@@ -3,6 +3,7 @@
 pub mod approvals;
 pub mod asking;
 pub mod calendars;
+pub mod config;
 pub mod console_log;
 pub mod hub;
 pub mod input;
@@ -12,6 +13,7 @@ pub mod notebook;
 pub mod permissions;
 pub mod records;
 pub mod sealed;
+pub mod settings;
 pub mod slack;
 pub mod store;
 pub mod triage;
