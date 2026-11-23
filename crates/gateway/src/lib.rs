@@ -1,8 +1,14 @@
 //! The gateway: the one door between a person and the outside services.
 //! What it promises is written in `SPEC.md` next to this crate.
 
+pub mod connections;
+mod lock;
+pub mod log;
 pub mod mcp;
+pub mod permissions;
+pub mod presence;
 pub mod process;
+pub mod store;
 
 
 /// One thing read from a service, as the reader that asked for it wants it.
