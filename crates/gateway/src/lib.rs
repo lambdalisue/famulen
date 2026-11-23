@@ -4,6 +4,7 @@
 pub mod catalog;
 pub mod connections;
 pub mod definitions;
+mod gateway;
 mod lock;
 pub mod log;
 pub mod mcp;
@@ -14,6 +15,7 @@ pub mod process;
 pub mod store;
 pub mod template;
 
+pub use gateway::*;
 
 /// One thing read from a service, as the reader that asked for it wants it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
