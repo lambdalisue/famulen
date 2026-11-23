@@ -1,0 +1,22 @@
+[package]
+name = "famulen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "famulen"
+path = "src/main.rs"
+
+[dependencies]
+famulen-api.workspace = true
+famulen-core.workspace = true
+axum.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+dotenvy.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
