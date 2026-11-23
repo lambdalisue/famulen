@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+// Nothing to send or return.
+message Empty {}
+
+// A record named by its id.
+message ById {
+  int64 id = 1;
+}
+
+// Something named by a string id.
+message ByName {
+  string id = 1;
+}
+
+// A URL for the browser to go to, such as a login page.
+message GoTo {
+  string url = 1;
+}

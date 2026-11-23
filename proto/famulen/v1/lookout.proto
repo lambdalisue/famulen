@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// Where what concerns the owner goes.
+enum LookoutRoute {
+  // The lookout decides each time.
+  LOOKOUT_ROUTE_UNSPECIFIED = 0;
+  // Always to the secretary, at once.
+  LOOKOUT_ROUTE_SECRETARY = 1;
+  // Always to the morning digest.
+  LOOKOUT_ROUTE_DIGEST = 2;
+  // Nowhere but the log.
+  LOOKOUT_ROUTE_LOG = 3;
+}
+
+// Where something arrives within a connection: a mail label, a chat channel.
+message LookoutPlace {
+  string id = 1;
+  string name = 2;
+}
+
+// Something the lookout reads on its own.
+message LookoutSource {
+  int64 id = 1;
+  string name = 2;
+  // A connection id, or slack:<workspace> for the bot's channels.
+  string connection = 3;
+  string tool = 4;
+  // The tool's arguments, as JSON.
+  string args = 5;
+  // How often it is read: its own interval, or else the default for its feed.
+  int32 interval_minutes = 6;
+  bool enabled = 7;
+  // Whether the owner chose the interval for this source alone.
+  bool own_interval = 8;
+  // mail, chat or other: which default it follows without an own interval.
+  string feed = 9;
+  LookoutRoute route = 10;
+  // The workgroups it belongs to.
+  repeated string workgroups = 11;
+  // The places a source reading what arrives is narrowed to; none reads
+  // whatever no other source of the connection is narrowed to.
+  repeated LookoutPlace places = 12;
+}
+
+// A tool the lookout can call: one that says it only reads.
+message LookoutTool {
+  string name = 1;
+  string description = 2;
+  // The JSON Schema of its arguments; empty when not known.
+  string input_schema = 3;
+}
+
+// What can be chosen for a lookout of one connection.
+message LookoutChoices {
+  // Whether anything arrives on it.
+  bool receives = 1;
+  // What its places are called: ラベル, チャンネル.
+  string place_label = 2;
+  repeated LookoutPlace places = 3;
+  repeated LookoutTool tools = 4;
+  // Why the places or tools could not be read, or empty.
+  string problem = 5;
+}
+
+message SetLookoutReadingRequest {
+  int64 id = 1;
+  // One that says it only reads.
+  string tool = 2;
+  // The tool's arguments, as JSON.
+  string args = 3;
+}
+
+message SetLookoutPlacesRequest {
+  int64 id = 1;
+  repeated LookoutPlace places = 2;
+}
+
+// How often sources of one feed are read when they have no own interval.
+message LookoutDefault {
+  // mail, chat or other.
+  string feed = 1;
+  string label = 2;
+  int32 interval_minutes = 3;
+}
+
+// A lookout the owner can add with one press.
+message LookoutPreset {
+  string name = 1;
+  string what = 2;
+  string connection = 3;
+  string tool = 4;
+  string args = 5;
+}
+
+// What the lookout decided about one item.
+message LookoutDecision {
+  int64 id = 1;
+  string source = 2;
+  int64 at = 3;
+  string title = 4;
+  // unrelated, kept for the digest, passed on…
+  string outcome = 5;
+  // The owner's answer: 1 wanted, -1 not wanted, 0 none.
+  int32 feedback = 6;
+  // Why the lookout decided so, in its own words.
+  string reason = 7;
+  // It went to the secretary; otherwise it was dropped or kept for the
+  // digest.
+  bool passed_on = 8;
+}
+
+message LookoutOverview {
+  repeated LookoutSource sources = 1;
+  repeated LookoutPreset presets = 2;
+  // In the last 24 hours.
+  int64 seen = 3;
+  int64 passed = 4;
+  int64 model_calls_today = 5;
+  // The profile the lookout judges by, made from records and memory.
+  string profile = 6;
+  repeated LookoutDefault defaults = 7;
+}
+
+message AddLookoutRequest {
+  string name = 1;
+  string connection = 2;
+  string tool = 3;
+  string args = 4;
+  // 0 leaves it to the default for what the connection brings (mail, chat
+  // or other).
+  int32 interval_minutes = 5;
+  // For what arrives: the places it is narrowed to.
+  repeated LookoutPlace places = 6;
+}
+
+message UpdateLookoutRequest {
+  int64 id = 1;
+  optional string name = 2;
+  optional LookoutRoute route = 3;
+  // The one workgroup it belongs to; empty for none.
+  optional string workgroup = 4;
+}
+
+message SetLookoutEnabledRequest {
+  int64 id = 1;
+  bool enabled = 2;
+}
+
+message SetLookoutIntervalRequest {
+  int64 id = 1;
+  // How often it is read: for what arrives, how often what came is looked
+  // at together; for a tool, how often the tool is called. 0 follows the
+  // default for its feed again.
+  int32 interval_minutes = 2;
+}
+
+message SetLookoutDefaultRequest {
+  // mail, chat or other.
+  string feed = 1;
+  // One at least.
+  int32 interval_minutes = 2;
+}
+
+message GiveFeedbackRequest {
+  int64 id = 1;
+  // True: should have been picked up. False: was not wanted.
+  bool wanted = 2;
+}
+
+// Watching the outside world and passing on only what concerns the owner.
+service LookoutService {
+  rpc GetLookout(Empty) returns (LookoutOverview) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc AddLookout(AddLookoutRequest) returns (LookoutSource);
+  // What can be chosen for a lookout of a connection.
+  rpc GetLookoutChoices(ByName) returns (LookoutChoices) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Change the tool a lookout calls and its arguments.
+  rpc SetLookoutReading(SetLookoutReadingRequest) returns (LookoutSource);
+  // Change the places a lookout of what arrives is narrowed to.
+  rpc SetLookoutPlaces(SetLookoutPlacesRequest) returns (LookoutSource);
+  // Change a lookout's name, where what it finds goes, or its workgroup.
+  rpc UpdateLookout(UpdateLookoutRequest) returns (LookoutSource);
+  rpc SetLookoutEnabled(SetLookoutEnabledRequest) returns (LookoutSource);
+  rpc SetLookoutInterval(SetLookoutIntervalRequest) returns (LookoutSource);
+  rpc SetLookoutDefault(SetLookoutDefaultRequest) returns (LookoutDefault);
+  rpc RemoveLookout(ById) returns (Empty) {
+    option (confirm) = true;
+  }
+  rpc GiveFeedback(GiveFeedbackRequest) returns (Empty);
+}

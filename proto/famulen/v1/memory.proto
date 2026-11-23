@@ -1,0 +1,222 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// One remembered item: a line in a memory file.
+message MemoryItem {
+  string id = 1;
+  string text = 2;
+  // said, confirmed or inferred.
+  string src = 3;
+  // The rest of its attributes (ev, uses, workgroup, party, state, …).
+  map<string, string> attrs = 4;
+  // The file it is in, relative to the memory directory.
+  string file = 5;
+  // An episodic item's time of day (HH:MM), when it was written down; the
+  // text then leaves it out.
+  string time = 6;
+}
+
+// A memory layer and what it holds now.
+message MemoryLayer {
+  // dream, pending, episodic, working, core, long, forgotten.
+  string id = 1;
+  string label = 2;
+  string help = 3;
+  // How many items or files it holds, in words.
+  string count = 4;
+}
+
+message ListLayersResponse {
+  repeated MemoryLayer layers = 1;
+}
+
+message GetLayerRequest {
+  string layer = 1;
+  // episodic: a date (YYYY-MM-DD); forgotten: a month (YYYY-MM).
+  string at = 2;
+}
+
+message MemoryFile {
+  string path = 1;
+  string title = 2;
+  int32 items = 3;
+  // What the file holds, in order.
+  repeated MemoryItem entries = 4;
+}
+
+message WorkingMemory {
+  string name = 1;
+  string done = 2;
+  string next = 3;
+  string waiting = 4;
+  string clues = 5;
+  // The heading of the working memory file; the name when it has none.
+  string title = 6;
+}
+
+message Layer {
+  MemoryLayer layer = 1;
+  repeated MemoryItem items = 2;
+  repeated MemoryFile files = 3;
+  repeated WorkingMemory working = 4;
+  // The dates or months that can be picked.
+  repeated string periods = 5;
+}
+
+message ReadFileRequest {
+  string path = 1;
+}
+
+message FileContent {
+  string path = 1;
+  string text = 2;
+  repeated FileChange history = 3;
+}
+
+message FileChange {
+  string commit = 1;
+  int64 at = 2;
+  string author = 3;
+  string message = 4;
+}
+
+message WriteFileRequest {
+  string path = 1;
+  string text = 2;
+}
+
+message RememberRequest {
+  string text = 1;
+  // The owner said it, rather than it being concluded.
+  bool said = 2;
+  // A rule or correction the owner gave that should hold at once:
+  // core.md, pending.md or long/<group>/<name>.md. Empty leaves it for the
+  // dream.
+  string keep_in = 3;
+  string workgroup = 4;
+  // The id of the party it is about, or empty.
+  string party = 5;
+}
+
+message SetWorkingRequest {
+  // A short id, such as invoice-acme.
+  string name = 1;
+  string done = 2;
+  string next = 3;
+  string waiting = 4;
+  string clues = 5;
+}
+
+// One night's dream.
+message Dream {
+  int64 id = 1;
+  int64 at = 2;
+  string status = 3;
+  int32 added = 4;
+  int32 edited = 5;
+  int32 replaced = 6;
+  int32 archived = 7;
+  int32 confirmed = 8;
+  int32 pending_added = 9;
+  repeated DreamChange changes = 10;
+  // The memory commit the dream made; empty when nothing was applied.
+  string commit = 11;
+}
+
+message DreamChange {
+  string op = 1;
+  string id = 2;
+  // Where the item is after the dream (before it, for a deletion).
+  string file = 3;
+  string text = 4;
+  // Why the item changed, when the dream said.
+  string reason = 5;
+  // The text before an edit or a replacement.
+  string previous = 6;
+  // Where the item was before a move.
+  string from_file = 7;
+}
+
+// How often the scheduled dream runs.
+enum DreamFrequency {
+  DREAM_FREQUENCY_UNSPECIFIED = 0;
+  DREAM_FREQUENCY_NIGHTLY = 1;
+  DREAM_FREQUENCY_EVERY_OTHER_DAY = 2;
+  // Once a week, on weekday.
+  DREAM_FREQUENCY_WEEKLY = 3;
+}
+
+// When the dream runs and how far it tidies memory.
+message DreamSettings {
+  // The time of day it runs, HH:MM in the owner's time zone.
+  string at = 1;
+  DreamFrequency frequency = 2;
+  // The day of a weekly dream, 0 being Sunday.
+  int32 weekday = 3;
+  // Dream before the time once this many notes wait; 0 never does.
+  int32 early_at = 4;
+  // The most lines core holds: the dream keeps it within them, and a new
+  // conversation is handed no more.
+  int32 core_lines = 5;
+  // When the next scheduled dream is due, in words. Answered, never read.
+  string next = 6;
+}
+
+message ListPartyMemoriesResponse {
+  repeated MemoryItem items = 1;
+}
+
+message ListDreamsResponse {
+  // Oldest first, the last two weeks.
+  repeated Dream dreams = 1;
+  // When the next dream is due, in words.
+  string next = 2;
+  bool dreaming = 3;
+  // Why a dream cannot run now, if it cannot.
+  string blocked = 4;
+  int32 waiting_notes = 5;
+}
+
+// What the secretary has learned, in layers of Markdown kept in Git.
+service MemoryService {
+  rpc ListLayers(Empty) returns (ListLayersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc GetLayer(GetLayerRequest) returns (Layer) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ReadFile(ReadFileRequest) returns (FileContent) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The owner rewrites a memory file; the change is kept as theirs.
+  rpc WriteFile(WriteFileRequest) returns (FileContent) {
+    option (console_only) = true;
+  }
+  // Write down something worth remembering in today's episodic memory. The nightly
+  // dream sorts it; set keep_in only for a rule or correction that must hold now.
+  rpc Remember(RememberRequest) returns (MemoryItem);
+  // Save where a piece of work stands, so it survives the conversation.
+  rpc SetWorking(SetWorkingRequest) returns (WorkingMemory);
+  // Close a working memory once the work is done.
+  rpc CloseWorking(ByName) returns (Empty);
+  // What long-term memory holds about a party (by its record id): the
+  // memories whose prose links to the party's record and items tagged with it.
+  rpc ListPartyMemories(ByName) returns (ListPartyMemoriesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListDreams(Empty) returns (ListDreamsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Dream now instead of waiting for the night.
+  rpc DreamNow(Empty) returns (Empty);
+  // When the dream runs and how far it tidies memory.
+  rpc GetDreamSettings(Empty) returns (DreamSettings) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Change them all at once; nothing is saved when a value is out of range.
+  rpc SetDreamSettings(DreamSettings) returns (DreamSettings);
+}

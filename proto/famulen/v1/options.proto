@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MethodOptions {
+  // The secretary asks the owner before calling this, even inside its own
+  // tools: it removes or reaches something the owner may not want touched.
+  bool confirm = 50001;
+  // The secretary is not given this as a tool: it only makes sense for a
+  // person at the console (a login in their browser, a live stream).
+  bool console_only = 50002;
+}

@@ -1,0 +1,578 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/lookout.proto";
+import "famulen/v1/memory.proto";
+import "famulen/v1/options.proto";
+
+message Persona {
+  // The secretary's name, which the owner gives it. Famulen is the service.
+  string name = 1;
+  // How the owner wants to be spoken to; told the secretary when it starts.
+  string tone = 2;
+  // An IANA name, such as Asia/Tokyo.
+  string timezone = 3;
+  // The way of speaking the owner wrote by hand, kept while a preset is
+  // in use so that choosing it again brings it back.
+  string own_tone = 4;
+}
+
+message UpdatePersonaRequest {
+  optional string name = 1;
+  optional string tone = 2;
+  optional string timezone = 3;
+  optional string own_tone = 4;
+}
+
+// One tile on the home screen.
+message Tile {
+  // today, approvals, aide, task, memos, due.
+  string kind = 1;
+  bool wide = 2;
+  bool tall = 3;
+}
+
+message Home {
+  repeated Tile tiles = 1;
+  // The tile kinds that can be added, with their names.
+  repeated TileKind kinds = 2;
+  // Steps left to set up, until done or put away.
+  repeated SetupStep setup = 3;
+}
+
+message TileKind {
+  string kind = 1;
+  string label = 2;
+}
+
+message SetupStep {
+  string label = 1;
+  bool done = 2;
+  // The console path that does it.
+  string path = 3;
+}
+
+message SetTilesRequest {
+  repeated Tile tiles = 1;
+}
+
+// Places outside the working directory where the secretary's shell commands
+// may write, such as where a skill keeps its notes. A sealed place (the
+// vault, the gateway's database, the .env) stays closed whatever is here.
+message WritablePlaces {
+  // Whole paths, in the order they were added.
+  repeated string paths = 1;
+}
+
+message WritablePlaceRequest {
+  // A whole path, or one starting with ~/ for the home of the user Famulen
+  // runs as.
+  string path = 1;
+}
+
+// A folder on the machine Famulen runs on, for the owner to walk to a
+// place the secretary may write in.
+message Folder {
+  // Written in full.
+  string path = 1;
+  // Empty at the root.
+  string parent = 2;
+  // The folders directly inside, by name; hidden ones are left out.
+  repeated string children = 3;
+}
+
+message GetFolderRequest {
+  // A whole path, or one starting with ~/; empty for the home.
+  string path = 1;
+}
+
+message FindFoldersRequest {
+  // A folder's name alone, as a browser hands over a folder dropped on it.
+  string name = 1;
+}
+
+message FindFoldersResponse {
+  // Whole paths below the home, nearest first.
+  repeated string paths = 1;
+}
+
+// Where the notebook is kept on the machine Famulen runs on. Paths are
+// written in full; those that do not apply are empty.
+message NotebookPlace {
+  string path = 1;
+  // Where it is kept unless the owner chooses another place.
+  string default_path = 2;
+  // Where it is about to be moved, once the work in progress ends.
+  string moving_to = 3;
+  // Why the last move did not happen; the notebook stayed where it was.
+  string failed = 4;
+  // Where files of the notebook could not be removed after it was moved.
+  string leftover = 5;
+}
+
+message MoveNotebookRequest {
+  // A whole path, or one starting with ~/; empty for the default.
+  string path = 1;
+}
+
+service SettingsService {
+  rpc GetPersona(Empty) returns (Persona) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc UpdatePersona(UpdatePersonaRequest) returns (Persona);
+  rpc GetHome(Empty) returns (Home) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc SetTiles(SetTilesRequest) returns (Home);
+  // Put the setup steps away from the home screen.
+  rpc HideSetup(Empty) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc GetWritablePlaces(Empty) returns (WritablePlaces) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Only the owner widens where the secretary may write; it applies once
+  // the work in progress ends.
+  rpc AddWritablePlace(WritablePlaceRequest) returns (WritablePlaces) {
+    option (console_only) = true;
+  }
+  rpc RemoveWritablePlace(WritablePlaceRequest) returns (WritablePlaces);
+  rpc GetNotebookPlace(Empty) returns (NotebookPlace) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Famulen starts again to move it, once the work in progress ends.
+  rpc MoveNotebook(MoveNotebookRequest) returns (NotebookPlace) {
+    option (console_only) = true;
+  }
+  rpc GetFolder(GetFolderRequest) returns (Folder) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  rpc FindFolders(FindFoldersRequest) returns (FindFoldersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+}
+
+// What kind of model it is, which decides how it is called.
+enum ModelKind {
+  MODEL_KIND_UNSPECIFIED = 0;
+  // An agent CLI such as Claude Code, run with its executable.
+  MODEL_KIND_AGENT_CLI = 1;
+  // An OpenAI-compatible server on this machine, such as Ollama.
+  MODEL_KIND_LOCAL = 2;
+  // A metered OpenAI-compatible API.
+  MODEL_KIND_API = 3;
+  // A classification API priced per call.
+  MODEL_KIND_JUDGE = 4;
+  // A speech-to-text API.
+  MODEL_KIND_TRANSCRIBE = 5;
+}
+
+// The program an agent CLI runs.
+enum AgentCli {
+  AGENT_CLI_UNSPECIFIED = 0;
+  AGENT_CLI_CLAUDE_CODE = 1;
+  // It serves every role an agent CLI can but the secretary.
+  AGENT_CLI_CODEX = 2;
+}
+
+// What a model does for Famulen.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_SECRETARY = 1;
+  ROLE_DREAM = 2;
+  // The lookout: one model call per batch of what arrived.
+  ROLE_LOOKOUT = 3;
+  // Triage: whether a message in an attended channel is said to the
+  // secretary.
+  ROLE_TRIAGE = 4;
+  // Assessing: whether a call the auto permission leaves to a model may run
+  // without asking the owner.
+  ROLE_ASSESS = 5;
+}
+
+message Model {
+  string id = 1;
+  string name = 2;
+  ModelKind kind = 3;
+  string model = 4;
+  // The executable or the URL.
+  string endpoint = 5;
+  // Yen per million tokens in and out, per call, and per month.
+  double input_yen = 6;
+  double output_yen = 7;
+  double call_yen = 8;
+  double monthly_yen = 9;
+  // Whether the model has a key in the vault. Nothing of the key itself is
+  // shown, not even its first or last characters.
+  bool has_key = 10;
+  // Set for an agent CLI.
+  AgentCli cli = 11;
+  // Famulen found it on this machine and registered it by itself.
+  bool found = 12;
+}
+
+message RoleSetting {
+  Role role = 1;
+  string label = 2;
+  // The model assigned, or empty.
+  string model = 3;
+  // The daily cap, in calls (or yen for priced models); 0 is none.
+  double cap = 4;
+  string cap_unit = 5;
+  int64 calls_today = 6;
+  double yen_today = 7;
+  // The registered models that can be assigned.
+  repeated string choices = 8;
+  // How much the model thinks: low, medium, high, xhigh, max, or empty
+  // for the model's default. Kept only for an agent CLI.
+  string effort = 9;
+  // The effort the role starts with, which 既定に戻す returns to; empty
+  // when the role leaves it to the model.
+  string default_effort = 10;
+}
+
+message Models {
+  repeated RoleSetting roles = 1;
+  repeated Model models = 2;
+  // On this machine, but removed by the owner; RestoreModel registers one
+  // again.
+  repeated Model candidates = 3;
+}
+
+message AssignRoleRequest {
+  Role role = 1;
+  // A registered model id, or empty to unassign.
+  string model = 2;
+  double cap = 3;
+  // low, medium, high, xhigh, max, or empty for the model's default;
+  // ignored unless the model is an agent CLI. The secretary's applies once
+  // the work in progress ends.
+  string effort = 4;
+}
+
+message RegisterModelRequest {
+  string name = 1;
+  ModelKind kind = 2;
+  string model = 3;
+  string endpoint = 4;
+  // Kept in the gateway's vault; never answered back.
+  string api_key = 5;
+  double input_yen = 6;
+  double output_yen = 7;
+  double call_yen = 8;
+  double monthly_yen = 9;
+  // For an agent CLI; Claude Code when left out.
+  AgentCli cli = 10;
+}
+
+message ListServerModelsRequest {
+  // The base URL of an OpenAI-compatible server without a key.
+  string endpoint = 1;
+}
+
+message ListServerModelsResponse {
+  repeated string models = 1;
+}
+
+message SetModelKeyRequest {
+  string id = 1;
+  string api_key = 2;
+}
+
+enum UsageSpan {
+  USAGE_SPAN_UNSPECIFIED = 0;
+  // Monday to Sunday, by day.
+  USAGE_SPAN_WEEK = 1;
+  // A calendar month, by day.
+  USAGE_SPAN_MONTH = 2;
+  // A calendar year, by month.
+  USAGE_SPAN_YEAR = 3;
+}
+
+message GetUsageRequest {
+  // Unspecified is a month.
+  UsageSpan span = 1;
+  // YYYY-MM-DD, any day of the period to show; empty is today.
+  string day = 2;
+}
+
+// What a role used of a model.
+message UsageRow {
+  Role role = 1;
+  string model = 2;
+  int64 calls = 3;
+  int64 input_tokens = 4;
+  int64 output_tokens = 5;
+  double yen = 6;
+  // Whether the model is counted in yen; otherwise it is counted by calls.
+  bool metered = 7;
+}
+
+// A day, or a month of a year.
+message UsageBucket {
+  // YYYY-MM-DD.
+  string from = 1;
+  // YYYY-MM-DD, included.
+  string to = 2;
+  repeated UsageRow rows = 3;
+}
+
+message Usage {
+  // YYYY-MM-DD.
+  string from = 1;
+  // YYYY-MM-DD, included.
+  string to = 2;
+  // YYYY-MM-DD, in the owner's time zone.
+  string today = 3;
+  // The period's total.
+  repeated UsageRow rows = 4;
+  repeated UsageBucket buckets = 5;
+  // Every model used in the year the period starts in, first used first.
+  repeated string models = 6;
+  double metered_yen = 7;
+  // Every subscription's fee for a month.
+  double fixed_monthly_yen = 8;
+  int64 calls_today = 9;
+}
+
+// The models Famulen runs on and what each does.
+service ModelService {
+  rpc GetModels(Empty) returns (Models) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc AssignRole(AssignRoleRequest) returns (Models);
+  rpc RegisterModel(RegisterModelRequest) returns (Model) {
+    option (console_only) = true;
+  }
+  // What models a server has, for the owner to pick from.
+  rpc ListServerModels(ListServerModelsRequest) returns (ListServerModelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // Look again for what this machine offers, which Famulen also does by
+  // itself.
+  rpc FindModels(Empty) returns (Models) {
+    option (console_only) = true;
+  }
+  // Register again a model on this machine that the owner removed.
+  rpc RestoreModel(ByName) returns (Models) {
+    option (console_only) = true;
+  }
+  // A model found on this machine is not registered again by itself.
+  rpc UnregisterModel(ByName) returns (Empty) {
+    option (confirm) = true;
+  }
+  // Replace a registered model's key; it goes to the vault and is never
+  // answered back.
+  rpc SetModelKey(SetModelKeyRequest) returns (Model) {
+    option (console_only) = true;
+  }
+  rpc GetUsage(GetUsageRequest) returns (Usage) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// One run of a routine to come.
+message RoutineRun {
+  // Unix seconds.
+  int64 at = 1;
+  bool skipped = 2;
+}
+
+// When a routine runs. What it is, is a record of routines.
+message Routine {
+  // The record's id.
+  string id = 1;
+  string title = 2;
+  // In words: 平日 8:30.
+  string when = 3;
+  bool enabled = 4;
+  // The next runs, skipped ones among them.
+  repeated RoutineRun runs = 5;
+  // Unix seconds, or 0.
+  int64 last_run = 6;
+  // Why it never runs, when something in it cannot be read.
+  string problem = 7;
+}
+
+message ListRoutinesResponse {
+  repeated Routine routines = 1;
+}
+
+message SkipRunRequest {
+  // The id or code of the routine.
+  string routine = 1;
+  // The run, in Unix seconds, as ListRoutines gives it.
+  int64 at = 2;
+  // Run it after all.
+  bool undo = 3;
+}
+
+message CronFromRequest {
+  // daily, weekdays, weekly or monthly, with time (HH:MM), weekday (0 =
+  // Sunday) and day; or a cron line.
+  string repeat = 1;
+  string time = 2;
+  int32 weekday = 3;
+  int32 day = 4;
+  string cron = 5;
+}
+
+message CronFromResponse {
+  string cron = 1;
+  // In words.
+  string when = 2;
+}
+
+message WakeAtRequest {
+  // RFC 3339 with an offset, or in_minutes from now.
+  string at = 1;
+  int32 in_minutes = 2;
+  // What to do then; self-contained, since only this is read.
+  string note = 3;
+  // Why it is set: the request or situation it follows up, in a short line
+  // the owner reads on the console. Not read when it fires.
+  string why = 4;
+}
+
+// A wake-up the secretary has set and that has not fired yet.
+message Wake {
+  int64 id = 1;
+  // RFC 3339 in the owner's time zone.
+  string at = 2;
+  // What the secretary will do then.
+  string note = 3;
+  // Why it was set; empty when not given.
+  string why = 4;
+  // The same moment as at, in Unix seconds.
+  int64 at_unix = 5;
+}
+
+message ListWakesResponse {
+  // Soonest first.
+  repeated Wake wakes = 1;
+}
+
+service RoutineService {
+  // When each routine runs. Add and change routines as records of routines.
+  rpc ListRoutines(Empty) returns (ListRoutinesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Skip one run of a routine, or take that back.
+  rpc SkipRun(SkipRunRequest) returns (Empty);
+  // The cron line for a time picked in words.
+  rpc CronFrom(CronFromRequest) returns (CronFromResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Wake the secretary later with a note, to follow up without waiting.
+  rpc WakeAt(WakeAtRequest) returns (Wake);
+  // The wake-ups that have not fired yet.
+  rpc ListWakes(Empty) returns (ListWakesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Drop a wake-up that has not fired, when it is no longer needed.
+  rpc CancelWake(ById) returns (Empty);
+}
+
+// One turn of the secretary, as the log shows it.
+message LogTurn {
+  int64 at = 1;
+  string origin = 2;
+  // What the owner asked, when it came from them.
+  string asked = 3;
+  repeated LogStep steps = 4;
+  string reply = 5;
+}
+
+message LogStep {
+  string service = 1;
+  string tool = 2;
+  string args = 3;
+  // Empty when it ran; otherwise held or refused.
+  string outcome = 4;
+}
+
+message LogEvent {
+  int64 at = 1;
+  // dream, setting, lookout, …
+  string kind = 2;
+  string detail = 3;
+}
+
+message LogItem {
+  oneof item {
+    LogTurn turn = 1;
+    LogEvent event = 2;
+  }
+  // Where the item begins in the journal; pass it as `before` to read what
+  // came earlier.
+  int64 id = 3;
+}
+
+message ListLogRequest {
+  // talk, other, or empty for everything.
+  string show = 1;
+  int32 limit = 2;
+  // Only what came before the item with this id; 0 from the newest.
+  int64 before = 3;
+}
+
+message ListLogResponse {
+  // Newest first.
+  repeated LogItem items = 1;
+  // Older items remain past this page.
+  bool more = 2;
+}
+
+// One page of an agent's log, newest first.
+message LogPageRequest {
+  // Only rows older than the one with this id; 0 from the newest.
+  int64 before = 1;
+  int32 limit = 2;
+}
+
+// What triage decided of one message in an attended channel.
+message TriageDecision {
+  int64 id = 1;
+  int64 at = 2;
+  string source = 3;
+  string title = 4;
+  // Said to the secretary, so passed on to it.
+  bool addressed = 5;
+  string reason = 6;
+}
+
+message ListTriageLogResponse {
+  repeated TriageDecision decisions = 1;
+  bool more = 2;
+}
+
+message ListDreamLogResponse {
+  repeated Dream dreams = 1;
+  bool more = 2;
+}
+
+message ListLookoutLogResponse {
+  repeated LookoutDecision decisions = 1;
+  bool more = 2;
+}
+
+// What each agent did, a page at a time.
+service LogService {
+  rpc ListLog(ListLogRequest) returns (ListLogResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListTriageLog(LogPageRequest) returns (ListTriageLogResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListDreamLog(LogPageRequest) returns (ListDreamLogResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListLookoutLog(LogPageRequest) returns (ListLookoutLogResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}

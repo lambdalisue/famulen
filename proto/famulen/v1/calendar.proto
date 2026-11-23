@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// How a calendar shows in a workgroup.
+enum CalendarMode {
+  CALENDAR_MODE_UNSPECIFIED = 0;
+  CALENDAR_MODE_SHOW = 1;
+  // Busy time only: "予定あり", without the contents.
+  CALENDAR_MODE_FAINT = 2;
+  CALENDAR_MODE_HIDE = 3;
+}
+
+message Attendee {
+  string name = 1;
+  string email = 2;
+  // accepted, declined, tentative or needs_action.
+  string response = 3;
+  bool organizer = 4;
+  bool optional = 5;
+  // The id of the party, when the notebook knows who it is.
+  string party = 6;
+}
+
+// One occurrence of an event.
+message CalendarEvent {
+  // The id of the calendar's record; empty for none.
+  string calendar = 1;
+  string calendar_name = 2;
+  string color = 3;
+  string uid = 4;
+  // RFC 3339 in the owner's time zone. A whole-day event ends when the day
+  // after its last starts.
+  string start = 5;
+  string end = 6;
+  bool all_day = 7;
+  // Empty when the event is faint.
+  string title = 8;
+  string location = 9;
+  CalendarMode mode = 10;
+  // hold, tentative, confirmed.
+  string status = 11;
+  // The owner's own answer.
+  string response = 12;
+  // The time is taken.
+  bool busy = 13;
+  // Where the map and the meeting open.
+  string map = 14;
+  string meeting = 15;
+  // Markdown.
+  string notes = 16;
+  repeated Attendee attendees = 17;
+  // Where it opens in Google.
+  string url = 18;
+  bool repeats = 19;
+  // The id of the series, or of the event itself, where it is kept.
+  string series = 20;
+  // The id of the record of events that holds it, or adds notes to it.
+  string record = 21;
+  // Kept in Google, not in the notebook.
+  bool google = 22;
+  repeated string labels = 23;
+  // Why the calendar it is of could not be read, when what is shown is old.
+  string stale = 24;
+}
+
+message ListEventsRequest {
+  // YYYY-MM-DD or RFC 3339.
+  string from = 1;
+  string to = 2;
+  string workgroup = 3;
+}
+
+message ListEventsResponse {
+  string timezone = 1;
+  repeated CalendarEvent events = 2;
+  // No calendar is registered yet: the events are not the owner's schedule.
+  bool no_calendars = 3;
+}
+
+message Calendar {
+  // The record's id.
+  string id = 1;
+  string name = 2;
+  // Where it is read from, in words: a Google account.
+  string source = 3;
+  string color = 4;
+  // Unix seconds of the last good read, or 0.
+  int64 fetched_at = 5;
+  // Why the last read failed, if it did.
+  string error = 6;
+  // The Google account connection it is read from, and the calendar there:
+  // primary for the account's main one.
+  string google_connection = 7;
+  string google_calendar = 8;
+  // The workgroups whose new events go here.
+  repeated string default_for = 9;
+}
+
+message ListCalendarsResponse {
+  repeated Calendar calendars = 1;
+}
+
+message AddCalendarRequest {
+  string name = 1;
+  // A Google account connection, with a calendar id (empty: primary). Without
+  // one, the calendar is kept in the notebook alone.
+  string google_connection = 2;
+  string google_calendar = 3;
+  string color = 4;
+}
+
+// The owner's calendars. An event of a Google calendar is added and changed
+// with that connection's tools; any other is a record of events.
+service CalendarService {
+  // Events and holds between two times, as the workgroup shows them.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListCalendars(Empty) returns (ListCalendarsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc AddCalendar(AddCalendarRequest) returns (Calendar);
+  // Events in Google stay there, and events of the notebook stay without a
+  // calendar.
+  rpc RemoveCalendar(ByName) returns (Empty) {
+    option (confirm) = true;
+  }
+  // Read every calendar again now.
+  rpc RefreshCalendars(Empty) returns (Empty);
+}

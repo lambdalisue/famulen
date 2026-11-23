@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/calendar.proto";
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// A workgroup such as 仕事 or 個人 that narrows what is shown and used.
+message Workgroup {
+  // "all" for すべて, which always exists.
+  string id = 1;
+  string name = 2;
+  // #RRGGBB.
+  string color = 3;
+}
+
+message ListWorkgroupsResponse {
+  repeated Workgroup workgroups = 1;
+}
+
+message AddWorkgroupRequest {
+  string name = 1;
+  string color = 2;
+}
+
+message UpdateWorkgroupRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string color = 3;
+}
+
+// What belongs to a workgroup.
+enum MemberKind {
+  MEMBER_KIND_UNSPECIFIED = 0;
+  // A channel: the console, a Slack workspace.
+  MEMBER_KIND_CHANNEL = 1;
+  // A service connection.
+  MEMBER_KIND_CONNECTION = 2;
+  // A lookout source.
+  MEMBER_KIND_LOOKOUT = 3;
+}
+
+message Member {
+  MemberKind kind = 1;
+  string id = 2;
+  string label = 3;
+  bool member = 4;
+}
+
+message CalendarSetting {
+  string calendar = 1;
+  string name = 2;
+  CalendarMode mode = 3;
+}
+
+// The account a workgroup uses for one purpose.
+message AccountSetting {
+  // mail, calendar, slack.
+  string purpose = 1;
+  string label = 2;
+  // The connection chosen, or empty.
+  string connection = 3;
+  // The connections that can be chosen.
+  repeated Choice choices = 4;
+}
+
+message Choice {
+  string id = 1;
+  string label = 2;
+}
+
+message WorkgroupDetail {
+  Workgroup workgroup = 1;
+  repeated CalendarSetting calendars = 2;
+  repeated AccountSetting accounts = 3;
+  repeated Member members = 4;
+}
+
+message SetMemberRequest {
+  string workgroup = 1;
+  MemberKind kind = 2;
+  string member = 3;
+  bool on = 4;
+}
+
+message SetCalendarModeRequest {
+  string workgroup = 1;
+  string calendar = 2;
+  CalendarMode mode = 3;
+}
+
+message SetAccountRequest {
+  string workgroup = 1;
+  string purpose = 2;
+  // Empty clears it.
+  string connection = 3;
+}
+
+service WorkgroupService {
+  rpc ListWorkgroups(Empty) returns (ListWorkgroupsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc GetWorkgroup(ByName) returns (WorkgroupDetail) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc AddWorkgroup(AddWorkgroupRequest) returns (Workgroup);
+  rpc UpdateWorkgroup(UpdateWorkgroupRequest) returns (Workgroup);
+  // Remove a workgroup. Its records and memories stay, out of it.
+  rpc DeleteWorkgroup(ByName) returns (Empty) {
+    option (confirm) = true;
+  }
+  rpc SetMember(SetMemberRequest) returns (Empty);
+  rpc SetCalendarMode(SetCalendarModeRequest) returns (Empty);
+  rpc SetAccount(SetAccountRequest) returns (Empty);
+}

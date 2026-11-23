@@ -1,0 +1,538 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// How a tool may be used.
+enum Permission {
+  PERMISSION_UNSPECIFIED = 0;
+  // Reading runs; a call beyond undoing or reaching other people is asked of
+  // the owner; the assessor weighs the rest. What applies when nothing is
+  // chosen.
+  PERMISSION_AUTO = 1;
+  // Used without asking.
+  PERMISSION_ALLOW = 2;
+  // Asked of the owner each time.
+  PERMISSION_CONFIRM = 3;
+  PERMISSION_FORBID = 4;
+}
+
+// A service and account Famulen is connected to.
+message Connection {
+  string id = 1;
+  string name = 2;
+  // google, slack, notion, …: the unit whose defaults it shares.
+  string kind = 3;
+  // The account, such as an address.
+  string account = 4;
+  // remote MCP, local MCP, API.
+  string transport = 5;
+  // つながっている, ログインし直す, …
+  string status = 6;
+  // Whether it has logged in (or holds a key).
+  bool ready = 7;
+  // What Famulen does with it on its own: reading the calendar and inbox,
+  // watching mentions.
+  string watching = 8;
+}
+
+message ToolSetting {
+  string name = 1;
+  string description = 2;
+  bool read_only = 3;
+  // The owner's own choice for this connection (or, in a kind's listing,
+  // for the kind), if any.
+  Permission permission = 4;
+  // What applies now.
+  Permission effective = 5;
+  // Where the effective permission comes from: this account, the kind's default,
+  // or nothing decided yet.
+  string source = 6;
+  // Under auto, the owner is always asked first: the tool cannot be undone or
+  // it reaches other people.
+  bool always_ask = 7;
+  // What applies when the owner chooses nothing here.
+  Permission inherited = 8;
+}
+
+message ConnectionDetail {
+  Connection connection = 1;
+  repeated ToolSetting tools = 2;
+  // The connection's address: the MCP URL, the command, the API base.
+  string target = 3;
+  // A connection made from a service definition: its receivers, each with
+  // where what arrives goes.
+  repeated ReceiverSetting receivers = 4;
+  // The destinations a receiver can be sent to.
+  repeated string destinations = 5;
+  // The definition's account fields and the values the login found.
+  repeated AccountValue values = 6;
+  // How the owner logs in through the browser: oauth2, mcp, or empty when
+  // there is nothing to log in to there.
+  string login = 7;
+  // Whether a key or token is kept for it. Nothing of it is shown, not even
+  // its first or last characters.
+  bool has_secret = 8;
+}
+
+message ReceiverSetting {
+  string name = 1;
+  // HTTP, or the connection the gateway opens (slack-socket-mode, …).
+  string how = 2;
+  // Empty until one is chosen; the receiver is not open until then.
+  string destination = 3;
+}
+
+message AccountValue {
+  string name = 1;
+  // Empty for a value the login found rather than a field to fill.
+  string label = 2;
+  // The value; always empty for a secret.
+  string value = 3;
+  bool secret = 4;
+  bool set = 5;
+  bool optional = 6;
+}
+
+message AccountField {
+  string name = 1;
+  string label = 2;
+  bool optional = 3;
+  bool secret = 4;
+}
+
+// A service definition the gateway read.
+message ServiceDefinition {
+  string id = 1;
+  string name = 2;
+  // Where its setup steps are: a path beside the definition, or a URL.
+  string setup = 3;
+  // Which environment variables of the app it needs are missing; empty when
+  // none is, or it needs no app.
+  string app_missing = 4;
+  repeated string receivers = 5;
+  // The tools it writes out; one read from MCP or OpenAPI is not listed.
+  repeated string tools = 6;
+  repeated AccountField fields = 7;
+  // Logs in with OAuth 2.0, a key, the account's values (session), or not
+  // at all (empty).
+  string login = 8;
+  // What it gives, in a few words.
+  string about = 9;
+  // What its key is called, when it logs in with one: given as `api_key`
+  // when the connection is added.
+  string key_label = 10;
+}
+
+message ListBuiltinToolsResponse {
+  // The model CLI's built-in tools the secretary has been offered. The permission
+  // is the owner's own, set with SetPermission under the empty scope.
+  repeated ToolSetting tools = 1;
+}
+
+message ListDefinitionsResponse {
+  repeated ServiceDefinition definitions = 1;
+  // Definitions that did not read: the file and why.
+  repeated string broken = 2;
+}
+
+message SetDestinationRequest {
+  string connection = 1;
+  string receiver = 2;
+  // One of the connection's destinations, or empty to send it nowhere:
+  // the receiver is closed.
+  string destination = 3;
+}
+
+message SetAccountValueRequest {
+  string connection = 1;
+  string name = 2;
+  // Empty clears it.
+  string value = 3;
+}
+
+// The defaults a kind of service gives every account of it, such as every
+// Google account. An account's own permission wins over its kind's.
+message KindDetail {
+  string kind = 1;
+  // Every tool any account of the kind has. The permission is the kind's own, set
+  // with SetPermission under kind:<kind>; the effective permission is what an account
+  // without its own permission gets.
+  repeated ToolSetting tools = 2;
+  // The accounts that share these defaults.
+  repeated Connection connections = 3;
+}
+
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+}
+
+// A service Famulen knows how to connect.
+message KnownService {
+  string id = 1;
+  string name = 2;
+  string icon = 3;
+  string what = 4;
+  // Can be connected now. A service whose provider needs Famulen's own app
+  // cannot until that app is set in the environment.
+  bool available = 5;
+  // Why it is not available, and which setting would make it so.
+  string unavailable = 6;
+  // Made from a service definition: added with AddConnection, how
+  // "definition", rather than ConnectKnown.
+  bool definition = 7;
+  // What to ask the owner for before connecting.
+  repeated AccountField fields = 8;
+}
+
+message ListKnownResponse {
+  repeated KnownService services = 1;
+}
+
+message ConnectKnownRequest {
+  // A known remote MCP server.
+  string service = 1;
+  // Where the console runs, for the login to come back to.
+  string console_origin = 2;
+  // The service's fields, as KEY=VALUE lines.
+  string env = 3;
+}
+
+message ConnectResult {
+  Connection connection = 1;
+  // Where to send the owner's browser to log in, if a login is needed.
+  string login_url = 2;
+}
+
+message AddConnectionRequest {
+  // An MCP URL, a command line, or the id of a service definition.
+  string target = 1;
+  // api for an HTTP API described by OpenAPI; definition for a connection
+  // made from the service definition named by target.
+  string how = 2;
+  string openapi = 3;
+  // KEY=VALUE lines: a command's environment, or a definition's account
+  // values.
+  string env = 4;
+  string console_origin = 5;
+  // What the owner calls it; guessed from the target when empty.
+  string name = 6;
+  // A key sent with every request to an MCP URL or an API, in `header`;
+  // Authorization by default. A definition that logs in with a key says
+  // itself where it goes.
+  string api_key = 7;
+  string header = 8;
+}
+
+message StartLoginRequest {
+  string id = 1;
+  string console_origin = 2;
+}
+
+message FinishLoginRequest {
+  // The query the provider sent back to the callback.
+  string query = 1;
+}
+
+// What a finished login added.
+message LoginFinished {
+  // connection or workspace.
+  string kind = 1;
+  string id = 2;
+  string name = 3;
+}
+
+message EditConnectionRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string kind = 3;
+  optional string account = 4;
+}
+
+message SetSecretRequest {
+  string id = 1;
+  string api_key = 2;
+  // The header to send it in; Authorization by default.
+  string header = 3;
+}
+
+message SetPermissionRequest {
+  // conn:<id>, kind:<kind>, or empty for one of the secretary's model CLI's
+  // built-in tools (Read, Bash, …).
+  string scope = 1;
+  string tool = 2;
+  // Unspecified goes back to the default.
+  Permission permission = 3;
+}
+
+message SetPermissionsRequest {
+  string scope = 1;
+  // read, write or all.
+  string which = 2;
+  Permission permission = 3;
+}
+
+message CallApiRequest {
+  // An API connection's id.
+  string connection = 1;
+  // GET, POST, PUT, PATCH or DELETE.
+  string method = 2;
+  // Relative to the connection's base URL.
+  string path = 3;
+  // Query parameters, as a JSON object.
+  string query = 4;
+  // The request body, as JSON.
+  string body = 5;
+}
+
+message CallApiResponse {
+  string body = 1;
+}
+
+message ProposeDefinitionChangeRequest {
+  // The definition's id: one the gateway reads, or a new one.
+  string definition = 1;
+  // The definition's whole text, as SERVICES.md describes it.
+  string toml = 2;
+  // Why the change is needed, for the owner to read beside it.
+  string why = 3;
+}
+
+// A service definition's text as the gateway reads it.
+message DefinitionText {
+  string id = 1;
+  string toml = 2;
+  // Where it was read from: a file the owner put, or one bundled.
+  string source = 3;
+}
+
+// One change to a service definition that went in, or one taken back.
+message DefinitionChange {
+  int64 id = 1;
+  string definition = 2;
+  // change, or revert for one taken back.
+  string kind = 3;
+  // The definition in use before and after; empty when there was none.
+  string before = 4;
+  string after = 5;
+  // owner, secretary, …
+  string actor = 6;
+  string why = 7;
+  // Seconds since the Unix epoch.
+  int64 at = 8;
+}
+
+message ListDefinitionChangesRequest {
+  // One definition's changes; empty for every definition.
+  string definition = 1;
+}
+
+message ListDefinitionChangesResponse {
+  // The newest first.
+  repeated DefinitionChange changes = 1;
+}
+
+// The owner's accounts on outside services: Google, Slack, MCP servers, APIs.
+service ConnectionService {
+  rpc ListConnections(Empty) returns (ListConnectionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc GetConnection(ByName) returns (ConnectionDetail) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // A kind's tool defaults, by the kind (google, slack, …) as the id.
+  rpc GetKind(ByName) returns (KindDetail) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListKnown(Empty) returns (ListKnownResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Add an account of a known remote MCP server and start its login.
+  rpc ConnectKnown(ConnectKnownRequest) returns (ConnectResult) {
+    option (console_only) = true;
+  }
+  rpc AddConnection(AddConnectionRequest) returns (ConnectResult) {
+    option (console_only) = true;
+  }
+  rpc StartLogin(StartLoginRequest) returns (GoTo) {
+    option (console_only) = true;
+  }
+  // Finish a login with what the provider sent back.
+  rpc FinishLogin(FinishLoginRequest) returns (LoginFinished) {
+    option (console_only) = true;
+  }
+  rpc EditConnection(EditConnectionRequest) returns (Connection);
+  rpc SetSecret(SetSecretRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Ask the connection for its tools again.
+  rpc RefreshTools(ByName) returns (ConnectionDetail);
+  rpc DeleteConnection(ByName) returns (Empty) {
+    option (confirm) = true;
+  }
+  // Only the owner changes a permission; the secretary may suggest one in words.
+  rpc SetPermission(SetPermissionRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc SetPermissions(SetPermissionsRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Call an HTTP API connection, one added as an API of its own. It is the
+  // connection's http_<method> tool, under that tool's permission.
+  rpc CallApi(CallApiRequest) returns (CallApiResponse);
+  // The secretary's model CLI's built-in tools, with their permissions.
+  rpc ListBuiltinTools(Empty) returns (ListBuiltinToolsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The service definitions the gateway read, and the ones it could not.
+  rpc ListDefinitions(Empty) returns (ListDefinitionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // A definition's text, to start a change from.
+  rpc GetDefinitionText(ByName) returns (DefinitionText) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Propose a change to a service definition when a tool the owner needs is
+  // missing or wrong: what to call, its input, its permission. Send the
+  // definition's whole text. The change waits for the owner, who reads how it
+  // differs from the definition in use; only their yes writes it, and then
+  // the connections made from it have the new tools. One that does not read
+  // is refused. A tool that is not a GET starts at confirm, and no tool may
+  // run more freely than it does now.
+  rpc ProposeDefinitionChange(ProposeDefinitionChangeRequest) returns (Empty);
+  // The changes to the definitions that went in, the newest first.
+  rpc ListDefinitionChanges(ListDefinitionChangesRequest) returns (ListDefinitionChangesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Take back the last change to a definition: what it replaced goes back.
+  rpc RevertDefinition(ByName) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Choose where what arrives at one of a connection's receivers goes.
+  rpc SetDestination(SetDestinationRequest) returns (ConnectionDetail) {
+    option (console_only) = true;
+  }
+  // Fill or replace one of a connection's account values; a secret one goes
+  // to the vault.
+  rpc SetAccountValue(SetAccountValueRequest) returns (ConnectionDetail) {
+    option (console_only) = true;
+  }
+}
+
+// A Slack workspace the secretary's bot is in.
+message Workspace {
+  string id = 1;
+  string name = 2;
+  // The owner's Slack user id there: whoever installed the app.
+  string owner = 3;
+  bool main = 4;
+  // How its connection stands: つながっている, ログインし直す, …
+  string status = 5;
+}
+
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+  // How many minutes a channel stays attended after a mention and after
+  // each message said to the secretary there; 0 answers mentions only.
+  uint32 attention_minutes = 2;
+}
+
+// A place the owner talks to the secretary through: a receiver of a
+// connected service whose definition suggests the channel. Adding the
+// service lists it; turning it off sends the receiver nowhere and keeps the
+// connection.
+message Channel {
+  string connection = 1;
+  string receiver = 2;
+  // The account, such as the Slack workspace, or the connection's name.
+  string name = 3;
+  // The service definition's name, such as Slack.
+  string service = 4;
+  // The service definition's id, such as slack.
+  string definition = 5;
+  // How its connection stands: つながっている, ログインし直す, …
+  string status = 6;
+  bool enabled = 7;
+}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+}
+
+message SetChannelEnabledRequest {
+  string connection = 1;
+  string receiver = 2;
+  bool enabled = 3;
+}
+
+message SetAttentionRequest {
+  uint32 minutes = 1;
+}
+
+message SendSlackRequest {
+  // The workspace from the input's header; the main one when empty.
+  string workspace = 1;
+  string channel = 2;
+  // Markdown. It is put into Slack's own format on the way; a mention is
+  // written as Slack does, <@U123>.
+  string text = 3;
+  // The thread of the message being answered when empty.
+  string thread_ts = 4;
+}
+
+message SendSlackResponse {
+  string ts = 1;
+}
+
+// The channels other than the console: what the connected services give,
+// and the Slack workspaces the bot is in.
+service ChannelService {
+  rpc ListChannels(Empty) returns (ListChannelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Take what arrives at a channel, or stop taking it.
+  rpc SetChannelEnabled(SetChannelEnabledRequest) returns (ListChannelsResponse) {
+    option (console_only) = true;
+  }
+  rpc ListWorkspaces(Empty) returns (ListWorkspacesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Ask approvals in this workspace.
+  rpc SetMainWorkspace(ByName) returns (Empty);
+  // Remove the workspace's connection.
+  rpc RemoveWorkspace(ByName) returns (Empty) {
+    option (confirm) = true;
+  }
+  // Post to Slack as the bot. The final reply text is never sent, so a Slack
+  // input is answered with this.
+  rpc SendSlack(SendSlackRequest) returns (SendSlackResponse);
+  // How long a channel stays attended after a mention.
+  rpc SetAttention(SetAttentionRequest) returns (ListWorkspacesResponse) {
+    option (console_only) = true;
+  }
+  // The secretary's bot as each workspace shows it, read from Slack.
+  rpc ListSlackNames(Empty) returns (ListSlackNamesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// The bot's name in one Slack workspace. Slack keeps it in the app's own
+// settings, so Famulen reads it but cannot change it.
+message SlackName {
+  string workspace = 1;
+  string workspace_name = 2;
+  // The name people see on its messages.
+  string display_name = 3;
+  // What people type after @ to mention it.
+  string handle = 4;
+  // The Slack page where the app's names are changed.
+  string settings_url = 5;
+  // Why the name could not be read, or empty.
+  string problem = 6;
+}
+
+message ListSlackNamesResponse {
+  repeated SlackName names = 1;
+}

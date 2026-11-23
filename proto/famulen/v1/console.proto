@@ -1,0 +1,224 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+enum Speaker {
+  SPEAKER_UNSPECIFIED = 0;
+  SPEAKER_OWNER = 1;
+  SPEAKER_AIDE = 2;
+}
+
+// One message in the conversation on the console.
+message ConsoleMessage {
+  int64 id = 1;
+  // Unix seconds.
+  int64 at = 2;
+  Speaker who = 3;
+  string text = 4;
+  // The workgroup it was said in.
+  string workgroup = 5;
+  // Where it came from (コンソール, Slack · …), for the owner's messages.
+  string origin = 6;
+  // What the owner was looking at when they said it.
+  string about = 7;
+  // A section the reply suggests opening: calendar, task, memos, …
+  string open = 8;
+}
+
+message ListMessagesRequest {
+  string workgroup = 1;
+  // Only messages older than this id; 0 is the newest.
+  int64 before = 2;
+  int32 limit = 3;
+}
+
+message ListMessagesResponse {
+  // Oldest first.
+  repeated ConsoleMessage messages = 1;
+}
+
+message SendRequest {
+  string text = 1;
+  string workgroup = 2;
+  // What the owner is looking at, in words: "カレンダー · 週 · 11月21日 – 27日".
+  string view = 3;
+  // Something the owner picked on screen to talk about.
+  string selection = 4;
+}
+
+message PostMessageRequest {
+  string text = 1;
+  // A section to suggest opening alongside: calendar, task, memos, parties,
+  // things, contracts, memory.
+  string open = 2;
+}
+
+// A tool call waiting for the owner's yes or no.
+message Approval {
+  int64 id = 1;
+  string tool = 2;
+  // The call's input, as JSON.
+  string input = 3;
+  // pending, approved, rejected or always_allowed.
+  string status = 4;
+  int64 created_at = 5;
+  // The owner is asked of every such call: it cannot be allowed from now on.
+  bool once = 6;
+  // What the owner answers instead of approving, if anything.
+  repeated ApprovalQuestion questions = 7;
+  // What the secretary says of it, beside what is asked.
+  string summary = 8;
+}
+
+message ApprovalQuestion {
+  string question = 1;
+  repeated ApprovalChoice choices = 2;
+  // Several may be chosen.
+  bool several = 3;
+}
+
+message ApprovalChoice {
+  string label = 1;
+  string description = 2;
+}
+
+// An input whose turn was cut off while a tool call was in flight, kept
+// until the owner says whether to run it again.
+message HeldInput {
+  int64 id = 1;
+  string text = 2;
+  // Unix seconds, when it arrived.
+  int64 at = 3;
+}
+
+message Inbox {
+  repeated Approval approvals = 1;
+  repeated HeldInput held = 2;
+  // Accounts inferred to belong to a party, waiting for 同じ人 / 別の人.
+  repeated AccountQuestion accounts = 3;
+}
+
+message AccountQuestion {
+  string account = 1;
+  string party = 2;
+  string party_name = 3;
+  string service = 4;
+  string handle = 5;
+  string how = 6;
+}
+
+enum ApprovalAnswer {
+  APPROVAL_ANSWER_UNSPECIFIED = 0;
+  APPROVAL_ANSWER_ALLOW = 1;
+  APPROVAL_ANSWER_DENY = 2;
+  // Allow this call and every later call of the same tool.
+  APPROVAL_ANSWER_ALWAYS = 3;
+}
+
+message AnswerApprovalRequest {
+  int64 id = 1;
+  ApprovalAnswer answer = 2;
+  // The answers to its questions, one for each, when it asks any.
+  repeated string replies = 3;
+}
+
+message AnswerHeldRequest {
+  int64 id = 1;
+  // True runs it again; false drops it.
+  bool go_on = 2;
+}
+
+// Whether the secretary is working.
+message Status {
+  // running or waiting.
+  string state = 1;
+  int32 pending_inputs = 2;
+  // What it is working on now, in words.
+  string doing = 3;
+}
+
+// Something changed that a screen may show.
+message ConsoleEvent {
+  oneof event {
+    ConsoleMessage message = 1;
+    // The inbox (approvals, held inputs, account questions) changed.
+    Empty inbox = 2;
+    // Records or settings changed.
+    Empty records = 3;
+  }
+}
+
+// Something that reached the secretary to act on.
+message InputItem {
+  int64 id = 1;
+  // Unix seconds, when it arrived.
+  int64 at = 2;
+  // Where it came from: console, slack, schedule, wake, approval, arrival or
+  // lookout.
+  string source = 3;
+  // More about where: the routine's name, the lookout's source, the Slack
+  // channel, the connection something arrived on. Empty when there is nothing more.
+  string detail = 4;
+  // owner, other or system.
+  string sender = 5;
+  string text = 6;
+  // pending, running, done, held or failed.
+  string status = 7;
+}
+
+message ListInputsRequest {
+  // How many, newest first; 0 is 15.
+  int32 limit = 1;
+  // Only inputs older than the one with this id; 0 from the newest.
+  int64 before = 2;
+}
+
+message ListInputsResponse {
+  // Newest first.
+  repeated InputItem inputs = 1;
+  // Older inputs remain past this page.
+  bool more = 2;
+}
+
+message SubscribeEventsRequest {
+  // Messages of this workgroup only; empty is all.
+  string workgroup = 1;
+}
+
+// The conversation with the secretary and what waits for the owner.
+service ConsoleService {
+  // The conversation, oldest first.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The owner says something to the secretary.
+  rpc Send(SendRequest) returns (ConsoleMessage) {
+    option (console_only) = true;
+  }
+  // The secretary says something to the owner on the console.
+  rpc PostMessage(PostMessageRequest) returns (ConsoleMessage);
+  // Approvals, held inputs and account questions waiting for the owner.
+  rpc GetInbox(Empty) returns (Inbox) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc AnswerApproval(AnswerApprovalRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc AnswerHeld(AnswerHeldRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc GetStatus(Empty) returns (Status) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The latest inputs that reached the secretary, with how far each got.
+  rpc ListInputs(ListInputsRequest) returns (ListInputsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Every change as it happens, until the caller goes away.
+  rpc SubscribeEvents(SubscribeEventsRequest) returns (stream ConsoleEvent) {
+    option (console_only) = true;
+  }
+}

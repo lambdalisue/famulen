@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+import "famulen/v1/services.proto";
+
+// A secret as anyone but the gateway sees it: never its value, not even its
+// first or last characters.
+message Secret {
+  // Letters, digits and - _ : . (a connection's own secrets are
+  // connection:<id>:<field>).
+  string name = 1;
+  // Who wrote it last: owner, secretary, or gateway for what a login or a
+  // connection's key put in.
+  string by = 2;
+  // Seconds since the Unix epoch.
+  int64 created_at = 3;
+  int64 updated_at = 4;
+  // The name of the connection that uses it; empty when none does. Such a
+  // secret is not deleted from the vault: the connection is removed instead.
+  string connection = 5;
+  // What it is for, as the owner or the secretary described it. It can be
+  // rewritten without the value.
+  string description = 6;
+  // The name of the model whose key it is; empty for any other secret. Such
+  // a secret is not deleted from the vault: the model is removed instead.
+  string model = 7;
+  // Put in by the gateway itself: a login's tokens, a connection's key or
+  // client secret, or the key given when a model was registered. Every
+  // other secret was put in by the owner or the secretary.
+  bool automatic = 8;
+}
+
+message ListSecretsResponse {
+  repeated Secret secrets = 1;
+  // Why there is no vault (no key set); empty when there is one.
+  string unavailable = 2;
+}
+
+message SetSecretValueRequest {
+  string name = 1;
+  // The secret itself. It goes into the vault and is never shown again, not
+  // even to whoever put it in.
+  string value = 2;
+  // What it is for, such as the site a password opens; it becomes the
+  // secret's description. Empty keeps the description it had.
+  string purpose = 3;
+}
+
+message DescribeSecretRequest {
+  string name = 1;
+  // What it is for. Empty clears it.
+  string description = 2;
+}
+
+// Whether the owner is asked before the secretary changes the vault.
+message VaultPermissions {
+  // Putting a secret in, or replacing one.
+  Permission put = 1;
+  // Taking a secret out.
+  Permission delete = 2;
+  // Rewriting what a secret is for.
+  Permission describe = 3;
+}
+
+message SetVaultPermissionRequest {
+  // put, describe or delete.
+  string change = 1;
+  // PERMISSION_UNSPECIFIED goes back to the default.
+  Permission permission = 2;
+}
+
+// One entry of the gateway's log: what was called, held, refused or
+// changed. Never a body, an answer or a secret's value.
+message GatewayLogEntry {
+  // Where it sits in the log; read on below it with `before`.
+  int64 id = 1;
+  // Seconds since the Unix epoch.
+  int64 at = 2;
+  // owner, secretary, …
+  string actor = 3;
+  string connection = 4;
+  // The tool called, or the change made (vault.put, permission.set, login, …).
+  string tool = 5;
+  // allow, confirm or deny.
+  string decision = 6;
+  string reason = 7;
+  // The names of the secrets used or changed.
+  string secret = 8;
+  string outcome = 9;
+  // Hashes and sizes of what was sent and answered.
+  string digest = 10;
+  int64 ms = 11;
+}
+
+message ListGatewayLogRequest {
+  // Empty fields pick every value.
+  string actor = 1;
+  string connection = 2;
+  string decision = 3;
+  // Only entries below this id; 0 for the newest.
+  int64 before = 4;
+  // How many; 50 when 0.
+  int32 limit = 5;
+}
+
+message ListGatewayLogResponse {
+  repeated GatewayLogEntry entries = 1;
+  // Whether there are older entries to read on.
+  bool more = 2;
+}
+
+// The gateway's log, for the owner to read.
+service GatewayLogService {
+  rpc ListGatewayLog(ListGatewayLogRequest) returns (ListGatewayLogResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+}
+
+// The vault: secrets only the gateway reads, when a call to the outside
+// needs them. Put a password, token or key found in a conversation or the
+// notebook here, and remove it from where it was found.
+service VaultService {
+  // The secrets in the vault, without their values.
+  rpc ListSecrets(Empty) returns (ListSecretsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Put a secret in, or replace the one of that name.
+  rpc SetSecretValue(SetSecretValueRequest) returns (Secret);
+  // Rewrite what a secret is for, leaving its value as it is; a login's or
+  // a model's secret too. Whether the owner is asked first is the vault's
+  // permission, which the gateway keeps.
+  rpc DescribeSecret(DescribeSecretRequest) returns (Secret);
+  // Take a secret out. One a connection uses is refused. Whether the owner
+  // is asked first is the vault's permission, which the gateway keeps.
+  rpc DeleteSecret(ByName) returns (Empty);
+  // Whether the owner is asked before the secretary changes the vault.
+  rpc GetVaultPermissions(Empty) returns (VaultPermissions) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  rpc SetVaultPermission(SetVaultPermissionRequest) returns (VaultPermissions) {
+    option (console_only) = true;
+  }
+}

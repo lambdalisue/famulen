@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+
+message SearchNotebookRequest {
+  // Words; every one must appear. Japanese words need no spaces between
+  // them. Empty finds everything the filters let through.
+  string text = 1;
+  // Where to look, as paths in the notebook: memory, memory/long,
+  // memory/episodic, records/tasks. Empty is everywhere.
+  repeated string scopes = 2;
+  // Only what applies to this workgroup; empty or "all" is every workgroup.
+  string workgroup = 3;
+  // Only what has these field values, such as status: open.
+  map<string, string> fields = 4;
+  // Only what is dated on or after this day (YYYY-MM-DD).
+  string from = 5;
+  // Only what is dated on or before this day (YYYY-MM-DD).
+  string to = 6;
+  // Look in forgotten memory too.
+  bool forgotten = 7;
+  // At most this many hits; 0 is 20.
+  int32 limit = 8;
+}
+
+// One thing found in the notebook.
+message NotebookHit {
+  // The file, relative to the notebook.
+  string path = 1;
+  // memory/<layer> or records/<kind>.
+  string scope = 2;
+  // The memory's or record's id.
+  string id = 3;
+  // The title, a long-term memory's summary, or a memory item's text.
+  string title = 4;
+  // Around where the words were found.
+  string snippet = 5;
+  // Higher is a better match.
+  double score = 6;
+}
+
+message SearchNotebookResponse {
+  // The best match first.
+  repeated NotebookHit hits = 1;
+}
+
+// One way the notebook strays from its rules.
+message Finding {
+  // Relative to the notebook.
+  string path = 1;
+  int32 line = 2;
+  string rule = 3;
+  // The tools cannot read it right; otherwise it only strays.
+  bool error = 4;
+  string why = 5;
+}
+
+message CheckNotebookResponse {
+  repeated Finding findings = 1;
+}
+
+message FixNotebookResponse {
+  // The files changed.
+  repeated string changed = 1;
+  repeated Finding findings = 2;
+}
+
+// The notebook: everything Famulen knows about the owner.
+service NotebookService {
+  // Search memories and records by words and filters. Read a hit's file
+  // when more than its snippet is needed.
+  rpc SearchNotebook(SearchNotebookRequest) returns (SearchNotebookResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // How the notebook strays from its rules.
+  rpc CheckNotebook(Empty) returns (CheckNotebookResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Put right what there is one way to put right.
+  rpc FixNotebook(Empty) returns (FixNotebookResponse);
+}

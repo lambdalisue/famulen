@@ -1,0 +1,209 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// A field and its value as written.
+message Field {
+  string name = 1;
+  // Empty removes the field. Dates are YYYY-MM-DD, times YYYY-MM-DD HH:MM,
+  // money "1200 JPY", yes or no for a flag, [[records/<kind>/<id>|title]] for
+  // a link.
+  string value = 2;
+  // The values of a field that holds several; leave value empty then.
+  repeated string values = 3;
+}
+
+// One item of a section of items.
+message RecordItem {
+  // What the item is: an attendee, a relation's other side, a deadline.
+  string text = 1;
+  repeated Field fields = 2;
+}
+
+message RecordSection {
+  string name = 1;
+  // For a section of one set of fields.
+  repeated Field fields = 2;
+  // For a section of items.
+  repeated RecordItem items = 3;
+}
+
+message LogLine {
+  // YYYY-MM-DD HH:MM.
+  string at = 1;
+  // owner, secretary or famulen.
+  string who = 2;
+  string text = 3;
+}
+
+// Another record, linked to or from.
+message RecordLink {
+  string kind = 1;
+  string id = 2;
+  string title = 3;
+  string code = 4;
+  // The field or section a link to this record is in; empty for free text.
+  string from = 5;
+}
+
+// A record of the notebook.
+message Record {
+  // tasks, routines, memos, events, calendars, parties, holdings, contracts,
+  // or a kind the owner added.
+  string kind = 1;
+  string id = 2;
+  // What people call it, such as task-7w1hbn.
+  string code = 3;
+  string title = 4;
+  repeated string labels = 5;
+  repeated string workgroups = 6;
+  // Where it came from, in words.
+  string source = 7;
+  // RFC 3339.
+  string created = 8;
+  string updated = 9;
+  // Where it opens outside, if it is there too.
+  string url = 10;
+  // Where the calendar or event is in Google, for one kept there.
+  string google = 11;
+  repeated Field fields = 12;
+  repeated RecordSection sections = 13;
+  // The owner's own fields.
+  repeated Field details = 14;
+  // Free Markdown. A memo's whole text.
+  string notes = 15;
+  repeated LogLine log = 16;
+  // Every record its text links to.
+  repeated RecordLink links = 17;
+  // Every record that links to it. Only from GetRecord.
+  repeated RecordLink backlinks = 18;
+  // The file as written. Only from GetRecord.
+  string markdown = 19;
+  // The tasks it waits for that are not over, for a task.
+  repeated RecordLink blockers = 20;
+}
+
+message FieldType {
+  string name = 1;
+  // text, number, flag, date, date-or-minute, money, url, list, link, links,
+  // choice or any.
+  string type = 2;
+  // The values a choice can have.
+  repeated string choices = 3;
+  // The kind a link names.
+  string of = 4;
+}
+
+message SectionType {
+  string name = 1;
+  // Holds items; the first field is the item's text.
+  bool many = 2;
+  repeated FieldType fields = 3;
+}
+
+// A kind of record.
+message RecordKind {
+  string name = 1;
+  // The word its codes start with.
+  string code = 2;
+  // The whole body is free text.
+  bool free = 3;
+  repeated FieldType fields = 4;
+  repeated SectionType sections = 5;
+}
+
+message ListKindsResponse {
+  repeated RecordKind kinds = 1;
+}
+
+message ListRecordsRequest {
+  string kind = 1;
+  string workgroup = 2;
+  // Leave out tasks that are done or cancelled.
+  bool open_only = 3;
+  // Only records with this label.
+  string label = 4;
+}
+
+message ListRecordsResponse {
+  repeated Record records = 1;
+}
+
+message RecordRef {
+  string kind = 1;
+  // The id, or the code such as task-7w1hbn.
+  string id = 2;
+}
+
+message SaveRecordRequest {
+  string kind = 1;
+  // The id or code of the record to change; empty adds one.
+  string id = 2;
+  // What is left out stays.
+  optional string title = 3;
+  // Free Markdown.
+  optional string notes = 4;
+  repeated string labels = 5;
+  // Replace the labels, even with none.
+  bool set_labels = 6;
+  repeated string workgroups = 7;
+  bool set_workgroups = 8;
+  // Where a new record came from, in words.
+  string source = 9;
+  // The fields to change. An empty value removes one.
+  repeated Field fields = 10;
+  // Each section given is replaced whole.
+  repeated RecordSection sections = 11;
+  // Facts the kind has no field for, replaced whole.
+  repeated Field details = 12;
+  bool set_details = 13;
+  // Lines to add to the log: what happened.
+  repeated string log = 14;
+  // The id of the Google event a new record of events adds notes to.
+  string google = 15;
+  string url = 16;
+}
+
+message LinkAccountRequest {
+  // The id of the party.
+  string party = 1;
+  string service = 2;
+  string handle = 3;
+  bool confirmed = 4;
+  string how = 5;
+}
+
+message AnswerAccountRequest {
+  // The account's id, <service>:<handle>.
+  string account = 1;
+  // True: the same person. False: a different one, and the link goes.
+  bool same = 2;
+}
+
+// The owner's records: what they rely on, kept in the notebook.
+service RecordService {
+  // Which kinds of record there are, and the fields and sections of each.
+  rpc ListKinds(Empty) returns (ListKindsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListRecords(ListRecordsRequest) returns (ListRecordsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // One record, with what links to it and its file as written.
+  rpc GetRecord(RecordRef) returns (Record) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Add a record, or change one.
+  rpc SaveRecord(SaveRecordRequest) returns (Record);
+  // Remove a record for good.
+  rpc DeleteRecord(RecordRef) returns (Empty) {
+    option (confirm) = true;
+  }
+  // Link an account to a party. An inferred link waits for the owner's answer.
+  rpc LinkAccount(LinkAccountRequest) returns (Record);
+  // Answer whether an inferred account is the same party.
+  rpc AnswerAccount(AnswerAccountRequest) returns (Empty);
+}
