@@ -1,12 +1,14 @@
 #![doc = include_str!("../SPEC.md")]
 
 pub mod body;
+pub mod check;
 mod doc;
 mod entry;
 mod git;
 mod link;
 pub mod memory;
 mod page;
+pub mod records;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod workgroups;
