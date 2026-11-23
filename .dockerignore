@@ -1,0 +1,13 @@
+.git
+.jj
+.env
+.envrc
+target
+frontend/node_modules
+frontend/.output
+frontend/.nitro
+frontend/src/gen
+frontend/test-results
+frontend/playwright-report
+brand
+docs
