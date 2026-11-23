@@ -1,14 +1,15 @@
-import { dateTimeText } from "~/lib/dates";
-import { A, createAsync, useSearchParams } from "@solidjs/router";
-import { For, Show } from "solid-js";
-import Markdown from "~/components/Markdown";
+import { createAsync } from "@solidjs/router";
+import { createEffect, For, Show } from "solid-js";
 import DreamNow from "~/components/DreamNow";
+import Markdown from "~/components/Markdown";
+import { EmptyState, Legend, LinkButton, List, Loading, PageHeader, Section, Tag } from "~/components/ui";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
+import { dateTimeText } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { dreamSettingsQuery, dreamsQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
+import { useParam } from "~/lib/params";
 import { setView } from "~/lib/view";
-import { EmptyState, LinkButton, Tag } from "~/components/ui";
 
 const OPS: [string, string][] = [
   ["足した", "#2a78d6"],
@@ -30,187 +31,166 @@ const OP_LABELS: Record<string, string> = {
   doubted: "古いかも",
 };
 
-const BAR_HEIGHT = 150;
-
+/** What a bar is made of, in the order of OPS. */
 function opCounts(d: Dream): number[] {
   return [d.added, d.edited, d.replaced, d.archived];
 }
 
+/** Each night's changes as a bar, pressed to open the night. */
+function Nights(props: { nights: Dream[]; at: number; tz: string }) {
+  const max = () => Math.max(5, ...props.nights.map((n) => opCounts(n).reduce((a, b) => a + b, 0)));
+  return (
+    <div class="nights">
+      <div class="nights-axis" aria-hidden="true">
+        <span>{max()}</span>
+        <span>0</span>
+      </div>
+      <div class="nights-bars" style={{ "--n": props.nights.length }}>
+        <For each={props.nights}>
+          {(n, i) => {
+            const counts = opCounts(n);
+            const said = `${dateTimeText(n.at, props.tz)} · ${OPS.map(([label], k) => `${label} ${counts[k]}`).join(" · ")}`;
+            return (
+              <a
+                class="night"
+                classList={{ on: i() === props.at }}
+                href={`/memory?night=${n.id}`}
+                title={said}
+                aria-label={said}
+                aria-current={i() === props.at ? "true" : undefined}
+              >
+                <For each={counts}>
+                  {(c, k) => (
+                    <Show when={c > 0}>
+                      <span style={{ height: `${(c * 100) / max()}%`, background: OPS[k()][1] }} />
+                    </Show>
+                  )}
+                </For>
+              </a>
+            );
+          }}
+        </For>
+      </div>
+    </div>
+  );
+}
+
+/** What one night changed, and why. */
+function Night(props: { night: Dream; title: string; before?: Dream; after?: Dream }) {
+  const n = () => props.night;
+  const href = (d: Dream) => `/memory?night=${d.id}`;
+  const counts = (): [string, number][] => [
+    ["足した", n().added],
+    ["直した", n().edited],
+    ["置き換えた", n().replaced],
+    ["確かめた", n().confirmed],
+    ["忘れた", n().archived],
+    ["保留にした", n().pendingAdded],
+    ["タスクにした", n().taskMade],
+    ["古いかもの印", n().doubted],
+  ];
+  return (
+    <Section
+      title={props.title}
+      note={n().status}
+      action={
+        <>
+          <Show when={props.before}>{(d) => <LinkButton small icon={icons.chevronLeft} label="前の夢" href={href(d())} />}</Show>
+          <Show when={props.after}>{(d) => <LinkButton small icon={icons.chevronRight} label="次の夢" href={href(d())} />}</Show>
+        </>
+      }
+    >
+      <dl class="figures">
+        <For each={counts()}>
+          {([label, count]) => (
+            <div classList={{ none: count === 0 }}>
+              <dd class="mono">{count}</dd>
+              <dt class="sub">{label}</dt>
+            </div>
+          )}
+        </For>
+      </dl>
+      <List>
+        <For each={n().changes} fallback={<EmptyState>変更はなかった</EmptyState>}>
+          {(c) => (
+            <div class="item memory-change-row" role="listitem">
+              <Tag>{OP_LABELS[c.op] ?? c.op}</Tag>
+              <div class="grow">
+                <Markdown inline text={c.text} />
+                <div class="sub">
+                  {c.fromFile ? `${c.fromFile} → ${c.file}` : c.file}
+                  <Show when={c.reason}>
+                    {" · "}
+                    <Markdown inline text={c.reason} />
+                  </Show>
+                  <Show when={c.previous}>
+                    {" · 前は「"}
+                    <Markdown inline text={c.previous} />
+                    {"」"}
+                  </Show>
+                </div>
+              </div>
+            </div>
+          )}
+        </For>
+      </List>
+      <p class="sub">
+        記憶の変更は 1
+        つのコミットにまとまる。全体の書き直しはせず、項目ごとの小さな変更だけを当てる。ファイルを半分より小さくする変更と、あなたの言ったことを消す変更は当てない。
+        <Show when={n().commit}>
+          {" "}
+          <span class="mono">commit {n().commit.slice(0, 7)}</span>
+        </Show>
+      </p>
+    </Section>
+  );
+}
+
 export default function Dreams() {
-  setView("記憶", "夢");
-  const [params] = useSearchParams();
+  createEffect(() => setView("記憶", "夢"));
+  const wanted = useParam("night");
   const dreams = createAsync(() => dreamsQuery());
   const plan = createAsync(() => dreamSettingsQuery());
   const owner = useOwner();
-  const tz = owner.tz;
   const nights = () => dreams()?.dreams ?? [];
   const index = () => {
-    const wanted = params.night;
-    const found = typeof wanted === "string" ? nights().findIndex((n) => n.id.toString() === wanted) : -1;
+    const found = nights().findIndex((n) => n.id.toString() === wanted());
     return found >= 0 ? found : nights().length - 1;
   };
-  const night = () => nights()[index()];
-  const max = () => Math.max(5, ...nights().map((n) => opCounts(n).reduce((a, b) => a + b, 0)));
-  const href = (n: Dream) => `/memory?night=${n.id}`;
+  const changed = () => nights().some((n) => opCounts(n).some((c) => c > 0));
 
   return (
     <>
-      <div class="row" style={{ "align-items": "baseline" }}>
-        <h1>夢</h1>
-        <span class="sub">
-          次は {dreams()?.next}。
-          <Show when={plan()?.earlyAt}>{(n) => `エピソード記憶の気づきが ${n()} 件たまれば早めに見る。`}</Show>
-          いま待っている気づき {dreams()?.waitingNotes ?? 0} 件
-        </span>
-        <span class="row" style={{ "margin-left": "auto" }}>
-          <DreamNow linkWhy />
-        </span>
-      </div>
-      <section class="card" style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
-        <div class="row">
-          <h2>夢ごとの変化（この 2 週間）</h2>
-          <div class="legend">
-            <For each={OPS}>
-              {([l, c]) => (
-                <span>
-                  <i style={{ background: c }} />
-                  {l}
-                </span>
-              )}
-            </For>
-          </div>
-        </div>
-        <Show when={nights().length > 0} fallback={<EmptyState>まだ夢を見ていない</EmptyState>}>
-          <div class="row" style={{ "flex-wrap": "nowrap", "align-items": "stretch" }}>
-            <div
-              style={{
-                display: "flex",
-                "flex-direction": "column",
-                "justify-content": "space-between",
-                height: `${BAR_HEIGHT}px`,
-                "font-size": "11px",
-                color: "var(--muted)",
-                width: "22px",
-                "text-align": "right",
-              }}
-            >
-              <span>{max()}</span>
-              <span>0</span>
-            </div>
-            <div
-              class="bars grow"
-              style={{
-                height: `${BAR_HEIGHT}px`,
-                "grid-template-columns": `repeat(${nights().length},minmax(0,1fr))`,
-                "background-image": "linear-gradient(to bottom,#EEECE5 1px,transparent 1px)",
-                "background-size": "100% 50px",
-              }}
-            >
-              <For each={nights()}>
-                {(n, i) => {
-                  const counts = opCounts(n);
-                  return (
-                    <A
-                      class={`bar${i() === index() ? " on" : ""}`}
-                      href={href(n)}
-                      title={`${dateTimeText(n.at, tz())} · 足した ${counts[0]} · 直した ${counts[1]} · 置き換えた ${counts[2]} · 忘れた ${counts[3]}`}
-                    >
-                      <For each={counts}>
-                        {(c, k) => (
-                          <Show when={c > 0}>
-                            <span
-                              style={{
-                                height: `${Math.floor((c * BAR_HEIGHT) / max())}px`,
-                                background: OPS[k()][1],
-                              }}
-                            />
-                          </Show>
-                        )}
-                      </For>
-                    </A>
-                  );
-                }}
-              </For>
-            </div>
-          </div>
-          <p class="sub">棒を押すと、その夜の夢を下に開く。確かめただけの変更は数に入れない。</p>
+      <PageHeader
+        title="夢"
+        note={
+          <>
+            次は {dreams()?.next}。<Show when={plan()?.earlyAt}>{(n) => `エピソード記憶の気づきが ${n()} 件たまれば早めに見る。`}</Show>
+            いま待っている気づき {dreams()?.waitingNotes ?? 0} 件。
+          </>
+        }
+        actions={<DreamNow linkWhy />}
+      />
+      <Show when={dreams()} fallback={<Loading />}>
+        <Section title="夢ごとの変化（この 2 週間）">
+          <Show when={nights().length > 0} fallback={<EmptyState>まだ夢を見ていない</EmptyState>}>
+            <Show when={changed()} fallback={<EmptyState>この 2 週間、記憶は変わっていない</EmptyState>}>
+              <Legend items={OPS.map(([text, background]) => ({ text, style: { background } }))} />
+              <Nights nights={nights()} at={index()} tz={owner.tz()} />
+              <p class="sub">棒を押すと、その夜の夢を下に開く。確かめただけの変更は数に入れない。</p>
+            </Show>
+          </Show>
+        </Section>
+        <Show when={nights()[index()]}>
+          {(n) => (
+            <Night
+              night={n()}
+              title={`${index() + 1 === nights().length ? "最後の夢 · " : ""}${dateTimeText(n().at, owner.tz())}`}
+              before={nights()[index() - 1]}
+              after={nights()[index() + 1]}
+            />
+          )}
         </Show>
-      </section>
-      <Show when={night()}>
-        {(n) => (
-          <section class="card" style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
-            <div class="row">
-              <Show when={index() > 0}>
-                <LinkButton small icon={icons.chevronLeft} label="前の夢" href={href(nights()[index() - 1])} />
-              </Show>
-              <h2>
-                {index() + 1 === nights().length ? "最後の夢 · " : ""}
-                {dateTimeText(n().at, tz())}
-              </h2>
-              <Show when={index() + 1 < nights().length}>
-                <LinkButton small icon={icons.chevronRight} label="次の夢" href={href(nights()[index() + 1])} />
-              </Show>
-              <span class="sub">{n().status}</span>
-              <Show when={n().commit}>
-                <span class="mono sub" style={{ "margin-left": "auto" }}>
-                  commit {n().commit.slice(0, 7)}
-                </span>
-              </Show>
-            </div>
-            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fit,minmax(96px,1fr))", gap: "8px" }}>
-              <For
-                each={
-                  [
-                    ["足した", n().added],
-                    ["直した", n().edited],
-                    ["置き換えた", n().replaced],
-                    ["確かめた", n().confirmed],
-                    ["忘れた", n().archived],
-                    ["保留にした", n().pendingAdded],
-                    ["タスクにした", n().taskMade],
-                    ["古いかもの印", n().doubted],
-                  ] as const
-                }
-              >
-                {([label, count]) => (
-                  <div class="card" style={{ padding: "10px 12px" }}>
-                    <div class="mono" style={{ "font-size": "20px" }}>
-                      {count}
-                    </div>
-                    <div class="sub">{label}</div>
-                  </div>
-                )}
-              </For>
-            </div>
-            <div class="list" style={{ border: 0, padding: 0 }}>
-              <For each={n().changes} fallback={<EmptyState>変更はなかった</EmptyState>}>
-                {(c) => (
-                  <div role="listitem" class="item" style={{ "align-items": "flex-start" }}>
-                    <Tag>{OP_LABELS[c.op] ?? c.op}</Tag>
-                    <div class="grow">
-                      <div style={{ "font-size": "13px" }}><Markdown inline text={c.text} /></div>
-                      <div class="sub">
-                        {c.fromFile ? `${c.fromFile} → ${c.file}` : c.file}
-                        <Show when={c.reason}>
-                          {" · "}
-                          <Markdown inline text={c.reason} />
-                        </Show>
-                        <Show when={c.previous}>
-                          {" · 前は「"}
-                          <Markdown inline text={c.previous} />
-                          {"」"}
-                        </Show>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
-            <p class="sub">
-              記憶の変更は 1 つのコミットにまとまる。全体の書き直しはせず、項目ごとの小さな変更だけを当てる。ファイルを半分より小さくする変更と、あなたの言ったことを消す変更は当てない。
-            </p>
-          </section>
-        )}
       </Show>
     </>
   );

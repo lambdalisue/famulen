@@ -48,10 +48,7 @@ export default function UsageChart(props: {
         <div class="usage-grid" aria-hidden="true">
           <For each={scale()}>{(v) => <span style={{ bottom: percent(v) }} />}</For>
         </div>
-        <div
-          class="usage-columns"
-          style={{ "grid-template-columns": `repeat(${props.columns.length},minmax(0,1fr))` }}
-        >
+        <div class="usage-columns" style={{ "grid-template-columns": `repeat(${props.columns.length},minmax(0,1fr))` }}>
           <For each={props.columns}>
             {(column) => (
               <Tooltip.Root lazyMount unmountOnExit openDelay={80} closeDelay={0} closeOnClick={false} positioning={{ placement: "top" }}>

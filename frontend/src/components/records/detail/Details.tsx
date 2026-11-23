@@ -5,7 +5,8 @@ import { type FieldLike, plainField } from "~/lib/records";
 
 /** The owner's own fields. */
 export default function Details(props: { fields: FieldLike[]; onSave: (change: (fields: FieldLike[]) => FieldLike[]) => void }) {
-  const put = (at: number, f: FieldLike | undefined) => props.onSave((fields) => fields.flatMap((x, n) => (n === at ? (f ? [f] : []) : [x])));
+  const put = (at: number, f: FieldLike | undefined) =>
+    props.onSave((fields) => fields.flatMap((x, n) => (n === at ? (f ? [f] : []) : [x])));
   return (
     <section class="rec-section">
       <h3>ほかの項目</h3>
@@ -13,8 +14,17 @@ export default function Details(props: { fields: FieldLike[]; onSave: (change: (
         <Index each={props.fields}>
           {(f, at) => (
             <div class="rec-detail-row">
-              <TextField aria-label="項目の名前" value={f().name} onChange={(e) => put(at, { ...plainField(f()), name: e.currentTarget.value.trim() || f().name })} />
-              <TextField class="grow" aria-label={`${f().name}の値`} value={f().value} onChange={(e) => put(at, { name: f().name, value: e.currentTarget.value, values: [] })} />
+              <TextField
+                aria-label="項目の名前"
+                value={f().name}
+                onChange={(e) => put(at, { ...plainField(f()), name: e.currentTarget.value.trim() || f().name })}
+              />
+              <TextField
+                class="grow"
+                aria-label={`${f().name}の値`}
+                value={f().value}
+                onChange={(e) => put(at, { name: f().name, value: e.currentTarget.value, values: [] })}
+              />
               <IconButton
                 plain
                 variant="danger"

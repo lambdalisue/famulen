@@ -7,7 +7,20 @@ import { api } from "~/lib/api";
 import { dateText } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
-import { fieldOf, KIND_NAMES, kindsQuery, nameOf, plainField, plainItem, type Rec, recordQuery, RELATED, same, sectionIn, withField } from "~/lib/records";
+import {
+  fieldOf,
+  KIND_NAMES,
+  kindsQuery,
+  nameOf,
+  plainField,
+  plainItem,
+  type Rec,
+  recordQuery,
+  RELATED,
+  same,
+  sectionIn,
+  withField,
+} from "~/lib/records";
 import { setSelection } from "~/lib/view";
 import Backlinks from "../links/Backlinks";
 import { KnownLinks } from "../links/known";
@@ -67,7 +80,9 @@ function Sections(props: { record: Rec; kind: RecordKind; aide: string; save: Sa
                   fields={given(s)?.fields ?? []}
                   aide={props.aide}
                   onSave={(name, v) =>
-                    void props.save((now) => ({ sections: [{ name: s.name, fields: withField(sectionIn(now, s.name)?.fields ?? [], name, v) }] }))
+                    void props.save((now) => ({
+                      sections: [{ name: s.name, fields: withField(sectionIn(now, s.name)?.fields ?? [], name, v) }],
+                    }))
                   }
                 />
               }
@@ -76,7 +91,11 @@ function Sections(props: { record: Rec; kind: RecordKind; aide: string; save: Sa
                 type={s}
                 items={given(s)?.items ?? []}
                 aide={props.aide}
-                onSave={(change) => void props.save((now) => ({ sections: [{ name: s.name, items: change((sectionIn(now, s.name)?.items ?? []).map(plainItem)) }] }))}
+                onSave={(change) =>
+                  void props.save((now) => ({
+                    sections: [{ name: s.name, items: change((sectionIn(now, s.name)?.items ?? []).map(plainItem)) }],
+                  }))
+                }
               />
             </Show>
           </section>
@@ -127,7 +146,13 @@ function Content(props: { record: Rec } & Extra) {
               <Show when={!free() && kind()}>
                 {(k) => (
                   <section class="rec-section rec-glance" aria-label="項目">
-                    <Fields types={k().fields} fields={r().fields} aide={owner.aide()} skip={[RELATED]} onSave={(name, v) => void save({ fields: [{ name, ...v }] })} />
+                    <Fields
+                      types={k().fields}
+                      fields={r().fields}
+                      aide={owner.aide()}
+                      skip={[RELATED]}
+                      onSave={(name, v) => void save({ fields: [{ name, ...v }] })}
+                    />
                   </section>
                 )}
               </Show>
@@ -144,11 +169,16 @@ function Content(props: { record: Rec } & Extra) {
               <Show when={kind()}>{(k) => <Sections record={r()} kind={k()} aide={owner.aide()} save={save} />}</Show>
               <RelatedLinks
                 record={r()}
-                onSave={(change) => void save((now) => ({ fields: [{ name: RELATED, value: "", values: change(fieldOf(now, RELATED)?.values ?? []) }] }))}
+                onSave={(change) =>
+                  void save((now) => ({ fields: [{ name: RELATED, value: "", values: change(fieldOf(now, RELATED)?.values ?? []) }] }))
+                }
               />
               <Backlinks record={r()} />
               <Show when={!free()}>
-                <Details fields={r().details} onSave={(change) => void save((now) => ({ details: change(now.details.map(plainField)), setDetails: true }))} />
+                <Details
+                  fields={r().details}
+                  onSave={(change) => void save((now) => ({ details: change(now.details.map(plainField)), setDetails: true }))}
+                />
               </Show>
             </div>
             <Show when={!free()}>

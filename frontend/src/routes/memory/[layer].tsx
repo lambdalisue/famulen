@@ -1,15 +1,15 @@
-import { A, createAsync, Navigate, useParams, useSearchParams } from "@solidjs/router";
+import { createAsync, Navigate, useParams } from "@solidjs/router";
 import { createEffect, For, Match, Show, Switch } from "solid-js";
 import Markdown from "~/components/Markdown";
-import { EntryRow, SrcTag } from "~/components/MemoryEntry";
-import type { Layer } from "~/gen/famulen/v1/memory_pb";
-import { workgroup } from "~/lib/workgroup";
+import { AskAbout, EntryRow, SrcTag } from "~/components/MemoryEntry";
+import { EmptyState, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
+import type { Layer, MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import * as icons from "~/lib/icons";
 import { layerQuery, visible } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
-import { oneParam } from "~/lib/params";
-import { setSelection, setView } from "~/lib/view";
-import { Button, EmptyState, LinkButton, List } from "~/components/ui";
+import { useParam, withParams } from "~/lib/params";
+import { setView } from "~/lib/view";
+import { workgroup } from "~/lib/workgroup";
 
 const LONG_GROUPS: [string, string][] = [
   ["semantic", "意味記憶"],
@@ -21,53 +21,59 @@ const LAYERS = ["pending", "episodic", "working", "core", "long", "forgotten"];
 
 const STATES: Record<string, string> = { waiting: "夢を待つ", applied: "すぐ入れた", record: "記録へ" };
 
+/** Where a memory's file is read, written and its history seen. */
 function FileLink(props: { path: string }) {
   return (
-    <LinkButton small icon={icons.pencil} style={{ "margin-left": "auto" }} href={`/memory/file?path=${encodeURIComponent(props.path)}`}>
-読む・書く・経緯
+    <LinkButton small icon={icons.pencil} href={withParams("/memory/file", { path: props.path })}>
+      読む・書く・経緯
     </LinkButton>
   );
 }
 
-/** Buttons for the dates or months a layer can show, newest first. */
+/** The dates or months a layer can show, newest first. */
 function Periods(props: { periods: string[]; at: string; layer: string; label: (p: string) => string }) {
   return (
-    <div class="row">
+    <nav class="row" aria-label="期間">
       <For each={props.periods.slice(0, 14)}>
         {(p) => (
-          <A class={`btn small${p === props.at ? " primary" : ""}`} href={`/memory/${props.layer}?at=${p}`}>
+          <a
+            class={`btn small${p === props.at ? " primary" : ""}`}
+            href={`/memory/${props.layer}?at=${p}`}
+            aria-current={p === props.at ? "true" : undefined}
+          >
             {props.label(p)}
-          </A>
+          </a>
         )}
       </For>
-    </div>
+    </nav>
   );
 }
 
+/** The items of a layer that belong to the workgroup on screen. */
+const shown = (items: MemoryItem[]) => items.filter((e) => visible(e, workgroup()));
+
 function Pending(props: { data: Layer; aide: string }) {
-  const items = () => props.data.items.filter((e) => visible(e, workgroup()));
   return (
     <>
-      <div class="row">
-        <h1>保留中の判断</h1>
-        <span class="sub">まったく急がない。答えなくてよい</span>
-        <FileLink path="pending.md" />
-      </div>
+      <PageHeader title="保留中の判断" note="まったく急がない。答えなくてよい。" actions={<FileLink path="pending.md" />} />
       <List>
-        <For each={items()} fallback={<EmptyState>いまはない</EmptyState>}>
+        <For each={shown(props.data.items)} fallback={<EmptyState>いまはない</EmptyState>}>
           {(e) => (
-            <div role="listitem" class="item">
-              <div class="grow">
-                <div style={{ "font-size": "14px" }}><Markdown inline text={e.text} /></div>
-                <div class="sub">
-                  根拠 {e.attrs.ev ?? "0"} / 要る {e.attrs.need ?? "2"}
-                  {e.attrs.against ? " · あなたの言葉と食い違う" : ""}
-                </div>
-              </div>
-              <Button small onClick={() => setSelection(`保留中の判断：${e.text}`)}>
-                答える
-              </Button>
-            </div>
+            <ListRow
+              class="memory-row"
+              title={<Markdown inline text={e.text} />}
+              sub={
+                <>
+                  <span>
+                    根拠 {e.attrs.ev ?? "0"} / 要る {e.attrs.need ?? "2"}
+                  </span>
+                  <Show when={e.attrs.against}>
+                    <span>あなたの言葉と食い違う</span>
+                  </Show>
+                </>
+              }
+              end={<AskAbout what={`保留中の判断：${e.text}`} label="答える" />}
+            />
           )}
         </For>
       </List>
@@ -81,16 +87,17 @@ function Pending(props: { data: Layer; aide: string }) {
 
 function Episodic(props: { data: Layer; at: string }) {
   const date = () => props.at || props.data.periods[0] || "";
-  const items = () => props.data.items.filter((e) => visible(e, workgroup()));
   return (
     <>
-      <div class="row">
-        <h1>エピソード記憶</h1>
-        <span class="sub">昼の間はここに書き留めるだけ。整理は夢の中で行う</span>
-        <Show when={date()}>
-          <FileLink path={`episodic/${date()}.md`} />
-        </Show>
-      </div>
+      <PageHeader
+        title="エピソード記憶"
+        note="昼の間はここに書き留めるだけ。整理は夢の中で行う。"
+        actions={
+          <Show when={date()}>
+            <FileLink path={`episodic/${date()}.md`} />
+          </Show>
+        }
+      />
       <Periods
         periods={props.data.periods}
         at={date()}
@@ -98,22 +105,20 @@ function Episodic(props: { data: Layer; at: string }) {
         label={(d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`}
       />
       <List>
-        <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
+        <For each={shown(props.data.items)} fallback={<EmptyState>まだない</EmptyState>}>
           {(e) => (
-            <div role="listitem" class="item">
-              <span class="mono" style={{ "font-size": "12px", width: "44px" }}>
-                {e.time}
-              </span>
-              <SrcTag src={e.src} />
-              <div
-                class="grow"
-                style={{ "font-size": "14px", cursor: "pointer" }}
-                onClick={() => setSelection(`記憶：${e.text}`)}
-              >
-                <Markdown inline text={e.text} />
-              </div>
-              <span class="sub">{STATES[e.attrs.state ?? ""] ?? ""}</span>
-            </div>
+            <ListRow
+              class="memory-row"
+              lead={<span class="mono sub memory-time">{e.time}</span>}
+              title={<Markdown inline text={e.text} />}
+              sub={
+                <>
+                  <SrcTag src={e.src} />
+                  <span>{STATES[e.attrs.state ?? ""] ?? ""}</span>
+                </>
+              }
+              end={<AskAbout what={`記憶：${e.text}`} />}
+            />
           )}
         </For>
       </List>
@@ -124,37 +129,34 @@ function Episodic(props: { data: Layer; at: string }) {
 function Working(props: { data: Layer }) {
   return (
     <>
-      <div class="row">
-        <h1>作業記憶</h1>
-        <span class="sub">いま進めている仕事の途中経過。済めば消える</span>
-      </div>
+      <PageHeader title="作業記憶" note="いま進めている仕事の途中経過。済めば消える。" />
       <For each={props.data.working} fallback={<EmptyState>いま進めている仕事はない</EmptyState>}>
         {(w) => (
-          <article class="card" style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+          <article class="card stack">
             <div class="row">
-              <h2 class="grow"><Markdown inline text={w.title || w.name} /></h2>
+              <h2 class="grow">
+                <Markdown inline text={w.title || w.name} />
+              </h2>
               <FileLink path={`working/${w.name}.md`} />
             </div>
-            <div
-              style={{
-                display: "grid",
-                "grid-template-columns": "96px minmax(0,1fr)",
-                "row-gap": "4px",
-                "font-size": "13px",
-                "line-height": 1.6,
-              }}
-            >
-              <span class="sub">ここまで</span>
-              <div><Markdown inline text={w.done} /></div>
-              <span class="sub">次にやる</span>
-              <div><Markdown inline text={w.next} /></div>
-              <span class="sub">待っている</span>
-              <div><Markdown inline text={w.waiting} /></div>
-              <span class="sub">手がかり</span>
-              <div class="mono" style={{ "font-size": "12px" }}>
+            <dl class="memory-working">
+              <dt>ここまで</dt>
+              <dd>
+                <Markdown inline text={w.done} />
+              </dd>
+              <dt>次にやる</dt>
+              <dd>
+                <Markdown inline text={w.next} />
+              </dd>
+              <dt>待っている</dt>
+              <dd>
+                <Markdown inline text={w.waiting} />
+              </dd>
+              <dt>手がかり</dt>
+              <dd class="mono">
                 <Markdown inline text={w.clues} />
-              </div>
-            </div>
+              </dd>
+            </dl>
           </article>
         )}
       </For>
@@ -163,30 +165,19 @@ function Working(props: { data: Layer }) {
 }
 
 function Core(props: { data: Layer }) {
-  const items = () => props.data.items.filter((e) => visible(e, workgroup()));
   const lines = () => props.data.items.length;
   const limit = () => Number(/\/\s*(\d+)/.exec(props.data.layer?.count ?? "")?.[1] ?? "150");
   return (
     <>
-      <div class="row">
-        <h1>心得</h1>
-        <span class="sub">毎回の会話の最初に必ず読む。小さく保つ。ここにあるものも長期記憶の一部</span>
-        <FileLink path="core.md" />
-      </div>
-      <div>
-        <div class="row" style={{ "justify-content": "space-between", "font-size": "12px" }}>
-          <span>大きさ</span>
-          <span class="mono">
-            {lines()} / {limit()} 行
-          </span>
-        </div>
-        <div class="meter">
-          <div style={{ width: `${Math.min(100, Math.floor((lines() * 100) / limit()))}%` }} />
-        </div>
-        <p class="sub">上限を超えそうになると、夢の中で使われていないものから心得を外す。外しても長期記憶には残る</p>
-      </div>
+      <PageHeader
+        title="心得"
+        note="毎回の会話の最初に必ず読む。小さく保つ。ここにあるものも長期記憶の一部。"
+        actions={<FileLink path="core.md" />}
+      />
+      <Meter label="大きさ" value={lines()} max={limit()} unit="行" />
+      <p class="sub">上限を超えそうになると、夢の中で使われていないものから心得を外す。外しても長期記憶には残る。</p>
       <List>
-        <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
+        <For each={shown(props.data.items)} fallback={<EmptyState>まだない</EmptyState>}>
           {(e) => <EntryRow item={e} />}
         </For>
       </List>
@@ -198,25 +189,18 @@ function Long(props: { data: Layer }) {
   const files = (group: string) => props.data.files.filter((f) => f.path.split("/")[1] === group);
   return (
     <>
-      <div class="row">
-        <h1>長期記憶</h1>
-        <span class="sub">覚えたこと。必要なときに読みに行く</span>
-      </div>
+      <PageHeader title="長期記憶" note="覚えたこと。必要なときに読みに行く。" />
       <For each={LONG_GROUPS}>
         {([group, label]) => (
-          <section style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+          <section class="stack">
             <h3>{label}</h3>
             <For each={files(group)} fallback={<EmptyState>まだない</EmptyState>}>
               {(f) => (
-                <div class="card" style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
-                  <div class="row">
-                    <b class="grow"><Markdown inline text={f.title.replace(/\.md$/, "")} /></b>
-                    <FileLink path={f.path} />
-                  </div>
-                  <div class="list" style={{ border: 0, padding: 0 }}>
-                    <For each={f.entries.filter((e) => visible(e, workgroup()))}>{(e) => <EntryRow item={e} />}</For>
-                  </div>
-                </div>
+                <Section title={<Markdown inline text={f.title.replace(/\.md$/, "")} />} action={<FileLink path={f.path} />}>
+                  <List>
+                    <For each={shown(f.entries)}>{(e) => <EntryRow item={e} />}</For>
+                  </List>
+                </Section>
               )}
             </For>
           </section>
@@ -228,40 +212,40 @@ function Long(props: { data: Layer }) {
 
 function Forgotten(props: { data: Layer; at: string }) {
   const month = () => props.at || props.data.periods[0] || "";
-  const items = () => props.data.items.filter((e) => visible(e, workgroup()));
   return (
     <>
-      <div class="row">
-        <h1>忘却</h1>
-        <span class="sub">古くなった・置き換わった記憶。ふだんは読まないが、消してはいないので戻せる</span>
-      </div>
+      <PageHeader
+        title="忘却"
+        note="古くなった・置き換わった記憶。ふだんは読まないが、消してはいないので戻せる。"
+        actions={
+          <Show when={month()}>
+            <FileLink path={`forgotten/${month()}.md`} />
+          </Show>
+        }
+      />
       <Show when={month()} fallback={<EmptyState>まだない</EmptyState>}>
         <Periods periods={props.data.periods} at={month()} layer="forgotten" label={(m) => m} />
-        <section style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
-          <div class="row">
-            <h3 class="grow">{month()}</h3>
-            <FileLink path={`forgotten/${month()}.md`} />
-          </div>
-          <List>
-            <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
-              {(e) => (
-                <div role="listitem" class="item">
-                  <div class="grow">
-                    <div style={{ "font-size": "14px", color: "#4D4C47", "text-decoration": "line-through" }}>
-                      <Markdown inline text={e.text} />
-                    </div>
-                    <div class="sub">
-                      <Markdown inline text={e.attrs.reason ?? ""} /> · {e.attrs.forgot ?? ""}
-                    </div>
-                  </div>
-                  <Button small onClick={() => setSelection(`忘れた記憶：${e.text}`)}>
-                    戻すよう頼む
-                  </Button>
-                </div>
-              )}
-            </For>
-          </List>
-        </section>
+        <List>
+          <For each={shown(props.data.items)} fallback={<EmptyState>まだない</EmptyState>}>
+            {(e) => (
+              <ListRow
+                class="memory-row"
+                title={
+                  <span class="struck">
+                    <Markdown inline text={e.text} />
+                  </span>
+                }
+                sub={
+                  <>
+                    <Markdown inline text={e.attrs.reason ?? ""} />
+                    <span>{e.attrs.forgot ?? ""}</span>
+                  </>
+                }
+                end={<AskAbout what={`忘れた記憶：${e.text}`} label="戻すよう頼む" />}
+              />
+            )}
+          </For>
+        </List>
       </Show>
     </>
   );
@@ -269,44 +253,42 @@ function Forgotten(props: { data: Layer; at: string }) {
 
 export default function MemoryLayer() {
   const params = useParams();
-  const [search] = useSearchParams();
-  const at = () => oneParam(search.at);
+  const at = useParam("at");
+  const owner = useOwner();
   const known = () => LAYERS.includes(params.layer ?? "");
   const data = createAsync(async () => (known() ? layerQuery(params.layer ?? "", at()) : undefined));
-  const owner = useOwner();
-  const aide = owner.aide;
   createEffect(() => {
     const label = data()?.layer?.label;
     if (label) setView("記憶", label);
   });
   return (
     <Show when={params.layer !== "dream"} fallback={<Navigate href="/memory" />}>
-    <Show when={known()} fallback={<EmptyState>そういう層はない</EmptyState>}>
-    <Show when={data()}>
-      {(d) => (
-        <Switch>
-          <Match when={params.layer === "pending"}>
-            <Pending data={d()} aide={aide()} />
-          </Match>
-          <Match when={params.layer === "episodic"}>
-            <Episodic data={d()} at={at()} />
-          </Match>
-          <Match when={params.layer === "working"}>
-            <Working data={d()} />
-          </Match>
-          <Match when={params.layer === "core"}>
-            <Core data={d()} />
-          </Match>
-          <Match when={params.layer === "long"}>
-            <Long data={d()} />
-          </Match>
-          <Match when={params.layer === "forgotten"}>
-            <Forgotten data={d()} at={at()} />
-          </Match>
-        </Switch>
-      )}
-    </Show>
-    </Show>
+      <Show when={known()} fallback={<EmptyState>そういう層はない</EmptyState>}>
+        <Show when={data()} fallback={<Loading />}>
+          {(d) => (
+            <Switch>
+              <Match when={params.layer === "pending"}>
+                <Pending data={d()} aide={owner.aide()} />
+              </Match>
+              <Match when={params.layer === "episodic"}>
+                <Episodic data={d()} at={at()} />
+              </Match>
+              <Match when={params.layer === "working"}>
+                <Working data={d()} />
+              </Match>
+              <Match when={params.layer === "core"}>
+                <Core data={d()} />
+              </Match>
+              <Match when={params.layer === "long"}>
+                <Long data={d()} />
+              </Match>
+              <Match when={params.layer === "forgotten"}>
+                <Forgotten data={d()} at={at()} />
+              </Match>
+            </Switch>
+          )}
+        </Show>
+      </Show>
     </Show>
   );
 }

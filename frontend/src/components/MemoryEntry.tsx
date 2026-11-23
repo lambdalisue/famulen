@@ -24,12 +24,9 @@ export function AskAbout(props: { what: string; label?: string }) {
 export function EntryRow(props: { item: MemoryItem }) {
   const meta = () => {
     const a = props.item.attrs;
-    return [
-      a.from && `${a.from} から`,
-      a.to && `${a.to} まで`,
-      a.ev && `根拠 ${a.ev}`,
-      a.uses && `使った ${a.uses} 回`,
-    ].filter((m): m is string => !!m);
+    return [a.from && `${a.from} から`, a.to && `${a.to} まで`, a.ev && `根拠 ${a.ev}`, a.uses && `使った ${a.uses} 回`].filter(
+      (m): m is string => !!m,
+    );
   };
   return (
     <ListRow

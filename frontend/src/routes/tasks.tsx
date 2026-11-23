@@ -13,13 +13,14 @@ import { useParam } from "~/lib/params";
 import { usePicked } from "~/lib/picked";
 import { bucketOf, isOver, type Rec, valueOf } from "~/lib/records";
 import { cancelWake, wakesQuery } from "~/lib/routines";
+import { byName } from "~/lib/words";
 
 const RANK: { [p: string]: number } = { high: 0, normal: 1, low: 2 };
 
 function order(a: Rec, b: Rec): number {
   const due = (r: Rec) => valueOf(r, "Due") || "9999";
   const rank = (r: Rec) => RANK[valueOf(r, "Priority")] ?? 1;
-  return due(a).localeCompare(due(b)) || rank(a) - rank(b) || a.title.localeCompare(b.title);
+  return due(a).localeCompare(due(b)) || rank(a) - rank(b) || byName(a.title, b.title);
 }
 
 type Tab = "once" | "routines" | "delegated";
@@ -33,7 +34,14 @@ const TABS: [Tab, string][] = [
 
 function Tabs(props: { tab: Tab }) {
   const navigate = useNavigate();
-  return <Segmented label="タスクの種類" items={TABS} value={props.tab} onChoose={(v) => navigate(v === "once" ? "/tasks" : `/tasks?tab=${v}`)} />;
+  return (
+    <Segmented
+      label="タスクの種類"
+      items={TABS}
+      value={props.tab}
+      onChoose={(v) => navigate(v === "once" ? "/tasks" : `/tasks?tab=${v}`)}
+    />
+  );
 }
 
 /** Finish a task, or take it up again, from its detail. */

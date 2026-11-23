@@ -1,5 +1,5 @@
 import { addDays, dateLabel, hm, localDate } from "~/lib/dates";
-import { A, createAsync, useNavigate } from "@solidjs/router";
+import { createAsync, useNavigate } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Markdown from "~/components/Markdown";
 import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
@@ -17,7 +17,9 @@ export function whenOf(e: CalendarEvent): string {
   const first = localDate(e.start);
   const last = e.allDay ? addDays(localDate(e.end), -1) : localDate(e.end);
   if (e.allDay) return first === last ? `${dateLabel(first)} 終日` : `${dateLabel(first)} – ${dateLabel(last)} 終日`;
-  return first === last ? `${dateLabel(first)} ${hm(e.start)} – ${hm(e.end)}` : `${dateLabel(first)} ${hm(e.start)} – ${dateLabel(last)} ${hm(e.end)}`;
+  return first === last
+    ? `${dateLabel(first)} ${hm(e.start)} – ${hm(e.end)}`
+    : `${dateLabel(first)} ${hm(e.start)} – ${dateLabel(last)} ${hm(e.end)}`;
 }
 
 const MARK: { [response: string]: string } = { accepted: "出席", declined: "欠席", tentative: "仮", needs_action: "未回答" };
@@ -29,17 +31,17 @@ function EventButtons(props: { event: CalendarEvent }) {
     <div class="row">
       <Show when={e().meeting}>
         <LinkButton variant="primary" icon={icons.video} href={e().meeting}>
-会議に入る
+          会議に入る
         </LinkButton>
       </Show>
       <Show when={e().map}>
         <LinkButton icon={icons.mapPin} href={e().map}>
-地図
+          地図
         </LinkButton>
       </Show>
       <Show when={e().url}>
         <LinkButton icon={icons.externalLink} href={e().url}>
-Google で開く
+          Google で開く
         </LinkButton>
       </Show>
     </div>
@@ -67,9 +69,9 @@ function Attendees(props: { event: CalendarEvent }) {
                   {MARK[a.response] ?? a.response}
                 </span>
                 <Show when={a.party} fallback={<span class="grow">{a.name || a.email}</span>}>
-                  <A class="grow" href={hrefOf("parties", a.party) ?? ""}>
+                  <a class="grow" href={hrefOf("parties", a.party) ?? ""}>
                     {a.name || a.email}
-                  </A>
+                  </a>
                 </Show>
                 <Show when={a.organizer}>
                   <Tag>主催</Tag>

@@ -76,9 +76,20 @@ export function Checkbox(props: Omit<ComponentProps<"input">, "type"> & { childr
 }
 
 /** On or off, saved as it is turned. `hidden` keeps the label for those who do not see the row it stands in. */
-export function Switch(props: { checked: boolean; onChange: (on: boolean) => void; children: JSX.Element; hidden?: boolean; end?: boolean; class?: string }) {
+export function Switch(props: {
+  checked: boolean;
+  onChange: (on: boolean) => void;
+  children: JSX.Element;
+  hidden?: boolean;
+  end?: boolean;
+  class?: string;
+}) {
   return (
-    <ArkSwitch.Root class={`switch-row ${props.end ? "end" : ""} ${props.class ?? ""}`} checked={props.checked} onCheckedChange={(d) => props.onChange(d.checked)}>
+    <ArkSwitch.Root
+      class={`switch-row ${props.end ? "end" : ""} ${props.class ?? ""}`}
+      checked={props.checked}
+      onCheckedChange={(d) => props.onChange(d.checked)}
+    >
       <ArkSwitch.Control class="switch">
         <ArkSwitch.Thumb class="switch-thumb" />
       </ArkSwitch.Control>
@@ -96,6 +107,8 @@ export function NumberField(props: {
   value: number;
   min?: number;
   max?: number;
+  /** It may have a fraction; otherwise it is cut to a whole number. */
+  decimal?: boolean;
   unit?: JSX.Element;
   hint?: JSX.Element;
   /** Shown for zero, where zero means there is none. */
@@ -114,7 +127,7 @@ export function NumberField(props: {
       value={text()}
       onValueChange={(d) => setText(d.value)}
       onValueCommit={(d) => {
-        const n = Math.trunc(d.valueAsNumber);
+        const n = props.decimal ? d.valueAsNumber : Math.trunc(d.valueAsNumber);
         if (Number.isFinite(n) && n >= (props.min ?? 0)) {
           if (n !== props.value) props.onSave(n);
         } else if (props.none !== undefined) {
@@ -125,7 +138,7 @@ export function NumberField(props: {
       <Ark.Label class={props.hidden ? "sr" : "field-label"}>{props.label}</Ark.Label>
       <div class="row">
         <Ark.Control>
-          <Ark.Input class="input number" inputmode="numeric" placeholder={props.none} />
+          <Ark.Input class="input number" inputmode={props.decimal ? "decimal" : "numeric"} placeholder={props.none} />
         </Ark.Control>
         <Show when={"unit" in props}>
           <span class="sub">{props.unit}</span>

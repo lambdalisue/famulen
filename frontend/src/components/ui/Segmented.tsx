@@ -2,7 +2,13 @@ import { SegmentGroup } from "@ark-ui/solid/segment-group";
 import { For } from "solid-js";
 
 /** One choice out of a few, each shown. */
-export function Segmented(props: { label: string; items: [string, string][]; value: string; onChoose: (value: string) => void; class?: string }) {
+export function Segmented(props: {
+  label: string;
+  items: [string, string][];
+  value: string;
+  onChoose: (value: string) => void;
+  class?: string;
+}) {
   return (
     <SegmentGroup.Root
       class={`segs ${props.class ?? ""}`}

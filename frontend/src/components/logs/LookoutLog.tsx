@@ -29,41 +29,44 @@ export default function LookoutLog() {
       <p class="sub">
         見張りが読んだものと、それぞれを関わりがないとしたか・朝のまとめに入れたか・秘書へ渡したか、そのわけ。判断が違えば、親指で教える。教えたことは記憶に入り、夢のあとの判断から効く。
       </p>
-        <List>
-          <For each={pages.rows()}>
-            {(d) => (
-              <div class="item" role="listitem">
-                <span class="mono sub when">
-                  {shortTime(d.at, owner.tz())}
-                </span>
-                <Tag tone={d.passedOn ? "aide" : undefined}>{d.outcome}</Tag>
-                <div class="grow">
-                  <PickName text={d.title} onPick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)} />
-                  <Show when={d.reason}>
-                    <div class="sub">{d.reason}</div>
-                  </Show>
-                </div>
-                <Show
-                  when={d.feedback === 0}
-                  fallback={<span class="sub">{d.feedback > 0 ? "拾ってほしかった" : "要らなかった"}</span>}
-                >
-                  <Show
-                    when={passedOn(d)}
-                    fallback={
-                      <IconButton icon={icons.thumbUp} label="拾ってほしかった" onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: true }), "覚えた")} />
-                    }
-                  >
-                    <IconButton icon={icons.thumbDown} label="要らなかった" onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: false }), "覚えた")} />
-                  </Show>
+      <List>
+        <For each={pages.rows()}>
+          {(d) => (
+            <div class="item" role="listitem">
+              <span class="mono sub when">{shortTime(d.at, owner.tz())}</span>
+              <Tag tone={d.passedOn ? "aide" : undefined}>{d.outcome}</Tag>
+              <div class="grow">
+                <PickName text={d.title} onPick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)} />
+                <Show when={d.reason}>
+                  <div class="sub">{d.reason}</div>
                 </Show>
               </div>
-            )}
-          </For>
-          <Show when={pages.loaded() && pages.rows().length === 0}>
-            <EmptyState>まだない</EmptyState>
-          </Show>
-        </List>
-        <PageNav pages={pages} />
+              <Show when={d.feedback === 0} fallback={<span class="sub">{d.feedback > 0 ? "拾ってほしかった" : "要らなかった"}</span>}>
+                <Show
+                  when={passedOn(d)}
+                  fallback={
+                    <IconButton
+                      icon={icons.thumbUp}
+                      label="拾ってほしかった"
+                      onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: true }), "覚えた")}
+                    />
+                  }
+                >
+                  <IconButton
+                    icon={icons.thumbDown}
+                    label="要らなかった"
+                    onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: false }), "覚えた")}
+                  />
+                </Show>
+              </Show>
+            </div>
+          )}
+        </For>
+        <Show when={pages.loaded() && pages.rows().length === 0}>
+          <EmptyState>まだない</EmptyState>
+        </Show>
+      </List>
+      <PageNav pages={pages} />
     </>
   );
 }

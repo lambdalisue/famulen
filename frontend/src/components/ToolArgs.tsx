@@ -93,15 +93,30 @@ function ToolArgs(props: { fields: Field[]; typed: Record<string, string>; onTyp
       {(f) => {
         const value = () => props.typed[f.name] ?? "";
         return (
-          <UiField label={<span classList={{ mono: f.title === f.name }} title={f.name}>
-              {f.title}
-            </span>} hint={<>
-              {f.required ? "要る。" : "なくてもよい。"}
-              {f.description}
-            </>}>
+          <UiField
+            label={
+              <span classList={{ mono: f.title === f.name }} title={f.name}>
+                {f.title}
+              </span>
+            }
+            hint={
+              <>
+                {f.required ? "要る。" : "なくてもよい。"}
+                {f.description}
+              </>
+            }
+          >
             <Switch
               fallback={
-                <TextField classList={{ mono: f.type in HINTS }} type={f.type === "integer" || f.type === "number" ? "number" : "text"} step={f.type === "number" ? "any" : undefined} required={f.required} placeholder={HINTS[f.type] ?? ""} value={value()} onInput={(e) => props.onType(f.name, e.currentTarget.value)} />
+                <TextField
+                  classList={{ mono: f.type in HINTS }}
+                  type={f.type === "integer" || f.type === "number" ? "number" : "text"}
+                  step={f.type === "number" ? "any" : undefined}
+                  required={f.required}
+                  placeholder={HINTS[f.type] ?? ""}
+                  value={value()}
+                  onInput={(e) => props.onType(f.name, e.currentTarget.value)}
+                />
               }
             >
               <Match when={f.choices.length > 0 || f.type === "boolean"}>
@@ -113,7 +128,7 @@ function ToolArgs(props: { fields: Field[]; typed: Record<string, string>; onTyp
                 </Select>
               </Match>
             </Switch>
-            </UiField>
+          </UiField>
         );
       }}
     </For>
@@ -139,8 +154,12 @@ export function ToolField(props: {
   };
   return (
     <>
-      <UiField label="読む道具" hint={chosen()?.description ||
-            "決まった間隔で呼び、結果に新しく出てきたものを見る。確認なしに呼ぶので、読むだけの道具しか選べない。"}>
+      <UiField
+        label="読む道具"
+        hint={
+          chosen()?.description || "決まった間隔で呼び、結果に新しく出てきたものを見る。確認なしに呼ぶので、読むだけの道具しか選べない。"
+        }
+      >
         <Select class="mono" required={!props.none} onChange={(e) => props.chooseTool(e.currentTarget.value)}>
           <option value="" selected={!props.tool}>
             {props.none ?? "選ぶ"}
@@ -159,13 +178,16 @@ export function ToolField(props: {
           when={fieldsOf(chosen()?.inputSchema ?? "")}
           fallback={
             <UiField label="条件（JSON）" hint="この道具は、何を受け取るかを言わない。要らなければ空のままでよい。">
-              <TextField class="mono" placeholder='{"query":"is:unread newer_than:1d"}' value={props.args} onInput={(e) => props.setArgs(e.currentTarget.value)} />
+              <TextField
+                class="mono"
+                placeholder='{"query":"is:unread newer_than:1d"}'
+                value={props.args}
+                onInput={(e) => props.setArgs(e.currentTarget.value)}
+              />
             </UiField>
           }
         >
-          {(known) => (
-            <ToolArgs fields={known()} typed={props.typed} onType={(k, v) => props.setTyped({ ...props.typed, [k]: v })} />
-          )}
+          {(known) => <ToolArgs fields={known()} typed={props.typed} onType={(k, v) => props.setTyped({ ...props.typed, [k]: v })} />}
         </Show>
       </Show>
     </>

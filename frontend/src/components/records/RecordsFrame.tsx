@@ -63,7 +63,13 @@ export default function RecordsFrame(props: {
               {place() + 1} / {props.order.length}
             </span>
             <IconButton variant="ghost" icon={icons.arrowUp} label="前の項目" disabled={place() === 0} onClick={() => step(-1)} />
-            <IconButton variant="ghost" icon={icons.arrowDown} label="次の項目" disabled={place() === props.order.length - 1} onClick={() => step(1)} />
+            <IconButton
+              variant="ghost"
+              icon={icons.arrowDown}
+              label="次の項目"
+              disabled={place() === props.order.length - 1}
+              onClick={() => step(1)}
+            />
           </Show>
           <span class="grow" />
           <IconButton class="split-close" variant="ghost" icon={icons.x} label="詳細を閉じる" onClick={close} />

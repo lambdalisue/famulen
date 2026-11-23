@@ -62,7 +62,12 @@ export default function SplitPane(props: {
 
   return (
     <div class="split-pane" classList={{ open: props.open, floats: props.floats }} ref={frame} onKeyDown={(e) => props.open && onEscape(e)}>
-      <div class="split-left" ref={left} style={props.open && size.width() ? { "--left": `${size.width()}px` } : undefined} onKeyDown={onKeyDown}>
+      <div
+        class="split-left"
+        ref={left}
+        style={props.open && size.width() ? { "--left": `${size.width()}px` } : undefined}
+        onKeyDown={onKeyDown}
+      >
         {props.children}
       </div>
       <Show when={props.open}>

@@ -5,7 +5,13 @@ import { BackLink, Button } from "./Button";
 import Icon from "./Icon";
 
 /** The head of a page: its name, what it is for, and what is done on it. */
-export function PageHeader(props: { title: JSX.Element; note?: JSX.Element; back?: { href: string; label: string }; tags?: JSX.Element; actions?: JSX.Element }) {
+export function PageHeader(props: {
+  title: JSX.Element;
+  note?: JSX.Element;
+  back?: { href: string; label: string };
+  tags?: JSX.Element;
+  actions?: JSX.Element;
+}) {
   return (
     <header class="page-head">
       <div class="page-head-line">
@@ -24,7 +30,15 @@ export function PageHeader(props: { title: JSX.Element; note?: JSX.Element; back
 }
 
 /** One thing decided on a page: a heading, a plain note under it, then its controls. */
-export function Section(props: { title: JSX.Element; note?: JSX.Element; action?: JSX.Element; label?: string; level?: 2 | 3; id?: string; children?: JSX.Element }) {
+export function Section(props: {
+  title: JSX.Element;
+  note?: JSX.Element;
+  action?: JSX.Element;
+  label?: string;
+  level?: 2 | 3;
+  id?: string;
+  children?: JSX.Element;
+}) {
   return (
     <section class="pref" aria-label={props.label}>
       <div class="pref-head">
@@ -44,7 +58,13 @@ export function Section(props: { title: JSX.Element; note?: JSX.Element; action?
 }
 
 /** A part of a section, or a group of lists on a page, under a smaller heading. */
-export function SubSection(props: { title: JSX.Element; note?: JSX.Element; action?: JSX.Element; class?: string; children?: JSX.Element }) {
+export function SubSection(props: {
+  title: JSX.Element;
+  note?: JSX.Element;
+  action?: JSX.Element;
+  class?: string;
+  children?: JSX.Element;
+}) {
   return (
     <div class={`pref-sub ${props.class ?? ""}`}>
       <div class="pref-title">
@@ -60,7 +80,14 @@ export function SubSection(props: { title: JSX.Element; note?: JSX.Element; acti
 }
 
 /** What is out of the way until asked for. */
-export function Disclosure(props: { title: JSX.Element; class?: string; open?: boolean; onOpenChange?: (open: boolean) => void; startsOpen?: boolean; children: JSX.Element }) {
+export function Disclosure(props: {
+  title: JSX.Element;
+  class?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  startsOpen?: boolean;
+  children: JSX.Element;
+}) {
   return (
     <Collapsible.Root
       class={`disclosure ${props.class ?? ""}`}

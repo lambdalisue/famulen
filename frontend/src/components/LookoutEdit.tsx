@@ -108,9 +108,7 @@ export default function LookoutEdit(props: { source: LookoutSource; defaults: Lo
       open={open()}
       onOpenChange={setOpen}
       title="見張りを直す"
-      trigger={
-        <DialogTrigger small icon={icons.pencil} label={`${props.source.name}を直す`} />
-      }
+      trigger={<DialogTrigger small icon={icons.pencil} label={`${props.source.name}を直す`} />}
     >
       <EditForm source={props.source} defaults={props.defaults} sources={props.sources} onDone={() => setOpen(false)} />
     </Dialog>

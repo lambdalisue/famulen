@@ -1,4 +1,4 @@
-import { A, createAsync } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import LogSheet from "~/components/logs/LogSheet";
 import { RunResult } from "~/components/records/Delegated";
@@ -25,8 +25,15 @@ function Pool(props: { settings: WorkerSettings }) {
     );
   };
   return (
-    <Section title="同時に動く数" note={<>委ねたタスクは、優先度、期日、古さの順に、ここで決めた数までを同時に動かす。あなたの承認や答えを待っているものは数に入らない。並びは
-          <A href="/tasks">タスク</A>の頁で見られる。</>}>
+    <Section
+      title="同時に動く数"
+      note={
+        <>
+          委ねたタスクは、優先度、期日、古さの順に、ここで決めた数までを同時に動かす。あなたの承認や答えを待っているものは数に入らない。並びは
+          <a href="/tasks">タスク</a>の頁で見られる。
+        </>
+      }
+    >
       <NumberField label="同時に動く数" min={1} max={20} value={s().slots} unit="件" onSave={(slots) => save({ slots })} />
       <Switch checked={s().paused} onChange={(paused) => save({ paused })}>
         一時停止する（動いているものは続く）
@@ -52,10 +59,15 @@ export default function Worker() {
   const settings = createAsync(() => workerSettingsQuery());
   return (
     <>
-      <PageHeader title="手代" note={<>
-        秘書やあなたがタスクとして委ねた仕事を、一つずつ片付けるエージェント。仕事ごとに生まれ、渡された道具と手帳のファイルだけを使い、済めば消える。あなたに確かめる道具は使えない。Adroit
-        に委ねた仕事は、あなたの承認を得てから Adroit のセッションとして始まる。
-      </>} />
+      <PageHeader
+        title="手代"
+        note={
+          <>
+            秘書やあなたがタスクとして委ねた仕事を、一つずつ片付けるエージェント。仕事ごとに生まれ、渡された道具と手帳のファイルだけを使い、済めば消える。あなたに確かめる道具は使えない。Adroit
+            に委ねた仕事は、あなたの承認を得てから Adroit のセッションとして始まる。
+          </>
+        }
+      />
       <div class="prefs">
         <RoleModel
           role={Role.WORKER}

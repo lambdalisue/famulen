@@ -26,7 +26,7 @@
 .composer .chip > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .composer .line { display: flex; gap: var(--s2); align-items: flex-end; }
 .composer textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; font-size: var(--t-md); padding: var(--s2) 0; background: transparent; min-height: 40px; max-height: 160px; field-sizing: content; }
-.composer .send { background: var(--workgroup); border-color: var(--workgroup); }
+.composer .send { background: var(--workgroup-ink); border-color: var(--workgroup-ink); }
 .composer:has(textarea:placeholder-shown) .send { background: var(--soft); border-color: var(--line); color: var(--muted); }
 
 /* How a definition changed. */

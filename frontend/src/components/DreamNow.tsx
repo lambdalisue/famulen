@@ -1,4 +1,4 @@
-import { A, createAsync, revalidate } from "@solidjs/router";
+import { createAsync, revalidate } from "@solidjs/router";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -50,21 +50,19 @@ export default function DreamNow(props: { linkWhy?: boolean }) {
   return (
     <span class="row dream-now">
       <Show when={running()}>
-        <Tag role="status">
-          いま見ている…
-        </Tag>
+        <Tag role="status">いま見ている…</Tag>
       </Show>
       <Show when={!running() && dreams()?.blocked}>
         {(why) => (
           <Show when={props.linkWhy} fallback={<Tag tone="warn">{why()}</Tag>}>
-            <A class="tag warn" href="/settings/roles/dream">
+            <a class="tag warn" href="/settings/roles/dream">
               {why()}
-            </A>
+            </a>
           </Show>
         )}
       </Show>
       <Button icon={icons.refresh} disabled={running() || !!dreams()?.blocked} onClick={dreamNow}>
-今すぐ夢を見る
+        今すぐ夢を見る
       </Button>
     </span>
   );

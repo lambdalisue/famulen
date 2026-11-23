@@ -23,7 +23,7 @@ export default function LinkTextarea(props: { label: string; value: string; onIn
     <>
       <div class="row">
         <Button small icon={icons.plus} onClick={() => start(box.selectionStart, box.selectionEnd)}>
-記録へのリンク
+          記録へのリンク
         </Button>
         <span class="sub">[[ でも選べる</span>
       </div>

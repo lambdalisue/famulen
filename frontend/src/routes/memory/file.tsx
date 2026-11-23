@@ -1,15 +1,15 @@
-import { dateTimeText } from "~/lib/dates";
-import { A, createAsync, useSearchParams } from "@solidjs/router";
-import { createEffect, For, Match, Show, Switch } from "solid-js";
+import { createAsync, useBeforeLeave } from "@solidjs/router";
+import { createEffect, createSignal, For, Match, on, Show, Switch } from "solid-js";
 import Markdown from "~/components/Markdown";
+import { Button, Callout, confirmed, EmptyState, List, ListRow, Loading, PageHeader, SegmentedLinks, Tag, TextArea } from "~/components/ui";
+import type { FileContent } from "~/gen/famulen/v1/memory_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { createDraft } from "~/lib/draft";
-import { memoryFileQuery } from "~/lib/memory";
+import { dateTimeText } from "~/lib/dates";
+import { layerHref, layerOfFile, memoryFileQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
-import { oneParam } from "~/lib/params";
+import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
-import { EmptyState, List, TextArea } from "~/components/ui";
 
 const MODES: [string, string][] = [
   ["read", "読む"],
@@ -17,81 +17,119 @@ const MODES: [string, string][] = [
   ["history", "経緯"],
 ];
 
-/** A file as it is being written: what is typed stays when the page's data loads again. */
-function Writing(props: { path: string; text: string; onSave: (text: string) => void }) {
-  const [draft, setDraft] = createDraft(() => props.text);
+/** The file's text, saved with a button and kept in its history as the owner's change. */
+function Write(props: { path: string; file: FileContent }) {
+  const [from, setFrom] = createSignal(props.file.text);
+  const [text, setText] = createSignal(from());
+  const dirty = () => text() !== from();
+  /** The file was written elsewhere after this was begun. */
+  const moved = () => dirty() && props.file.text !== from();
+  const take = () => {
+    setFrom(props.file.text);
+    setText(props.file.text);
+  };
+  createEffect(
+    on(
+      () => props.file.text,
+      () => !dirty() && take(),
+      { defer: true },
+    ),
+  );
+  const save = () =>
+    act(async () => {
+      const sent = text();
+      const file = await api.memory.writeFile({ path: props.path, text: sent.replace(/\r\n/g, "\n") });
+      // What is kept may not be what was sent: links are written out in full.
+      setFrom(file.text);
+      if (text() === sent) setText(file.text);
+    }, "保存した");
+  useBeforeLeave((e) => {
+    if (!dirty() || e.defaultPrevented) return;
+    e.preventDefault();
+    void confirmed("書きかけを捨てる", "捨てる", `${props.path} に書いたものは、まだ保存していない。`).then((yes) => yes && e.retry(true));
+  });
   return (
-    <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-      <label for="mem-edit" class="sr">
-        {props.path} を書く
-      </label>
+    <>
+      <Show when={moved()}>
+        <Callout
+          tone="warn"
+          live
+          action={
+            <Button small onClick={take}>
+              書きかけを捨てて読み直す
+            </Button>
+          }
+        >
+          書いているあいだに、このファイルがほかで直された。保存すると、その直しの上に書く。
+        </Callout>
+      </Show>
       <TextArea
-        id="mem-edit"
-        class="mono"
-        style={{ "min-height": "420px", "font-size": "13px", "line-height": 1.8 }}
-        value={draft()}
-        onInput={(e) => setDraft(e.currentTarget.value)}
-        onChange={(e) => props.onSave(e.currentTarget.value)}
+        class="mono memory-text"
+        aria-label={`${props.path} を書く`}
+        value={text()}
+        onInput={(e) => setText(e.currentTarget.value)}
       />
-      <span class="sub">書き終えて離れると保存し、あなたが直したこととして経緯に残る</span>
-    </div>
+      <div class="row">
+        <span class="sub grow">保存すると、あなたが直したこととして経緯に残る。</span>
+        <Button variant="primary" disabled={!dirty()} onClick={() => void save()}>
+          保存
+        </Button>
+      </div>
+    </>
   );
 }
 
 export default function MemoryFile() {
-  const [params] = useSearchParams();
-  const path = () => oneParam(params.path);
-  const mode = () => oneParam(params.mode) || "read";
+  const path = useParam("path");
+  const asked = useParam("mode");
+  const mode = () => asked() || "read";
   const file = createAsync(async () => (path() ? memoryFileQuery(path()) : undefined));
   const owner = useOwner();
-  const aide = owner.aide;
-  const tz = owner.tz;
   createEffect(() => setView("記憶", path()));
-
-  const save = async (text: string) => {
-    const content = text.replace(/\r\n/g, "\n");
-    if (content === file()?.text) return;
-    await act(() => api.memory.writeFile({ path: path(), text: content }), "保存した");
-  };
 
   return (
     <Show when={path()} fallback={<EmptyState>ファイルを選んでいない</EmptyState>}>
-      <div class="row">
-        <span class="mono sub">{path()}</span>
-        <div class="seg" style={{ "margin-left": "auto" }}>
-          <For each={MODES}>
-            {([m, l]) => (
-              <A
-                class={m === mode() ? "on" : ""}
-                href={`/memory/file?path=${encodeURIComponent(path())}&mode=${m}`}
-              >
-                {l}
-              </A>
-            )}
-          </For>
-        </div>
-      </div>
-      <Show when={file()}>
+      <PageHeader
+        back={{ href: layerHref(layerOfFile(path())), label: "層へ戻る" }}
+        title={<span class="mono memory-path">{path()}</span>}
+        actions={
+          <SegmentedLinks
+            label="見方"
+            items={MODES.map(([m, text]) => [withParams("/memory/file", { path: path(), mode: m }), text, m === mode()])}
+          />
+        }
+      />
+      <Show when={file()} fallback={<Loading />}>
         {(f) => (
-          <Switch fallback={<div class="card"><Markdown text={f().text} attributes /></div>}>
+          <Switch
+            fallback={
+              <div class="card">
+                <div class="rec-prose">
+                  <Markdown text={f().text} attributes />
+                </div>
+              </div>
+            }
+          >
             <Match when={mode() === "write"}>
-              <Writing path={path()} text={f().text} onSave={(text) => void save(text)} />
+              <Show when={f().path} keyed>
+                {(written) => <Write path={written} file={f()} />}
+              </Show>
             </Match>
             <Match when={mode() === "history"}>
               <List>
                 <For each={f().history} fallback={<EmptyState>まだ経緯はない</EmptyState>}>
                   {(c) => {
-                    const mine = c.author === "Famulen";
+                    const aides = c.author === "Famulen";
                     return (
-                      <div role="listitem" class="item">
-                        <span class="mono sub" style={{ width: "120px" }}>
-                          {dateTimeText(c.at, tz())}
-                        </span>
-                        <span class={`tag ${mine ? "aide" : "said"}`}>{mine ? aide() : "あなた"}</span>
-                        <span class="grow" style={{ "font-size": "13px", "white-space": "pre-wrap" }}>
-                          {c.message}
-                        </span>
-                      </div>
+                      <ListRow
+                        title={<span class="memory-change">{c.message}</span>}
+                        sub={
+                          <>
+                            <Tag tone={aides ? "aide" : "said"}>{aides ? owner.aide() : "あなた"}</Tag>
+                            <span>{dateTimeText(c.at, owner.tz())}</span>
+                          </>
+                        }
+                      />
                     );
                   }}
                 </For>

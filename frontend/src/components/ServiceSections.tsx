@@ -1,5 +1,5 @@
 import { clock } from "~/lib/dates";
-import { A, createAsync, query } from "@solidjs/router";
+import { createAsync, query } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
 import LookoutEdit from "~/components/LookoutEdit";
 import LookoutInterval from "~/components/LookoutInterval";
@@ -9,7 +9,21 @@ import { api } from "~/lib/api";
 import { calendarsQuery } from "~/lib/calendar";
 import { channelsQuery, workspacesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
-import { Button, IconButton, Keyed, List, ListRow, Section, Select, Switch, Tag, TextField, whenConfirmed } from "~/components/ui";
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Keyed,
+  List,
+  ListRow,
+  Section,
+  Select,
+  Switch,
+  Tag,
+  TextField,
+  whenConfirmed,
+} from "~/components/ui";
+import { COLORS } from "~/lib/workgroup";
 
 const lookoutQuery = query(() => api.lookout.getLookout({}), "lookout");
 
@@ -39,10 +53,7 @@ export function MainWorkspace(props: { connection: string }) {
   return (
     <Show when={w()}>
       {(ws) => (
-        <Show
-          when={!ws().main}
-          fallback={<Tag tone="aide">確認を受けるところ</Tag>}
-        >
+        <Show when={!ws().main} fallback={<Tag tone="aide">確認を受けるところ</Tag>}>
           <Button small onClick={() => act(() => api.channels.setMainWorkspace({ id: ws().id }), "確認をここで受ける")}>
             確認をここで受ける
           </Button>
@@ -63,7 +74,7 @@ export function ChannelsSection(props: { connection: string }) {
         note={
           <>
             ここで秘書に話しかけられる。切ると、ここからの話しかけを受けなくなる。つながりは残るので、道具と見張りには使える。
-            <A href="/settings/channels">チャネルの一覧</A>
+            <a href="/settings/channels">チャネルの一覧</a>
           </>
         }
       >
@@ -79,15 +90,6 @@ export function ChannelsSection(props: { connection: string }) {
     </Show>
   );
 }
-
-/** The colors a calendar can take, as the workgroups use them. */
-const COLORS: [string, string][] = [
-  ["青", "#2a78d6"],
-  ["橙", "#E0622F"],
-  ["青緑", "#0F6E68"],
-  ["紫", "#6250d6"],
-  ["緑", "#008300"],
-];
 
 /** A Google account's calendars: added, removed and read again here. */
 export function CalendarsSection(props: { connection: string; account: string; timezone: string }) {
@@ -115,10 +117,14 @@ export function CalendarsSection(props: { connection: string; account: string; t
       title="カレンダー"
       note="このアカウントのカレンダーを足すと、そのまま読める。Google 以外のカレンダーや祝日の一覧は、Google カレンダーで購読してから足す。ワークグループごとの見え方は、ワークグループの頁で決める。"
       action={
-        <IconButton icon={icons.refresh} label="カレンダーを読み直す" onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")} />
+        <IconButton
+          icon={icons.refresh}
+          label="カレンダーを読み直す"
+          onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")}
+        />
       }
     >
-      <Show when={mine().length > 0} fallback={<p class="sub">まだない。メインのカレンダーは、ID を空のまま足す。</p>}>
+      <Show when={mine().length > 0} fallback={<EmptyState>まだない。メインのカレンダーは、ID を空のまま足す</EmptyState>}>
         <List>
           <For each={mine()}>
             {(c) => (
@@ -128,7 +134,10 @@ export function CalendarsSection(props: { connection: string; account: string; t
                 sub={
                   <>
                     <span class="mono">{c.googleCalendar === "primary" ? "メインのカレンダー" : c.googleCalendar}</span>
-                    <Show when={c.error} fallback={<span>{c.fetchedAt > 0n ? `${clock(c.fetchedAt, props.timezone)} に読んだ` : "まだ読んでいない"}</span>}>
+                    <Show
+                      when={c.error}
+                      fallback={<span>{c.fetchedAt > 0n ? `${clock(c.fetchedAt, props.timezone)} に読んだ` : "まだ読んでいない"}</span>}
+                    >
                       <Tag tone="warn">読めない</Tag>
                       <span>{c.error}</span>
                     </Show>
@@ -139,7 +148,14 @@ export function CalendarsSection(props: { connection: string; account: string; t
                     variant="danger"
                     icon={icons.trash}
                     label={`${c.name}を外す`}
-                    onClick={() => void whenConfirmed(`カレンダー「${c.name}」を外す`, "外す", () => act(() => api.calendar.removeCalendar({ id: c.id }), "外した"), "Google のカレンダーはそのまま残る。")}
+                    onClick={() =>
+                      void whenConfirmed(
+                        `カレンダー「${c.name}」を外す`,
+                        "外す",
+                        () => act(() => api.calendar.removeCalendar({ id: c.id }), "外した"),
+                        "Google のカレンダーはそのまま残る。",
+                      )
+                    }
                   />
                 }
               />
@@ -149,11 +165,18 @@ export function CalendarsSection(props: { connection: string; account: string; t
       </Show>
       <form class="row" onSubmit={add}>
         <TextField name="name" required value={props.account} aria-label="カレンダーの名前" />
-        <TextField class="grow mono" name="calendar_id" placeholder="カレンダー ID（空ならメインのカレンダー）" aria-label="カレンダー ID" />
+        <TextField
+          class="grow mono"
+          name="calendar_id"
+          placeholder="カレンダー ID（空ならメインのカレンダー）"
+          aria-label="カレンダー ID"
+        />
         <Select name="color" aria-label="色">
           <For each={COLORS}>{([l, c]) => <option value={c}>{l}</option>}</For>
         </Select>
-        <Button variant="primary" type="submit">足す</Button>
+        <Button variant="primary" type="submit">
+          足す
+        </Button>
       </form>
     </Section>
   );
@@ -162,32 +185,36 @@ export function CalendarsSection(props: { connection: string; account: string; t
 /** What the lookout reads from one connection, each turned on or off with how often it looks. */
 export function LookoutSection(props: { connection: string }) {
   const w = createAsync(() => lookoutQuery());
-  const mine = () =>
-    (w()?.sources ?? []).filter(
-      (s) => s.connection === props.connection || s.connection === `slack:${props.connection}`,
-    );
+  const mine = () => (w()?.sources ?? []).filter((s) => s.connection === props.connection || s.connection === `slack:${props.connection}`);
   return (
     <Section
       title="見張り"
       note={
         <>
           このアカウントに届くもの（受信箱やメンションなど）を見張るか、どれほどの間隔でまとめて見るか。間隔は既定に従うか、この見張りだけ上書きする。既定の間隔と何を拾うかは
-          <A href="/settings/lookout">見張りの頁</A>で決める。
+          <a href="/settings/lookout">見張りの頁</a>で決める。
         </>
       }
     >
-      <Show when={mine().length > 0} fallback={<p class="sub">このアカウントを見張るものはまだない。</p>}>
+      <Show when={mine().length > 0} fallback={<EmptyState>このアカウントを見張るものはまだない</EmptyState>}>
         <Keyed each={mine()} by={(s) => s.id}>
           {(s) => (
             <div class="row">
               <Switch
                 class="wg-switch grow"
                 checked={s().enabled}
-                onChange={(enabled) => void act(() => api.lookout.setLookoutEnabled({ id: s().id, enabled }), enabled ? "見張りを始めた" : "止めた")}
+                onChange={(enabled) =>
+                  void act(() => api.lookout.setLookoutEnabled({ id: s().id, enabled }), enabled ? "見張りを始めた" : "止めた")
+                }
               >
                 {s().name}
               </Switch>
-              <LookoutInterval source={s()} defaults={w()?.defaults ?? []} place="connection" label={`${s().name}をまとめて見る間隔（分）`} />
+              <LookoutInterval
+                source={s()}
+                defaults={w()?.defaults ?? []}
+                place="connection"
+                label={`${s().name}をまとめて見る間隔（分）`}
+              />
               <LookoutEdit source={s()} defaults={w()?.defaults ?? []} sources={w()?.sources ?? []} />
             </div>
           )}

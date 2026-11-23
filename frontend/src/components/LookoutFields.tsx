@@ -57,8 +57,16 @@ export const ROUTES: [LookoutRoute, string, string][] = [
 export function RouteField(props: { route: LookoutRoute; setRoute: (route: LookoutRoute) => void }) {
   const own = () => props.route !== LookoutRoute.UNSPECIFIED;
   return (
-    <Field label="どこへ" hint={<>{ROUTES.find(([r]) => r === props.route)?.[2] ?? "急ぎと中身を見て、秘書か朝のまとめかをそのつど決める。"}
-        {own() ? "関わるかどうかは、これまでどおり見張りが決める。" : ""}</>} group>
+    <Field
+      label="どこへ"
+      hint={
+        <>
+          {ROUTES.find(([r]) => r === props.route)?.[2] ?? "急ぎと中身を見て、秘書か朝のまとめかをそのつど決める。"}
+          {own() ? "関わるかどうかは、これまでどおり見張りが決める。" : ""}
+        </>
+      }
+      group
+    >
       <div class="lookout-interval-wrap">
         <Segmented
           label="どこへの決め方"
@@ -124,11 +132,13 @@ export function PlacesField(props: {
           <For each={listed()}>
             {(p) => (
               <Checkbox
-                  checked={on(p.id)}
-                  onChange={(e) =>
-                    props.setPlaces(e.currentTarget.checked ? [...props.places, p] : props.places.filter((q) => q.id !== p.id))
-                  }
-                >{p.name}</Checkbox>
+                checked={on(p.id)}
+                onChange={(e) =>
+                  props.setPlaces(e.currentTarget.checked ? [...props.places, p] : props.places.filter((q) => q.id !== p.id))
+                }
+              >
+                {p.name}
+              </Checkbox>
             )}
           </For>
         </div>

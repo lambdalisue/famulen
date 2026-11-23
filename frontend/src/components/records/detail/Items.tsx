@@ -11,7 +11,13 @@ const textField = (name: string, text: string): FieldLike => ({ name, value: tex
 /** A field the section does not name, kept as it was written. */
 const written = (name: string): FieldSpec => ({ name, type: "text", choices: [], of: "" });
 
-function Item(props: { type: SectionType; item: ItemLike; aide: string; onChange: (f: (i: ItemLike) => ItemLike) => void; onRemove: () => void }) {
+function Item(props: {
+  type: SectionType;
+  item: ItemLike;
+  aide: string;
+  onChange: (f: (i: ItemLike) => ItemLike) => void;
+  onRemove: () => void;
+}) {
   const [editing, setEditing] = createSignal(false);
   const first = () => props.type.fields[0];
   const rest = () => props.type.fields.slice(1);
@@ -115,7 +121,9 @@ function NewItem(props: { type: SectionType; onAdd: (i: ItemLike) => void }) {
   return (
     <Show
       when={first().type !== "link"}
-      fallback={<FieldEdit type={first()} label={nameOf(props.type.name)} field={undefined} onSave={(v) => add(v.value || v.values[0] || "")} />}
+      fallback={
+        <FieldEdit type={first()} label={nameOf(props.type.name)} field={undefined} onSave={(v) => add(v.value || v.values[0] || "")} />
+      }
     >
       <form
         class="rec-new"
@@ -129,7 +137,14 @@ function NewItem(props: { type: SectionType; onAdd: (i: ItemLike) => void }) {
       >
         <TextField class="grow" placeholder={label()} aria-label={label()} />
         <Show when={NAMES[first().name]}>
-          {(n) => <FieldEdit type={{ name: first().name, choices: [], type: "link", of: n().of }} label={n().label} field={undefined} onSave={(v) => add(v.value)} />}
+          {(n) => (
+            <FieldEdit
+              type={{ name: first().name, choices: [], type: "link", of: n().of }}
+              label={n().label}
+              field={undefined}
+              onSave={(v) => add(v.value)}
+            />
+          )}
         </Show>
         <Show when={READY[props.type.name]}>
           {(r) => (
@@ -147,7 +162,12 @@ function NewItem(props: { type: SectionType; onAdd: (i: ItemLike) => void }) {
 }
 
 /** A section of items: each a card with its own fields. */
-export default function Items(props: { type: SectionType; items: ItemLike[]; aide: string; onSave: (change: (items: ItemLike[]) => ItemLike[]) => void }) {
+export default function Items(props: {
+  type: SectionType;
+  items: ItemLike[];
+  aide: string;
+  onSave: (change: (items: ItemLike[]) => ItemLike[]) => void;
+}) {
   return (
     <div class="rec-items">
       <Index each={props.items}>

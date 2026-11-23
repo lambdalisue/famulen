@@ -28,16 +28,23 @@ function Choices(props: { kinds?: string[]; onPick: (r: Rec) => void }) {
   let list: HTMLUListElement | undefined;
   return (
     <div class="service-add">
-      <SearchBox label="探す" placeholder="題名や中身の言葉" autofocus value={words()} onInput={(e) => setWords(e.currentTarget.value)} onKeyDown={(e) => {
-            if (e.isComposing) return;
-            if (e.key === "ArrowDown") move(at() + 1);
-            else if (e.key === "ArrowUp") move(at() - 1);
-            else if (e.key === "Enter") {
-              const r = found()[at()];
-              if (r) props.onPick(r);
-            } else return;
-            e.preventDefault();
-          }} />
+      <SearchBox
+        label="探す"
+        placeholder="題名や中身の言葉"
+        autofocus
+        value={words()}
+        onInput={(e) => setWords(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.isComposing) return;
+          if (e.key === "ArrowDown") move(at() + 1);
+          else if (e.key === "ArrowUp") move(at() - 1);
+          else if (e.key === "Enter") {
+            const r = found()[at()];
+            if (r) props.onPick(r);
+          } else return;
+          e.preventDefault();
+        }}
+      />
       <ul class="pick-list" ref={list}>
         <For each={found()} fallback={<li class="empty">見つからない</li>}>
           {(r, n) => (
@@ -87,7 +94,7 @@ export default function RecordPicker(props: { label: string; kinds?: string[]; o
   return (
     <>
       <Button small icon={icons.plus} onClick={() => setOpen(true)}>
-{props.label}
+        {props.label}
       </Button>
       <PickDialog label={props.label} kinds={props.kinds} open={open()} onOpenChange={setOpen} onPick={props.onPick} />
     </>

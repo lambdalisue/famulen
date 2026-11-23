@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { Show } from "solid-js";
 import { hrefOf, linkOf } from "~/lib/records";
 import { useKnownLink } from "./known";
@@ -18,12 +17,12 @@ export default function RecordChip(props: { text: string }) {
         const now = () => known(l().kind, l().id);
         const title = () => now()?.title || l().title || l().id;
         return (
-          <Show when={!now()?.missing} fallback={<span class="tag missing">{title()}（もうない）</span>}>
+          <Show when={!now()?.missing} fallback={<Tag class="missing">{title()}（もうない）</Tag>}>
             <Show when={hrefOf(l().kind, l().id)} fallback={<Tag>{title()}</Tag>}>
               {(href) => (
-                <A class="tag link" href={href()}>
+                <a class="tag link" href={href()}>
                   {title()}
-                </A>
+                </a>
               )}
             </Show>
           </Show>

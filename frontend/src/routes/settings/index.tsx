@@ -1,4 +1,4 @@
-import { A, createAsync, revalidate } from "@solidjs/router";
+import { createAsync, revalidate } from "@solidjs/router";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import FolderPicker from "~/components/FolderPicker";
 import NotebookCheck from "~/components/NotebookCheck";
@@ -13,7 +13,7 @@ import { coveringPlace, isUnder, wholePath } from "~/lib/places";
 import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
-import { Button, Callout, Icon, LinkButton, PageHeader, RadioCards, Section, Tag, TextArea, TextField } from "~/components/ui";
+import { Button, Callout, EmptyState, Icon, LinkButton, PageHeader, RadioCards, Section, Tag, TextArea, TextField } from "~/components/ui";
 
 /** Ways of speaking the owner picks from; the text is what the secretary is told. */
 const TONES = [
@@ -27,8 +27,7 @@ const OWN = "own";
 
 const toneOf = (text: string) => TONES.find((t) => t.text === text.trim())?.id ?? (text.trim() ? OWN : "");
 
-const save = (change: Parameters<typeof api.settings.updatePersona>[0]) =>
-  act(() => api.settings.updatePersona(change));
+const save = (change: Parameters<typeof api.settings.updatePersona>[0]) => act(() => api.settings.updatePersona(change));
 
 function NameSection(props: { name: string }) {
   const slack = createAsync(() => slackNamesQuery());
@@ -43,7 +42,15 @@ function NameSection(props: { name: string }) {
   };
   return (
     <Section title="秘書の名前" note="Famulen はこの仕組みの名前で、秘書にはあなたが名前を付ける。">
-      <TextField class="pref-name" id="p-name" name="name" aria-label="秘書の名前" value={props.name} required onChange={(e) => saveName(e.currentTarget)} />
+      <TextField
+        class="pref-name"
+        id="p-name"
+        name="name"
+        aria-label="秘書の名前"
+        value={props.name}
+        required
+        onChange={(e) => saveName(e.currentTarget)}
+      />
       <ul class="pref-uses sub">
         <li>コンソールの見出しと、会話での呼び名</li>
         <li>秘書の自己紹介。秘書を起動するときの前置きで、この名前を名乗るよう伝える</li>
@@ -52,14 +59,13 @@ function NameSection(props: { name: string }) {
       <div class="pref-sub">
         <h3>外のツールでの名前</h3>
         <p class="sub">
-          Slack では、アプリの設定にある表示名で出て、メンション名（@ のあと）で呼ばれる。どちらも Slack
-          で決まり、ここからは変えられない。
+          Slack では、アプリの設定にある表示名で出て、メンション名（@ のあと）で呼ばれる。どちらも Slack で決まり、ここからは変えられない。
         </p>
         <Show
           when={(slack() ?? []).length > 0}
           fallback={
             <p class="sub">
-              Slack のワークスペースを足すと、そこでの名前がここに出る（<A href="/settings/channels">チャネル</A>）。
+              Slack のワークスペースを足すと、そこでの名前がここに出る（<a href="/settings/channels">チャネル</a>）。
             </p>
           }
         >
@@ -99,7 +105,10 @@ function ToneSection(props: { tone: string; own: string }) {
   createEffect(() => setChosen(toneOf(props.tone)));
   let own: HTMLTextAreaElement | undefined;
   return (
-    <Section title="話し方" note="秘書があなたに話すときの口調。秘書を起動するときの前置きに入れる。細かい好みは、話すうちに記憶の心得に入る。">
+    <Section
+      title="話し方"
+      note="秘書があなたに話すときの口調。秘書を起動するときの前置きに入れる。細かい好みは、話すうちに記憶の心得に入る。"
+    >
       <RadioCards
         label="話し方"
         items={[...TONES, { id: OWN, label: "自分で書く", text: "" }].map((t) => ({
@@ -119,13 +128,29 @@ function ToneSection(props: { tone: string; own: string }) {
         }}
       />
       <Show when={chosen() === OWN}>
-        <div class="own">
-          <TextArea ref={own} id="p-tone" name="tone" rows="4" aria-label="話し方を自分で書く" placeholder="丁寧語で、短く。結論から話す。" value={ownText()} onChange={(e) => {
-              const text = e.currentTarget.value.trim();
-              void save({ tone: text, ownTone: text });
-            }} />
-          <span class="sub">この文がそのまま秘書に伝わる。ほかの話し方を選んでも、この文は残る。</span>
-        </div>
+        <form
+          class="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const text = own?.value.trim() ?? "";
+            void save({ tone: text, ownTone: text });
+          }}
+        >
+          <TextArea
+            ref={own}
+            name="tone"
+            rows="4"
+            aria-label="話し方を自分で書く"
+            placeholder="丁寧語で、短く。結論から話す。"
+            value={ownText()}
+          />
+          <div class="row">
+            <span class="sub grow">この文がそのまま秘書に伝わる。ほかの話し方を選んでも、この文は残る。</span>
+            <Button type="submit" variant="primary">
+              保存
+            </Button>
+          </div>
+        </form>
       </Show>
     </Section>
   );
@@ -195,16 +220,30 @@ function WritableSection() {
     setFound(result.paths);
   };
   return (
-    <Section title="秘書が書ける場所" note={<>秘書はあなたの Claude Code のスキルを使える。ただしスキルに書かれた道具の許しは受け継がず、道具はいつもの確かめ方で裁かれる。秘書のシェルのコマンドが書けるのは作業の場所と手帳だけなので、スキルがその外に書くときは、その場所をここに足す。読むほうは変わらない。金庫やゲートウェイの置き場所と
-          .env は、ここに足しても読み書きできない。変えたことは、秘書が今の仕事を終えてから効く。</>}>
-      <Show when={(places() ?? []).length > 0} fallback={<p class="sub">まだない。</p>}>
+    <Section
+      title="秘書が書ける場所"
+      note={
+        <>
+          秘書はあなたの Claude Code
+          のスキルを使える。ただしスキルに書かれた道具の許しは受け継がず、道具はいつもの確かめ方で裁かれる。秘書のシェルのコマンドが書けるのは作業の場所と手帳だけなので、スキルがその外に書くときは、その場所をここに足す。読むほうは変わらない。金庫やゲートウェイの置き場所と
+          .env は、ここに足しても読み書きできない。変えたことは、秘書が今の仕事を終えてから効く。
+        </>
+      }
+    >
+      <Show when={(places() ?? []).length > 0} fallback={<EmptyState>まだない</EmptyState>}>
         <ul class="places" aria-label="秘書が書ける場所">
           <For each={places()}>
             {(p) => (
               <li>
                 <span class="mono">{p}</span>
-                <Button variant="danger" small icon={x} aria-label={`${p} を外す`} onClick={() => void act(() => api.settings.removeWritablePlace({ path: p }), "外した")}>
-外す
+                <Button
+                  variant="danger"
+                  small
+                  icon={x}
+                  aria-label={`${p} を外す`}
+                  onClick={() => void act(() => api.settings.removeWritablePlace({ path: p }), "外した")}
+                >
+                  外す
                 </Button>
               </li>
             )}
@@ -227,10 +266,18 @@ function WritableSection() {
         onDrop={(e) => void drop(e)}
       >
         <div class="place-row">
-          <TextField class="mono" name="path" aria-label="書ける場所を足す" placeholder="/ か ~/ から書く" required value={path()} onInput={(e) => setPath(e.currentTarget.value)} />
+          <TextField
+            class="mono"
+            name="path"
+            aria-label="書ける場所を足す"
+            placeholder="/ か ~/ から書く"
+            required
+            value={path()}
+            onInput={(e) => setPath(e.currentTarget.value)}
+          />
           <FolderPicker start={path} places={() => places() ?? []} onAdd={addAll} />
           <Button variant="primary" small icon={plus} type="submit" disabled={!!covering()}>
-足す
+            足す
           </Button>
         </div>
         <Show when={covering()}>
@@ -288,8 +335,16 @@ function NotebookSection() {
     if (await act(() => api.settings.moveNotebook({ path: to }), "")) setPath("");
   };
   return (
-    <Section title="手帳の場所" label="手帳の場所" note={<>記憶と、手帳に置いた記録（タスク・メモ・予定・相手・物・契約）のある場所。変えると、履歴ごと新しい場所へ移し、前の場所からは手帳のファイルだけを消す。ほかのファイルがあるフォルダも選べる。移すときは、秘書が今の仕事を終えてから
-          Famulen が起動し直す。</>}>
+    <Section
+      title="手帳の場所"
+      label="手帳の場所"
+      note={
+        <>
+          記憶と、手帳に置いた記録（タスク・メモ・予定・相手・物・契約）のある場所。変えると、履歴ごと新しい場所へ移し、前の場所からは手帳のファイルだけを消す。ほかのファイルがあるフォルダも選べる。移すときは、秘書が今の仕事を終えてから
+          Famulen が起動し直す。
+        </>
+      }
+    >
       <Show when={place()}>
         {(p) => (
           <>
@@ -331,7 +386,14 @@ function NotebookSection() {
         }}
       >
         <div class="place-row">
-          <TextField class="mono" aria-label="手帳の新しい場所" placeholder="/ か ~/ から書く" required value={path()} onInput={(e) => setPath(e.currentTarget.value)} />
+          <TextField
+            class="mono"
+            aria-label="手帳の新しい場所"
+            placeholder="/ か ~/ から書く"
+            required
+            value={path()}
+            onInput={(e) => setPath(e.currentTarget.value)}
+          />
           <Button variant="primary" small type="submit" disabled={!!moving()}>
             移す
           </Button>
@@ -346,7 +408,10 @@ export default function Secretary() {
   const owner = useOwner();
   return (
     <>
-      <PageHeader title="秘書" note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と口調、書ける場所、手帳の場所を決める。" />
+      <PageHeader
+        title="秘書"
+        note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と口調、書ける場所、手帳の場所を決める。"
+      />
       <div class="prefs">
         <RoleModel role={Role.SECRETARY} cap="上限は目安で、超えても会話は止めない。値段のあるモデルは円で、ないモデルは回数で数える。" />
         <Show when={owner.persona()}>

@@ -30,7 +30,14 @@ export default function SideSheet(props: { name: string; title: string; children
           <header class="side-sheet-head">
             <Dialog.Title class="dialog-title">{props.title}</Dialog.Title>
             <div class="side-sheet-tools">
-              <IconButton variant="ghost" class="side-sheet-reset" icon={icons.arrowAutofitWidth} label="元の幅に戻す" disabled={!size.changed()} onClick={() => size.reset()} />
+              <IconButton
+                variant="ghost"
+                class="side-sheet-reset"
+                icon={icons.arrowAutofitWidth}
+                label="元の幅に戻す"
+                disabled={!size.changed()}
+                onClick={() => size.reset()}
+              />
               <Dialog.CloseTrigger class={buttonClass({ small: true, variant: "ghost" }, "icon-btn")} aria-label="閉じる" title="閉じる">
                 <Icon svg={icons.x} size={16} />
               </Dialog.CloseTrigger>

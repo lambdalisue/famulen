@@ -22,9 +22,7 @@ export default function TriageLog() {
         <For each={pages.rows()}>
           {(d) => (
             <div role="listitem" class="item triage-log-entry">
-              <span class="mono sub when">
-                {shortTime(d.at, owner.tz())}
-              </span>
+              <span class="mono sub when">{shortTime(d.at, owner.tz())}</span>
               <Tag tone={d.addressed ? "aide" : undefined}>{d.addressed ? "秘書へ" : "見送った"}</Tag>
               <div class="grow">
                 <div>{d.title}</div>

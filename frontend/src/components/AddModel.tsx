@@ -102,7 +102,7 @@ export default function AddModel(props: { candidates: Model[] }) {
       size="wide"
       trigger={
         <DialogTrigger variant="primary" icon={icons.plus}>
-モデルの追加
+          モデルの追加
         </DialogTrigger>
       }
     >
@@ -120,7 +120,11 @@ export default function AddModel(props: { candidates: Model[] }) {
                 {(m) => (
                   <div class="model-back">
                     <span>{m.name}</span>
-                    <Button small aria-label={`${m.name}を戻す`} onClick={() => void act(() => api.models.restoreModel({ id: m.id }), "戻した")}>
+                    <Button
+                      small
+                      aria-label={`${m.name}を戻す`}
+                      onClick={() => void act(() => api.models.restoreModel({ id: m.id }), "戻した")}
+                    >
                       戻す
                     </Button>
                   </div>
@@ -212,7 +216,9 @@ function Fields(props: { way: Way; onAdded: () => void }) {
   };
 
   const Price = (p: { id: string; label: string }) => (
-    <Field label={p.label}><TextField id={`m-${p.id}`} name={p.id} inputmode="decimal" placeholder="円" /></Field>
+    <Field label={p.label}>
+      <TextField id={`m-${p.id}`} name={p.id} inputmode="decimal" placeholder="円" />
+    </Field>
   );
 
   return (
@@ -221,17 +227,23 @@ function Fields(props: { way: Way; onAdded: () => void }) {
         <Segments label="道具" items={Object.keys(CLIS)} value={cli()} onChange={setCli} />
       </Show>
       <Show when={w.presets}>
-        {(presets) => (
-          <Segments label="サービス" items={presets().map((p) => p.label)} value={preset()} onChange={pickPreset} />
-        )}
+        {(presets) => <Segments label="サービス" items={presets().map((p) => p.label)} value={preset()} onChange={pickPreset} />}
       </Show>
       <Show when={!isCli}>
         <Field label="URL">
           <div class="model-url">
-            <TextField class="mono" id="m-url" type="url" required placeholder="https://…/v1" value={url()} onInput={(e) => {
+            <TextField
+              class="mono"
+              id="m-url"
+              type="url"
+              required
+              placeholder="https://…/v1"
+              value={url()}
+              onInput={(e) => {
                 setUrl(e.currentTarget.value);
                 setOffered(undefined);
-              }} />
+              }}
+            />
             <Show when={isLocal}>
               <Button disabled={asking() || url().trim() === ""} onClick={() => void ask()}>
                 {asking() ? "探している" : "モデルを探す"}
@@ -243,22 +255,27 @@ function Fields(props: { way: Way; onAdded: () => void }) {
       <Show when={keyed}>
         <Field label="API キー" hint="金庫にしまい、ゲートウェイが呼ぶときだけ付ける。">
           <TextField id="m-key" name="api_key" type="password" autocomplete="new-password" />
-          </Field>
+        </Field>
       </Show>
-      <div class="field"><label class="field-label" for="m-model">モデル名</label>
-        <TextField class="mono" id="m-model" required={w.kind !== ModelKind.JUDGE} placeholder={isCli ? CLIS[cli()]!.hint : w.modelHint} value={model()} onInput={(e) => setModel(e.currentTarget.value)} />
+      <div class="field">
+        <label class="field-label" for="m-model">
+          モデル名
+        </label>
+        <TextField
+          class="mono"
+          id="m-model"
+          required={w.kind !== ModelKind.JUDGE}
+          placeholder={isCli ? CLIS[cli()]!.hint : w.modelHint}
+          value={model()}
+          onInput={(e) => setModel(e.currentTarget.value)}
+        />
         <Show when={isCli && CLIS[cli()]!.note}>{(note) => <span class="sub">{note()}</span>}</Show>
         <Show when={offered()}>
           {(found) => (
             <div class="model-picks" role="group" aria-label="サーバーにあるモデル">
               <For each={found()} fallback={<span class="sub">このサーバーにはモデルがない</span>}>
                 {(name) => (
-                  <button
-                    type="button"
-                    class="model-pick"
-                    aria-pressed={model() === name}
-                    onClick={() => setModel(name)}
-                  >
+                  <button type="button" class="model-pick" aria-pressed={model() === name} onClick={() => setModel(name)}>
                     {name}
                   </button>
                 )}

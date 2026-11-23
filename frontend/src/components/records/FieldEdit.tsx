@@ -2,7 +2,18 @@ import { dateText } from "~/lib/dates";
 import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
 import * as icons from "~/lib/icons";
-import { choiceOf, type FieldLike, type FieldSpec, type FieldValue, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
+import {
+  choiceOf,
+  type FieldLike,
+  type FieldSpec,
+  type FieldValue,
+  linkOf,
+  linkTo,
+  moneyText,
+  OWNER,
+  SECRETARY,
+  WORKER,
+} from "~/lib/records";
 import RecordChip from "./links/RecordChip";
 import { useOwner } from "~/lib/owner";
 import RecordPicker from "./RecordPicker";
@@ -57,7 +68,7 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: FieldVal
     <span class="chips-edit">
       <For each={props.values}>
         {(v) => (
-          <span class="tag removable">
+          <Tag class="removable">
             {v}
             <button
               type="button"
@@ -66,15 +77,22 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: FieldVal
             >
               <Icon svg={icons.x} size={12} />
             </button>
-          </span>
+          </Tag>
         )}
       </For>
-      <TextField aria-label={`${props.label}に足す`} placeholder="足す" value={text()} onInput={(e) => setText(e.currentTarget.value)} onKeyDown={(e) => {
+      <TextField
+        aria-label={`${props.label}に足す`}
+        placeholder="足す"
+        value={text()}
+        onInput={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
           if (e.key === "Enter" && !e.isComposing) {
             e.preventDefault();
             add();
           }
-        }} onBlur={add} />
+        }}
+        onBlur={add}
+      />
     </span>
   );
 }
@@ -86,12 +104,12 @@ function LinksEdit(props: { label: string; of: string; values: string[]; single:
     <span class="chips-edit">
       <For each={props.values}>
         {(v) => (
-          <span class="tag removable">
+          <Tag class="removable">
             <RecordChip text={v} />
             <button type="button" aria-label="外す" onClick={() => save(without(v))}>
               <Icon svg={icons.x} size={12} />
             </button>
-          </span>
+          </Tag>
         )}
       </For>
       <RecordPicker
@@ -113,7 +131,13 @@ function TimeEdit(props: { label: string; value: string; onSave: (v: FieldValue)
   return (
     <span class="row">
       <TextField type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
-      <TextField type="time" aria-label={`${props.label}の時刻`} value={time()} disabled={!day()} onChange={(e) => save(day(), e.currentTarget.value)} />
+      <TextField
+        type="time"
+        aria-label={`${props.label}の時刻`}
+        value={time()}
+        disabled={!day()}
+        onChange={(e) => save(day(), e.currentTarget.value)}
+      />
     </span>
   );
 }
@@ -124,7 +148,12 @@ function MoneyEdit(props: { label: string; value: string; onSave: (v: FieldValue
   const save = (a: string, c: string) => props.onSave(one(a.trim() ? `${a.trim()} ${c}` : ""));
   return (
     <span class="row">
-      <TextField inputmode="decimal" aria-label={`${props.label}の額`} value={amount()} onChange={(e) => save(e.currentTarget.value, currency())} />
+      <TextField
+        inputmode="decimal"
+        aria-label={`${props.label}の額`}
+        value={amount()}
+        onChange={(e) => save(e.currentTarget.value, currency())}
+      />
       <Select aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
         <For each={[...new Set(["JPY", "USD", "EUR", "GBP", currency()])]}>{(c) => <option value={c}>{c}</option>}</For>
       </Select>
@@ -133,7 +162,12 @@ function MoneyEdit(props: { label: string; value: string; onSave: (v: FieldValue
 }
 
 /** The control that changes a field, by what the field holds. */
-export default function FieldEdit(props: { type: FieldSpec; label: string; field: FieldLike | undefined; onSave: (v: FieldValue) => void }) {
+export default function FieldEdit(props: {
+  type: FieldSpec;
+  label: string;
+  field: FieldLike | undefined;
+  onSave: (v: FieldValue) => void;
+}) {
   const owner = useOwner();
   const value = () => props.field?.value ?? "";
   const values = () => props.field?.values ?? [];
@@ -145,10 +179,17 @@ export default function FieldEdit(props: { type: FieldSpec; label: string; field
   return (
     <Cases
       fallback={
-        <TextField class="grow" ref={box} aria-label={props.label} type={t() === "number" ? "number" : t() === "date" ? "date" : "text"} value={t() === "url" ? value().replace(/^<|>$/g, "") : value()} onChange={(e) => {
+        <TextField
+          class="grow"
+          ref={box}
+          aria-label={props.label}
+          type={t() === "number" ? "number" : t() === "date" ? "date" : "text"}
+          value={t() === "url" ? value().replace(/^<|>$/g, "") : value()}
+          onChange={(e) => {
             const v = e.currentTarget.value.trim();
             if (v !== value()) props.onSave(one(v));
-          }} />
+          }}
+        />
       }
     >
       <Match when={t() === "choice"}>
@@ -164,9 +205,13 @@ export default function FieldEdit(props: { type: FieldSpec; label: string; field
       </Match>
       <Match when={props.type.name === "Assignee"}>
         <span class="row">
-          <Select aria-label={props.label} value={linkOf(value()) ? "other" : value() || OWNER} onChange={(e) => {
+          <Select
+            aria-label={props.label}
+            value={linkOf(value()) ? "other" : value() || OWNER}
+            onChange={(e) => {
               if (e.currentTarget.value !== "other") props.onSave(one(e.currentTarget.value));
-            }}>
+            }}
+          >
             <option value={OWNER}>あなた</option>
             <option value={SECRETARY}>{owner.aide()}</option>
             <option value={WORKER}>{choiceOf(WORKER)}</option>

@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { type ComponentProps, type JSX, Show, splitProps } from "solid-js";
 import { chevronLeft } from "~/lib/icons";
 import Icon from "./Icon";
@@ -25,13 +24,26 @@ export function Button(props: ComponentProps<"button"> & Look) {
 }
 
 /** A button of an icon alone; its label is what it is called and what the pointer shows. */
-export function IconButton(props: Omit<ComponentProps<"button">, "aria-label" | "title"> & { icon: string; label: string; title?: string; variant?: ButtonVariant; plain?: boolean; size?: number }) {
+export function IconButton(
+  props: Omit<ComponentProps<"button">, "aria-label" | "title"> & {
+    icon: string;
+    label: string;
+    title?: string;
+    variant?: ButtonVariant;
+    plain?: boolean;
+    size?: number;
+  },
+) {
   const [own, rest] = splitProps(props, ["icon", "label", "title", "variant", "plain", "size", "class", "type"]);
   return (
     <button
       {...rest}
       type={own.type ?? "button"}
-      class={own.plain ? `icon-plain ${own.variant ?? ""} ${own.class ?? ""}` : buttonClass({ small: true, variant: own.variant }, `icon-btn ${own.class ?? ""}`)}
+      class={
+        own.plain
+          ? `icon-plain ${own.variant ?? ""} ${own.class ?? ""}`
+          : buttonClass({ small: true, variant: own.variant }, `icon-btn ${own.class ?? ""}`)
+      }
       aria-label={own.label}
       title={own.title ?? own.label}
     >
@@ -62,8 +74,8 @@ export function LinkButton(props: ComponentProps<"a"> & Look & { href: string; l
 /** The way back from a page to the list it is in. */
 export function BackLink(props: { href: string; label: string }) {
   return (
-    <A class={buttonClass({ small: true }, "icon-btn")} href={props.href} aria-label={props.label} title={props.label}>
+    <a class={buttonClass({ small: true }, "icon-btn back-link")} href={props.href} aria-label={props.label} title={props.label}>
       <Icon svg={chevronLeft} size={16} />
-    </A>
+    </a>
   );
 }

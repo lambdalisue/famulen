@@ -33,9 +33,7 @@ export default function PermissionSeg(props: {
         ]}
         value={own() ? "own" : "default"}
         onChoose={(way) =>
-          way === "own"
-            ? props.onChoose(props.inherited, "既定を上書きした")
-            : props.onChoose(Permission.UNSPECIFIED, "既定に戻した")
+          way === "own" ? props.onChoose(props.inherited, "既定を上書きした") : props.onChoose(Permission.UNSPECIFIED, "既定に戻した")
         }
       />
       <Show when={own()}>

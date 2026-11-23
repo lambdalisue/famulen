@@ -5,7 +5,7 @@ import { api } from "~/lib/api";
 import { calendarsQuery } from "~/lib/calendar";
 import { linkTo, newWorkgroups } from "~/lib/records";
 import { workgroup } from "~/lib/workgroup";
-import { Dialog, DialogActions, Field, Segmented, Select, TextArea, TextField } from "~/components/ui";
+import { Checkbox, Dialog, DialogActions, Field, Segmented, Select, TextArea, TextField } from "~/components/ui";
 
 /** Add an event of the notebook, or hold a time. */
 export default function AddEvent(props: { day: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -28,13 +28,25 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
       { name: "Calendar", value: calendar ? linkTo({ kind: "calendars", id: calendar.id, title: calendar.name }) : "" },
     ].filter((x) => x.value);
     const made = await act(
-      () => api.records.saveRecord({ kind: "events", title: text("title"), notes: text("notes"), workgroups: newWorkgroups(workgroup()), fields }),
+      () =>
+        api.records.saveRecord({
+          kind: "events",
+          title: text("title"),
+          notes: text("notes"),
+          workgroups: newWorkgroups(workgroup()),
+          fields,
+        }),
       kind() === "hold" ? "仮押さえした" : "足した",
     );
     if (made) props.onOpenChange(false);
   };
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange} title="予定を足す" description="手帳に置く予定。Google のカレンダーに入れるときは、会話で頼む。">
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title="予定を足す"
+      description="手帳に置く予定。Google のカレンダーに入れるときは、会話で頼む。"
+    >
       <form class="dialog-form" onSubmit={add}>
         <Segmented
           label="予定の種類"
@@ -48,10 +60,9 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
         <Field label="何の予定か">
           <TextField name="title" required autofocus />
         </Field>
-        <label class="records-over">
-          <input type="checkbox" checked={whole()} onChange={(e) => setWhole(e.currentTarget.checked)} />
+        <Checkbox checked={whole()} onChange={(e) => setWhole(e.currentTarget.checked)}>
           終日
-        </label>
+        </Checkbox>
         <Field label="始まり" group>
           <div class="row">
             <TextField type="date" name="from" value={props.day} required aria-label="始まりの日" />

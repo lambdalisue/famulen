@@ -1,4 +1,4 @@
-import { A, createAsync } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import DreamNow from "~/components/DreamNow";
 import DreamLog from "~/components/logs/DreamLog";
@@ -31,14 +31,22 @@ function When(props: { plan: DreamSettings; save: (c: Change) => void }) {
   const p = () => props.plan;
   const times = () => (TIMES.includes(p().at) ? TIMES : [...TIMES, p().at].sort());
   return (
-    <Section title="いつ見るか" note="決めた頻度で、決めた時刻を過ぎたら夢を見る。秘書の会話が少ない夜更けがよい。時刻はワークグループ全体のタイムゾーンで数える。">
+    <Section
+      title="いつ見るか"
+      note="決めた頻度で、決めた時刻を過ぎたら夢を見る。秘書の会話が少ない夜更けがよい。時刻はワークグループ全体のタイムゾーンで数える。"
+    >
       <div class="role-model">
         <Field label="頻度" group>
           <SegmentedOf label="頻度" items={FREQUENCIES} value={p().frequency} onChoose={(frequency) => props.save({ frequency })} />
         </Field>
         <Show when={p().frequency === DreamFrequency.WEEKLY}>
           <Field label="曜日" group>
-            <SegmentedOf label="曜日" items={WEEKDAYS.map((label, i) => [i, label] as const)} value={p().weekday} onChoose={(weekday) => props.save({ weekday })} />
+            <SegmentedOf
+              label="曜日"
+              items={WEEKDAYS.map((label, i) => [i, label] as const)}
+              value={p().weekday}
+              onChoose={(weekday) => props.save({ weekday })}
+            />
           </Field>
         </Show>
         <Field label="時刻">
@@ -69,8 +77,15 @@ function When(props: { plan: DreamSettings; save: (c: Change) => void }) {
 
 function Reach(props: { plan: DreamSettings; save: (c: Change) => void }) {
   return (
-    <Section title="どこまで整えるか" note={<><A href="/memory/core">心得</A>
-          は、秘書が毎回の会話で必ず読む記憶。夢はこれを決めた行数に収め、あふれるときは使われていないものから長期記憶へ移す。</>}>
+    <Section
+      title="どこまで整えるか"
+      note={
+        <>
+          <a href="/memory/core">心得</a>
+          は、秘書が毎回の会話で必ず読む記憶。夢はこれを決めた行数に収め、あふれるときは使われていないものから長期記憶へ移す。
+        </>
+      }
+    >
       <NumberField
         label="記憶の核"
         unit="行まで"
@@ -86,7 +101,10 @@ function Reach(props: { plan: DreamSettings; save: (c: Change) => void }) {
 
 function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
   return (
-    <Section title="記録を整える" note="夢のあとに、することを書いたメモをタスクにし、古くなったかもしれない記録に印を付けて、確かめるタスクを足す。一晩に見るのは少しずつで、書いてあることは変えず、消さない。">
+    <Section
+      title="記録を整える"
+      note="夢のあとに、することを書いたメモをタスクにし、古くなったかもしれない記録に印を付けて、確かめるタスクを足す。一晩に見るのは少しずつで、書いてあることは変えず、消さない。"
+    >
       <Switch checked={props.plan.tidyRecords ?? true} onChange={(tidyRecords) => props.save({ tidyRecords })}>
         記録も整える
       </Switch>
@@ -98,28 +116,28 @@ function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
 export default function Dream() {
   setView("設定", "夢");
   const plan = createAsync(() => dreamSettingsQuery());
-  const save = (change: Change) => {
-    const p = plan();
-    if (!p) return;
-    void act(() =>
-      api.memory.setDreamSettings({
-        at: p.at,
-        frequency: p.frequency,
-        weekday: p.weekday,
-        earlyAt: p.earlyAt,
-        coreLines: p.coreLines,
-        tidyRecords: p.tidyRecords,
-        ...change,
-      }),
-    );
-  };
+  // Worked out from the settings as they are by then: what was saved a moment
+  // ago may not have come back to the page yet.
+  const save = (change: Change) =>
+    void act(async () => {
+      const { at, frequency, weekday, earlyAt, coreLines, tidyRecords } = await api.memory.getDreamSettings({});
+      return api.memory.setDreamSettings({ at, frequency, weekday, earlyAt, coreLines, tidyRecords, ...change });
+    });
   return (
     <>
-      <PageHeader title="夢" note={<><p>
-        その日に秘書が書き留めたことと元の会話を読み直し、近い記憶と比べて、足す・直す・置き換える・忘れるを選んで記憶を整えるエージェント。秘書の会話とは別のモデルで動く。
-      </p><p>
-        夜ごとに何を変えたかは、<A href="/memory">記憶</A>の夢で読む。
-      </p></>} />
+      <PageHeader
+        title="夢"
+        note={
+          <>
+            <p>
+              その日に秘書が書き留めたことと元の会話を読み直し、近い記憶と比べて、足す・直す・置き換える・忘れるを選んで記憶を整えるエージェント。秘書の会話とは別のモデルで動く。
+            </p>
+            <p>
+              夜ごとに何を変えたかは、<a href="/memory">記憶</a>の夢で読む。
+            </p>
+          </>
+        }
+      />
       <div class="prefs">
         <RoleModel
           role={Role.DREAM}

@@ -63,7 +63,14 @@ export function DialogTrigger(props: { variant?: ButtonVariant; small?: boolean;
 }
 
 /** The foot of a dialog's form: give up at its left, go on at its right. */
-export function DialogActions(props: { submit?: string; disabled?: boolean; cancel?: string; before?: JSX.Element; variant?: ButtonVariant; onSubmit?: () => void }) {
+export function DialogActions(props: {
+  submit?: string;
+  disabled?: boolean;
+  cancel?: string;
+  before?: JSX.Element;
+  variant?: ButtonVariant;
+  onSubmit?: () => void;
+}) {
   return (
     <div class="dialog-actions">
       <Show when={"before" in props} fallback={<Ark.CloseTrigger class={buttonClass()}>{props.cancel ?? "やめる"}</Ark.CloseTrigger>}>
@@ -71,7 +78,12 @@ export function DialogActions(props: { submit?: string; disabled?: boolean; canc
       </Show>
       <Show when={props.submit}>
         {(text) => (
-          <Button type={props.onSubmit ? "button" : "submit"} variant={props.variant ?? "primary"} disabled={props.disabled} onClick={() => props.onSubmit?.()}>
+          <Button
+            type={props.onSubmit ? "button" : "submit"}
+            variant={props.variant ?? "primary"}
+            disabled={props.disabled}
+            onClick={() => props.onSubmit?.()}
+          >
             {text()}
           </Button>
         )}

@@ -4,13 +4,14 @@ import { dateText, daysLeft, nearness } from "~/lib/dates";
 import { useOwner } from "~/lib/owner";
 import { usePicked } from "~/lib/picked";
 import { choiceOf, deadlinesOf, excerptOf, isPast, linkOf, moneyText, type Rec, sectionOf, valueOf } from "~/lib/records";
+import { byName } from "~/lib/words";
 import RecordDetail from "./detail/RecordDetail";
 import RecordsPage, { type Group } from "./RecordsPage";
 import type { RowParts } from "./Row";
 
 const next = (r: Rec) => (isPast(r) ? undefined : deadlinesOf(r)[0]);
 const soonest = (r: Rec) => next(r)?.on ?? "9999";
-const order = (a: Rec, b: Rec) => soonest(a).localeCompare(soonest(b)) || a.title.localeCompare(b.title, "ja");
+const order = (a: Rec, b: Rec) => soonest(a).localeCompare(soonest(b)) || byName(a.title, b.title);
 
 /** What a thing is and where it came from. */
 function thingFacts(r: Rec): string[] {
@@ -64,7 +65,7 @@ function groups(records: Rec[]): Group[] {
   }
   if (by.size <= 1) return [{ name: "", records: sorted }];
   return [...by]
-    .sort(([a, ra], [b, rb]) => soonest(ra[0]).localeCompare(soonest(rb[0])) || a.localeCompare(b, "ja"))
+    .sort(([a, ra], [b, rb]) => soonest(ra[0]).localeCompare(soonest(rb[0])) || byName(a, b))
     .map(([name, rs]) => ({ name, records: rs }));
 }
 

@@ -7,7 +7,13 @@ import * as icons from "~/lib/icons";
 import LinkTextarea from "../links/LinkTextarea";
 
 /** Free Markdown: read as Arto draws it, written as plain text and saved with a button. */
-export default function Notes(props: { text: string; label: string; empty: string; links: RecordLink[]; onSave: (text: string) => Promise<boolean> }) {
+export default function Notes(props: {
+  text: string;
+  label: string;
+  empty: string;
+  links: RecordLink[];
+  onSave: (text: string) => Promise<boolean>;
+}) {
   const [draft, setDraft] = createSignal<string | undefined>();
   const [preview, setPreview] = createSignal(false);
   const save = async () => {

@@ -78,7 +78,12 @@ export function taskParts(t: () => Rec): RowParts {
           <Tag tone="warn">優先</Tag>
         </Show>
         <Show when={t().blockers.length > 0}>
-          <Tag tone="danger" title={t().blockers.map((b) => b.title).join("、")}>
+          <Tag
+            tone="danger"
+            title={t()
+              .blockers.map((b) => b.title)
+              .join("、")}
+          >
             <Icon svg={icons.lock} size={11} /> {t().blockers[0].title} 待ち
           </Tag>
         </Show>

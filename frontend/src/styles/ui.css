@@ -17,7 +17,7 @@
 .icon-plain.danger:hover { background: var(--danger-soft); color: var(--danger); }
 
 /* Text, numbers, choices. */
-.input { min-height: 36px; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--r); padding: 0 10px; background: var(--card); font-size: var(--t-base); }
+.input { min-height: 36px; min-width: 0; border: 1px solid var(--control); border-radius: var(--r); padding: 0 10px; background: var(--card); font-size: var(--t-base); }
 .input:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .input:disabled { background: var(--soft); color: var(--muted); }
 .input.number { width: 96px; }

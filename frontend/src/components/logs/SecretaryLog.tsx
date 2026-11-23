@@ -119,9 +119,7 @@ function Turn(props: { turn: LogTurn; tz: string }) {
           <Tag>{t().origin}から</Tag>
         </Show>
         <Show when={t().steps.length > 0}>
-          <Tag>
-            道具 {t().steps.length} 回
-          </Tag>
+          <Tag>道具 {t().steps.length} 回</Tag>
         </Show>
         <For each={stopped()}>
           {(s) => (

@@ -37,7 +37,12 @@ export function ListRow(props: {
   children?: JSX.Element;
 }) {
   return (
-    <div class={`item ${props.class ?? ""}`} classList={{ picks: !!props.href || !!props.onPick, current: props.current, ...props.classList }} role="listitem" data-record={props.record}>
+    <div
+      class={`item ${props.class ?? ""}`}
+      classList={{ picks: !!props.href || !!props.onPick, current: props.current, ...props.classList }}
+      role="listitem"
+      data-record={props.record}
+    >
       <Show when={props.icon}>{(svg) => <Icon svg={svg()} size={18} />}</Show>
       {props.lead}
       <div class="item-main">

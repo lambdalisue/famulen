@@ -10,15 +10,24 @@ import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
-import { Button, Dialog, DialogActions, DialogTrigger, Field, Icon, List, ListRow, PageHeader, Section, SegmentedOf, Select, Switch, TextField, whenConfirmed } from "~/components/ui";
-
-const COLORS: [string, string][] = [
-  ["青", "#2a78d6"],
-  ["橙", "#E0622F"],
-  ["青緑", "#0F6E68"],
-  ["紫", "#6250d6"],
-  ["緑", "#008300"],
-];
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogTrigger,
+  Field,
+  Icon,
+  List,
+  ListRow,
+  PageHeader,
+  Section,
+  SegmentedOf,
+  Select,
+  Switch,
+  TextField,
+  whenConfirmed,
+} from "~/components/ui";
+import { COLORS } from "~/lib/workgroup";
 
 const MODES: [CalendarMode, string][] = [
   [CalendarMode.SHOW, "出す"],
@@ -45,12 +54,7 @@ const workgroupQuery = query((id: string) => api.workgroups.getWorkgroup({ id })
 const sameColor = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** The name and colour of a workgroup, as the add and edit dialogs ask them. */
-function WorkgroupForm(props: {
-  name: string;
-  color: string;
-  submit: string;
-  onSubmit: (name: string, color: string) => void;
-}) {
+function WorkgroupForm(props: { name: string; color: string; submit: string; onSubmit: (name: string, color: string) => void }) {
   const [name, setName] = createSignal(props.name);
   const [color, setColor] = createSignal(props.color);
   return (
@@ -65,11 +69,11 @@ function WorkgroupForm(props: {
         <TextField name="name" placeholder="趣味" required value={name()} onInput={(e) => setName(e.currentTarget.value)} />
       </Field>
       <RadioGroup.Root
-        class="dialog-field"
+        class="field"
         value={COLORS.find(([, c]) => sameColor(c, color()))?.[1] ?? COLORS[0][1]}
         onValueChange={(d) => d.value && setColor(d.value)}
       >
-        <RadioGroup.Label>色</RadioGroup.Label>
+        <RadioGroup.Label class="field-label">色</RadioGroup.Label>
         <div class="swatches">
           <For each={COLORS}>
             {([label, c]) => (
@@ -120,7 +124,9 @@ function MemberRow(props: { workgroup: string; member: Member }) {
     <Switch
       end
       checked={props.member.member}
-      onChange={(on) => void act(() => api.workgroups.setMember({ workgroup: props.workgroup, kind: props.member.kind, member: props.member.id, on }))}
+      onChange={(on) =>
+        void act(() => api.workgroups.setMember({ workgroup: props.workgroup, kind: props.member.kind, member: props.member.id, on }))
+      }
     >
       {props.member.label}
     </Switch>
@@ -158,35 +164,36 @@ export default function Workgroups() {
 
   return (
     <>
-      <div class="page-head">
-        <div>
-          <PageHeader title="ワークグループ" note="仕事・個人のように、頼みごとと使うものを分ける。上の帯でワークグループを選ぶと、会話と右の画面はそこに入るものだけになり、秘書もその中で動く。「すべて」はいつもあり、どのワークグループのものも見える。どのワークグループにも同じように効く設定は「全体」で決める。" />
-        </div>
-        <Dialog
-          open={adding()}
-          onOpenChange={setAdding}
-          title="ワークグループを足す"
-          description="名前と、選んでいるときの帯の色を決める。中身はあとから決められる。"
-          trigger={
-            <DialogTrigger variant="primary" icon={icons.plus}>
-ワークグループを足す
-            </DialogTrigger>
-          }
-        >
-          <WorkgroupForm
-            name=""
-            color={COLORS[0][1]}
-            submit="足す"
-            onSubmit={async (name, color) => {
-              const c = await act(() => api.workgroups.addWorkgroup({ name, color }), "ワークグループを足した");
-              if (c) {
-                setAdding(false);
-                setParams({ id: c.id });
-              }
-            }}
-          />
-        </Dialog>
-      </div>
+      <PageHeader
+        title="ワークグループ"
+        note="仕事・個人のように、頼みごとと使うものを分ける。上の帯でワークグループを選ぶと、会話と右の画面はそこに入るものだけになり、秘書もその中で動く。「すべて」はいつもあり、どのワークグループのものも見える。どのワークグループにも同じように効く設定は「全体」で決める。"
+        actions={
+          <Dialog
+            open={adding()}
+            onOpenChange={setAdding}
+            title="ワークグループを足す"
+            description="名前と、選んでいるときの帯の色を決める。中身はあとから決められる。"
+            trigger={
+              <DialogTrigger variant="primary" icon={icons.plus}>
+                ワークグループを足す
+              </DialogTrigger>
+            }
+          >
+            <WorkgroupForm
+              name=""
+              color={COLORS[0][1]}
+              submit="足す"
+              onSubmit={async (name, color) => {
+                const c = await act(() => api.workgroups.addWorkgroup({ name, color }), "ワークグループを足した");
+                if (c) {
+                  setAdding(false);
+                  setParams({ id: c.id });
+                }
+              }}
+            />
+          </Dialog>
+        }
+      />
 
       <div class="wg-layout">
         <nav class="wg-list" aria-label="ワークグループの一覧">
@@ -235,7 +242,7 @@ export default function Workgroups() {
                       title="名前と色を変える"
                       trigger={
                         <DialogTrigger small icon={icons.pencil}>
-名前と色
+                          名前と色
                         </DialogTrigger>
                       }
                     >
@@ -258,7 +265,8 @@ export default function Workgroups() {
                           `「${workgroup()?.name}」を消す`,
                           "消す",
                           async () => {
-                            if (await act(() => api.workgroups.deleteWorkgroup({ id: id() }), "ワークグループを消した")) setParams({ id: undefined });
+                            if (await act(() => api.workgroups.deleteWorkgroup({ id: id() }), "ワークグループを消した"))
+                              setParams({ id: undefined });
                           },
                           "ワークグループを消しても、記録と記憶は消えない。その印が付いていたものは「すべて」で見える。",
                         )
@@ -269,33 +277,50 @@ export default function Workgroups() {
                   </div>
                 </header>
 
-                <Section title="予定の見え方" level={3} note="このワークグループを選んでいるとき、それぞれのカレンダーの予定をどう出すか。出さない予定も、秘書は空いていない時間として扱う。">
-                  <Show when={d().calendars.length > 0} fallback={<p class="sub">カレンダーがまだない。サービスで Google をつなぐと出てくる。</p>}>
+                <Section
+                  title="予定の見え方"
+                  level={3}
+                  note="このワークグループを選んでいるとき、それぞれのカレンダーの予定をどう出すか。出さない予定も、秘書は空いていない時間として扱う。"
+                >
+                  <Show
+                    when={d().calendars.length > 0}
+                    fallback={<p class="sub">カレンダーがまだない。サービスで Google をつなぐと出てくる。</p>}
+                  >
                     <List>
-                    <For each={d().calendars}>
-                      {(cal) => (
-                        <ListRow
-                          title={cal.name}
-                          end={
-                            <SegmentedOf
-                              label={`${cal.name}の出し方`}
-                              items={MODES}
-                              value={cal.mode}
-                              onChoose={(mode) => void act(() => api.workgroups.setCalendarMode({ workgroup: id(), calendar: cal.calendar, mode }))}
-                            />
-                          }
-                        />
-                      )}
-                    </For>
+                      <For each={d().calendars}>
+                        {(cal) => (
+                          <ListRow
+                            title={cal.name}
+                            end={
+                              <SegmentedOf
+                                label={`${cal.name}の出し方`}
+                                items={MODES}
+                                value={cal.mode}
+                                onChoose={(mode) =>
+                                  void act(() => api.workgroups.setCalendarMode({ workgroup: id(), calendar: cal.calendar, mode }))
+                                }
+                              />
+                            }
+                          />
+                        )}
+                      </For>
                     </List>
                   </Show>
                 </Section>
 
-                <Section title="使うアカウント" level={3} note="このワークグループで秘書がメールを送ったり予定を入れたりするとき、どのアカウントを使うか。決めておくと、秘書はいつもそのアカウントを使う。">
+                <Section
+                  title="使うアカウント"
+                  level={3}
+                  note="このワークグループで秘書がメールを送ったり予定を入れたりするとき、どのアカウントを使うか。決めておくと、秘書はいつもそのアカウントを使う。"
+                >
                   <For each={d().accounts}>{(a) => <AccountRow workgroup={id()} account={a} />}</For>
                 </Section>
 
-                <Section title="このワークグループに入るもの" level={3} note="どこから来たものをこのワークグループとして受け、何を確かめずに使うか。一つのものをいくつのワークグループに入れてもよい。">
+                <Section
+                  title="このワークグループに入るもの"
+                  level={3}
+                  note="どこから来たものをこのワークグループとして受け、何を確かめずに使うか。一つのものをいくつのワークグループに入れてもよい。"
+                >
                   <For each={KINDS}>
                     {([kind, title, meaning]) => {
                       const members = () => d().members.filter((m) => m.kind === kind);

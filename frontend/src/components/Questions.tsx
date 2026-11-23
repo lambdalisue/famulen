@@ -38,7 +38,13 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
             <div class="question-choices">
               <For each={q.choices}>
                 {(c) => (
-                  <Button small classList={{ primary: (chosen()[i()] ?? []).includes(c.label) }} aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)} title={c.description} onClick={() => choose(i(), q, c.label)}>
+                  <Button
+                    small
+                    classList={{ primary: (chosen()[i()] ?? []).includes(c.label) }}
+                    aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)}
+                    title={c.description}
+                    onClick={() => choose(i(), q, c.label)}
+                  >
                     {c.label}
                   </Button>
                 )}
@@ -51,10 +57,15 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
                 </span>
               )}
             </For>
-            <TextField aria-label={`${q.question} に自分の言葉で答える`} placeholder="自分の言葉で答える" value={words()[i()] ?? ""} onInput={(e) => {
+            <TextField
+              aria-label={`${q.question} に自分の言葉で答える`}
+              placeholder="自分の言葉で答える"
+              value={words()[i()] ?? ""}
+              onInput={(e) => {
                 const text = e.currentTarget.value;
                 setWords((all) => put(all, i(), text));
-              }} />
+              }}
+            />
           </div>
         )}
       </For>

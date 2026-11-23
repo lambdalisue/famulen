@@ -1,3 +1,5 @@
+/* The workgroup's color where words are set in it or on it, deep enough to be read. */
+.app { --workgroup-ink: color-mix(in srgb, var(--workgroup) 78%, black); }
 .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; border-top: 4px solid var(--workgroup); }
 .topbar { height: 56px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--wg-tint); }
 .logo { color: var(--logo); display: flex; }
@@ -47,3 +49,4 @@ dialog.sheet > * + * { margin-top: 10px; }
 .sheet-row:first-child { border-top: 0; }
 .sheet-row svg { color: var(--workgroup); }
 .sheet-row .dot { width: 12px; height: 12px; }
+.pane-error { padding: 22px 26px; }

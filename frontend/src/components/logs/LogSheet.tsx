@@ -11,9 +11,7 @@ export default function LogSheet(props: { title: string; label?: string; childre
   return (
     <Dialog.Root lazyMount unmountOnExit>
       <div class="log-open">
-        <DialogTrigger icon={icons.listDetails}>
-          {props.label ?? "ログを見る"}
-        </DialogTrigger>
+        <DialogTrigger icon={icons.listDetails}>{props.label ?? "ログを見る"}</DialogTrigger>
       </div>
       <SideSheet name="log" title={props.title}>
         {props.children}

@@ -1,5 +1,5 @@
 import { dateTimeText } from "~/lib/dates";
-import { A, createAsync, query } from "@solidjs/router";
+import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
 import { api } from "~/lib/api";
@@ -36,15 +36,13 @@ export default function DreamLog() {
   return (
     <>
       <p class="sub">
-        夜ごとに夢を見たか、何件の記憶と記録を変えたか。変えた中身は<A href="/memory">記憶</A>の夢で読む。
+        夜ごとに夢を見たか、何件の記憶と記録を変えたか。変えた中身は<a href="/memory">記憶</a>の夢で読む。
       </p>
       <List>
         <For each={pages.rows()}>
           {(d) => (
             <div role="listitem" class="item dream-log-entry">
-              <span class="mono sub when">
-                {dateTimeText(d.at, owner.tz())}
-              </span>
+              <span class="mono sub when">{dateTimeText(d.at, owner.tz())}</span>
               <div class="grow">
                 <div>{d.status}</div>
                 <Show when={counts(d)}>

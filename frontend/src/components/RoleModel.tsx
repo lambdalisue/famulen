@@ -34,7 +34,7 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
         max={EFFORTS.length - 1}
         step={1}
         value={[shown() < 0 ? DEFAULT_STOP : shown()]}
-        getAriaValueText={(d) => (shown() < 0 ? "モデルの既定" : EFFORTS[d.value]?.label ?? "")}
+        getAriaValueText={(d) => (shown() < 0 ? "モデルの既定" : (EFFORTS[d.value]?.label ?? ""))}
         onValueChange={(d) => setShown(d.value[0] ?? DEFAULT_STOP)}
         onValueChangeEnd={(d) => {
           const next = EFFORTS[d.value[0] ?? DEFAULT_STOP]?.value ?? "";
@@ -45,7 +45,13 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
           <Slider.Label>考える深さ</Slider.Label>
           <span class="effort-value">{current()?.label ?? "モデルの既定"}</span>
           <Show when={props.effort !== props.fallback}>
-            <Button variant="ghost" small class="effort-reset" title={`このエージェントの既定は「${EFFORTS.find((e) => e.value === props.fallback)?.label ?? "モデルの既定"}」`} onClick={() => props.onChange(props.fallback)}>
+            <Button
+              variant="ghost"
+              small
+              class="effort-reset"
+              title={`このエージェントの既定は「${EFFORTS.find((e) => e.value === props.fallback)?.label ?? "モデルの既定"}」`}
+              onClick={() => props.onChange(props.fallback)}
+            >
               既定に戻す
             </Button>
           </Show>
@@ -72,9 +78,7 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
           <span>じっくり・高く</span>
         </div>
       </Slider.Root>
-      <p class="sub effort-means">
-        {current()?.means ?? "モデルに任せる。どの深さで考えるかは、モデルとその実行ファイルの既定のまま。"}
-      </p>
+      <p class="sub effort-means">{current()?.means ?? "モデルに任せる。どの深さで考えるかは、モデルとその実行ファイルの既定のまま。"}</p>
     </div>
   );
 }
@@ -115,6 +119,7 @@ function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: st
         <NumberField
           label="一日の上限"
           min={0}
+          decimal
           none="なし"
           value={r().cap}
           unit={

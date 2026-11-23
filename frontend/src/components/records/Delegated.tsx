@@ -1,6 +1,19 @@
 import { createAsync } from "@solidjs/router";
 import { createMemo, For, type JSX, Show } from "solid-js";
-import { Button, Disclosure, EmptyState, Icon, IconButton, List, ListRow, Loading, PageHeader, Section, Tag, whenConfirmed } from "~/components/ui";
+import {
+  Button,
+  Disclosure,
+  EmptyState,
+  Icon,
+  IconButton,
+  List,
+  ListRow,
+  Loading,
+  PageHeader,
+  Section,
+  Tag,
+  whenConfirmed,
+} from "~/components/ui";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { shortTime } from "~/lib/dates";
@@ -8,7 +21,18 @@ import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { useParam, withParams } from "~/lib/params";
 import { isOver, type Rec, recordsQuery, valueOf, WORKER } from "~/lib/records";
-import { type DelegatedTask, delegatedQuery, isBad, isBadOutcome, outcomeText, runnerText, stageOf, STAGES, standingText, type WorkerRun } from "~/lib/workers";
+import {
+  type DelegatedTask,
+  delegatedQuery,
+  isBad,
+  isBadOutcome,
+  outcomeText,
+  runnerText,
+  stageOf,
+  STAGES,
+  standingText,
+  type WorkerRun,
+} from "~/lib/workers";
 import { workgroup } from "~/lib/workgroup";
 import RecordsFrame from "./RecordsFrame";
 
@@ -24,7 +48,8 @@ const cancel = (id: string, title: string) =>
 const placeOf = (queue: DelegatedTask[] | undefined, task: string) => (queue ?? []).findIndex((t) => t.task === task) + 1;
 
 function Standing(props: { of: DelegatedTask }) {
-  const tone = () => (isBad(props.of) ? "danger" : stageOf(props.of) === "owner" ? "warn" : props.of.state === "running" ? "aide" : undefined);
+  const tone = () =>
+    isBad(props.of) ? "danger" : stageOf(props.of) === "owner" ? "warn" : props.of.state === "running" ? "aide" : undefined;
   return <Tag tone={tone()}>{standingText(props.of)}</Tag>;
 }
 
@@ -98,7 +123,9 @@ export function DelegatedPage(props: { tools: JSX.Element; detail: (id: string) 
   const line = createAsync(() => delegatedQuery());
   const tasks = createAsync(() => recordsQuery("tasks", "all"));
   const stages = createMemo(() =>
-    STAGES.map(([stage, name]) => ({ stage, name, tasks: (delegated()?.queue ?? []).filter((t) => stageOf(t) === stage) })).filter((s) => s.tasks.length > 0),
+    STAGES.map(([stage, name]) => ({ stage, name, tasks: (delegated()?.queue ?? []).filter((t) => stageOf(t) === stage) })).filter(
+      (s) => s.tasks.length > 0,
+    ),
   );
   const order = createMemo(() => {
     const ids = stages().flatMap((s) => s.tasks.map((t) => t.task));
@@ -113,7 +140,8 @@ export function DelegatedPage(props: { tools: JSX.Element; detail: (id: string) 
           actions={<span class="d-only">{props.tools}</span>}
           note={
             <>
-              手代か Adroit に委ねたタスク。上から順に動く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>で決める。
+              手代か Adroit に委ねたタスク。上から順に動く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>
+              で決める。
             </>
           }
         />

@@ -88,9 +88,7 @@ export default function FolderPicker(props: {
             </button>
           )}
         </Show>
-        <span class="folder-note sub">
-          {NOTES[m().kind](m().by ?? "")}
-        </span>
+        <span class="folder-note sub">{NOTES[m().kind](m().by ?? "")}</span>
       </li>
     );
   };
@@ -104,14 +102,20 @@ export default function FolderPicker(props: {
       description="Famulen が動いているマシンのフォルダ。名前を押すと中へ進み、チェックで選ぶ。ほかのフォルダへ移っても、選んだものは残る。書ける場所の下は、選ばなくても書ける。"
       trigger={
         <DialogTrigger small icon={icons.folder}>
-選ぶ
+          選ぶ
         </DialogTrigger>
       }
     >
       <div class="folder-picker">
         <div class="folder-bar">
           <IconButton icon={icons.home} label="ホーム" variant="ghost" onClick={() => void go("")} />
-          <IconButton icon={icons.folderUp} label="ひとつ上へ" variant="ghost" disabled={!folder()?.parent} onClick={() => void go(folder()?.parent ?? "")} />
+          <IconButton
+            icon={icons.folderUp}
+            label="ひとつ上へ"
+            variant="ghost"
+            disabled={!folder()?.parent}
+            onClick={() => void go(folder()?.parent ?? "")}
+          />
           <span class="mono folder-path" aria-label="いまのフォルダ">
             {folder()?.path ?? "…"}
           </span>
@@ -144,7 +148,11 @@ export default function FolderPicker(props: {
           </Show>
         </div>
       </div>
-      <DialogActions submit={chosen().length > 0 ? `${chosen().length} 件を足す` : "足す"} disabled={chosen().length === 0} onSubmit={() => void add()} />
+      <DialogActions
+        submit={chosen().length > 0 ? `${chosen().length} 件を足す` : "足す"}
+        disabled={chosen().length === 0}
+        onSubmit={() => void add()}
+      />
     </Dialog>
   );
 }

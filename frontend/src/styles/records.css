@@ -9,11 +9,11 @@
 .split-pane.open > .split-left { flex: 0 0 var(--left); padding-inline: 18px; }
 .split-back { display: none; }
 /* The detail lies over the right of what it is about, such as a week, rather than squeezing it. */
-.split-pane.floats { --detail: 420px; }
+.split-pane.floats { --detail: 400px; }
 .split-pane.floats.open > .split-left { flex: 1; padding-inline: 26px; }
 .split-pane.floats > .split-detail { flex: 0 0 var(--detail); }
 .main { container: main / inline-size; }
-@container main (max-width: 1199px) {
+@container main (max-width: 999px) {
   .split-pane.floats > .split-detail { position: absolute; inset: 0 0 0 auto; width: min(var(--detail), 100%); z-index: 4; box-shadow: -12px 0 32px rgba(27, 27, 25, .12); }
 }
 /* No room for both: the detail takes the list's place. */
@@ -99,6 +99,7 @@
 .rec-field { display: grid; grid-template-columns: minmax(84px, 132px) minmax(0, 1fr); gap: 10px; align-items: start; min-height: 32px; font-size: var(--t-base); }
 .rec-field dt { color: var(--muted); padding-top: 4px; }
 .rec-field dd { margin: 0; display: flex; align-items: flex-start; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.rec-field dd:has(> .rec-value) { flex-wrap: nowrap; }
 .rec-field dd > .input { flex: 1 1 120px; }
 .rec-field dd > .row > .input { flex: 1 1 110px; }
 .rec-value { padding-top: 4px; overflow-wrap: anywhere; min-width: 0; white-space: pre-wrap; }

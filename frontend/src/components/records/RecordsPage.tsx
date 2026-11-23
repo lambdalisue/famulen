@@ -121,11 +121,20 @@ export default function RecordsPage(props: {
           }
         />
         <div class="records-filter">
-          <SearchBox label={`${props.title}を探す`} placeholder="探す" value={n.words()} onInput={(e) => n.setWords(e.currentTarget.value)} />
+          <SearchBox
+            label={`${props.title}を探す`}
+            placeholder="探す"
+            value={n.words()}
+            onInput={(e) => n.setWords(e.currentTarget.value)}
+          />
           <div class="records-choices" data-scrolls-x>
             <For each={props.narrow}>
               {(field) => (
-                <Select aria-label={`${nameOf(field)}で絞る`} value={n.chosen()[field] ?? ""} onChange={(e) => n.choose(field, e.currentTarget.value)}>
+                <Select
+                  aria-label={`${nameOf(field)}で絞る`}
+                  value={n.chosen()[field] ?? ""}
+                  onChange={(e) => n.choose(field, e.currentTarget.value)}
+                >
                   <option value="">{nameOf(field)}：すべて</option>
                   <For each={choices(field)}>{(c) => <option value={c}>{choiceOf(c, owner.aide())}</option>}</For>
                 </Select>
@@ -159,12 +168,7 @@ export default function RecordsPage(props: {
           <Show
             when={n.found().length > 0}
             fallback={
-              <Show
-                when={n.any()}
-                fallback={
-                  <EmptyState>{props.empty}</EmptyState>
-                }
-              >
+              <Show when={n.any()} fallback={<EmptyState>{props.empty}</EmptyState>}>
                 <EmptyState
                   action={
                     <Button small onClick={() => n.clear()}>

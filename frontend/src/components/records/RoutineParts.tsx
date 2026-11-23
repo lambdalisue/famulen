@@ -27,7 +27,10 @@ function Running(props: { routine: Rec }) {
       hidden
       checked={isOn(r())}
       onChange={(on) =>
-        void act(() => api.records.saveRecord({ kind: "routines", id: r().id, fields: [{ name: "Enabled", value: on ? "yes" : "no" }] }), on ? "動かす" : "止めた")
+        void act(
+          () => api.records.saveRecord({ kind: "routines", id: r().id, fields: [{ name: "Enabled", value: on ? "yes" : "no" }] }),
+          on ? "動かす" : "止めた",
+        )
       }
     >
       {r().title}を動かす
@@ -124,9 +127,7 @@ export function Runs(props: { routine: Rec }) {
               </div>
             )}
           </For>
-          <p class="sub">
-            ほかのタスクの状態や前の回しだいで飛ばすなら、下の「飛ばす条件」を足す。
-          </p>
+          <p class="sub">ほかのタスクの状態や前の回しだいで飛ばすなら、下の「飛ばす条件」を足す。</p>
         </section>
       )}
     </Show>
@@ -190,18 +191,31 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
           <div class="row">
             <Show when={repeat() === "weekly"}>
               <Select name="weekday" aria-label="曜日">
-                <For each={WEEKDAYS}>{(d, i) => <option value={i()} selected={i() === 1}>{d}曜</option>}</For>
+                <For each={WEEKDAYS}>
+                  {(d, i) => (
+                    <option value={i()} selected={i() === 1}>
+                      {d}曜
+                    </option>
+                  )}
+                </For>
               </Select>
             </Show>
             <Show when={repeat() === "monthly"}>
               <TextField name="day" type="number" min="1" max="28" value="1" aria-label="日" />
             </Show>
-            <Show when={repeat() !== "cron"} fallback={<TextField class="mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}>
+            <Show
+              when={repeat() !== "cron"}
+              fallback={<TextField class="mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}
+            >
               <TextField name="time" type="time" value="09:00" required aria-label="時刻" />
             </Show>
           </div>
         </Field>
-        <Field label="だれが" hint={who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"} group>
+        <Field
+          label="だれが"
+          hint={who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"}
+          group
+        >
           <Segmented
             label="担当"
             items={[

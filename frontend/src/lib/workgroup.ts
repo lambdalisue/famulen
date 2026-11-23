@@ -23,6 +23,15 @@ export function chooseWorkgroup(id: string) {
   setCurrent(id);
 }
 
+/** The colors a workgroup or a calendar can take. */
+export const COLORS: [string, string][] = [
+  ["青", "#2a78d6"],
+  ["橙", "#E0622F"],
+  ["青緑", "#0F6E68"],
+  ["紫", "#6250d6"],
+  ["緑", "#008300"],
+];
+
 /** A theme color mixed into a pale background. */
 export function tint(color: string): string {
   const hex = color.replace("#", "");

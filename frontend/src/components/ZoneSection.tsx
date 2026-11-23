@@ -70,7 +70,10 @@ export default function ZoneSection(props: { timezone: string }) {
                   {(z) => (
                     <Combobox.Item item={z} class="zone-item">
                       <Combobox.ItemText>
-                        <b>{z.id}</b> <span class="sub">{z.name}（{z.offset}）</span>
+                        <b>{z.id}</b>{" "}
+                        <span class="sub">
+                          {z.name}（{z.offset}）
+                        </span>
                       </Combobox.ItemText>
                     </Combobox.Item>
                   )}

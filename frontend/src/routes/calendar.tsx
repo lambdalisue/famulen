@@ -92,7 +92,7 @@ export default function Calendar() {
   createEffect(() => {
     const d = data();
     if (!d) return;
-    setView("カレンダー", UNITS.find(([u]) => u === unit())?.[1], d.range.title);
+    setView("カレンダー", UNITS.find(([u]) => u === unit())?.[1], { told: d.range.title, shown: shown()?.title || d.range.title });
   });
 
   createEffect(() => {
@@ -105,7 +105,9 @@ export default function Calendar() {
     queueMicrotask(() => {
       const mark = el.querySelector<HTMLElement>(`[data-hour="${hour}"]`);
       const head = el.querySelector<HTMLElement>(".head");
-      if (mark) el.scrollTop = mark.offsetTop - (head?.offsetHeight ?? 0);
+      if (!mark) return;
+      if (isNarrow()) mark.scrollIntoView({ block: "start" });
+      else el.scrollTop = mark.offsetTop - (head?.offsetHeight ?? 0);
     });
   });
 
@@ -125,7 +127,9 @@ export default function Calendar() {
         const on = (day: string) => d().events.filter((e) => onDay(e, day));
         const units = (): [string, string, boolean][] => UNITS.map(([u, l]) => [href(u, d().at), l, u === unit()]);
         const add = () => setAdding(d().range.days.includes(d().today) && unit() !== "day" ? d().today : d().at);
-        const line = (e: CalendarEvent, day: string, time = false) => <Line event={e} day={day} time={time} picked={e.uid === uid()} onOpen={open} />;
+        const line = (e: CalendarEvent, day: string, time = false) => (
+          <Line event={e} day={day} time={time} picked={e.uid === uid()} onOpen={open} />
+        );
         return (
           <>
             <SplitPane
@@ -173,10 +177,13 @@ export default function Calendar() {
               />
               <Show when={d().noCalendars}>
                 <Callout>
-                  カレンダーがまだない。設定のサービスで Google のアカウントを開き、<a href="/settings/services">カレンダーの節で足す</a>と、ここに出る。
+                  カレンダーがまだない。設定のサービスで Google のアカウントを開き、<a href="/settings/services">カレンダーの節で足す</a>
+                  と、ここに出る。
                 </Callout>
               </Show>
-              <For each={d().calendars.filter((c) => c.error)}>{(c) => <Callout tone="warn">{c.name} を読めなかった。前に読めた予定を出している。</Callout>}</For>
+              <For each={d().calendars.filter((c) => c.error)}>
+                {(c) => <Callout tone="warn">{c.name} を読めなかった。前に読めた予定を出している。</Callout>}
+              </For>
               <Show
                 when={unit() !== "month"}
                 fallback={
@@ -219,7 +226,13 @@ export default function Calendar() {
                     </div>
                     <For each={d().range.days}>
                       {(day) => (
-                        <DayColumn day={day} events={on(day).filter((e) => !e.allDay)} picked={uid()} onOpen={open} now={day === d().today ? d().tz : ""} />
+                        <DayColumn
+                          day={day}
+                          events={on(day).filter((e) => !e.allDay)}
+                          picked={uid()}
+                          onOpen={open}
+                          now={day === d().today ? d().tz : ""}
+                        />
                       )}
                     </For>
                   </div>

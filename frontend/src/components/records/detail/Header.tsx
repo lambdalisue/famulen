@@ -115,7 +115,13 @@ export default function Header(props: { record: Rec; view: string; onView: (v: s
   return (
     <header class="rec-title">
       <div class="row">
-        <button type="button" class="tag mono" title="呼び名を写す" aria-label={`呼び名 ${r().code} を写す`} onClick={() => copy(r().code, "呼び名")}>
+        <button
+          type="button"
+          class="tag mono"
+          title="呼び名を写す"
+          aria-label={`呼び名 ${r().code} を写す`}
+          onClick={() => copy(r().code, "呼び名")}
+        >
           {r().code}
           <Icon svg={icons.copy} size={11} />
         </button>

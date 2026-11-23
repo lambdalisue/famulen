@@ -50,7 +50,13 @@ export default function Fields(props: {
       <dl class="rec-fields">
         <For each={shown()}>
           {(t) => (
-            <FieldRow type={t} field={fieldOf(props, t.name)} aide={props.aide} open={added().includes(t.name)} onSave={(v) => props.onSave(t.name, v)} />
+            <FieldRow
+              type={t}
+              field={fieldOf(props, t.name)}
+              aide={props.aide}
+              open={added().includes(t.name)}
+              onSave={(v) => props.onSave(t.name, v)}
+            />
           )}
         </For>
         <For each={unknown()}>

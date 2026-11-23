@@ -12,6 +12,7 @@ import { api } from "~/lib/api";
 import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf } from "~/lib/records";
 import { usePicked } from "~/lib/picked";
 import { useOwner } from "~/lib/owner";
+import { byName } from "~/lib/words";
 import { workgroup } from "~/lib/workgroup";
 import { Button, Callout, EmptyState, List, Tag } from "~/components/ui";
 
@@ -32,7 +33,10 @@ const partyAroundQuery = query(async (workgroup: string, id: string, names: stri
   return {
     tz,
     events: events.events.filter((e) => e.mode === CalendarMode.SHOW && (e.attendees.some((a) => a.party === id) || says(e.title))),
-    talk: talk.messages.filter((m) => says(m.text)).reverse().slice(0, 5),
+    talk: talk.messages
+      .filter((m) => says(m.text))
+      .reverse()
+      .slice(0, 5),
   };
 }, "partyAround");
 
@@ -95,9 +99,7 @@ function Around(props: { party: Rec }) {
                 <div role="listitem" class="item">
                   <span class="mono sub">{shortTime(m.at, around()?.tz ?? "UTC")}</span>
                   <Tag>{m.who === Speaker.OWNER ? "あなた" : aide()}</Tag>
-                  <span class="grow">
-                    {Array.from(m.text).slice(0, 120).join("")}
-                  </span>
+                  <span class="grow">{Array.from(m.text).slice(0, 120).join("")}</span>
                 </div>
               )}
             </For>
@@ -134,7 +136,7 @@ function Guessed(props: { party: Rec }) {
 
 /** People, companies and groups, each by name. */
 function groups(records: Rec[]): Group[] {
-  const sorted = [...records].sort((a, b) => a.title.localeCompare(b.title, "ja"));
+  const sorted = [...records].sort((a, b) => byName(a.title, b.title));
   const of = (k: string) => sorted.filter((r) => (valueOf(r, "Kind") || "person") === k);
   return [
     { name: "人", records: of("person") },
@@ -151,7 +153,11 @@ const places = (r: Rec) =>
 export default function Parties() {
   const all = createAsync(() => recordsQuery("parties", workgroup()));
   usePicked({ kind: () => "parties", section: () => "相手" });
-  const index = (r: Rec) => Math.max((all() ?? []).findIndex((x) => x.id === r.id), 0);
+  const index = (r: Rec) =>
+    Math.max(
+      (all() ?? []).findIndex((x) => x.id === r.id),
+      0,
+    );
   const row = (r: () => Rec): RowParts => ({
     lead: () => <Avatar party={r()} index={index(r())} />,
     sub: () => (
@@ -175,7 +181,9 @@ export default function Parties() {
       groups={groups}
       row={row}
       cards
-      detail={(id) => <RecordDetail kind="parties" id={id} back="/parties" top={(r) => <Guessed party={r} />} extra={(r) => <Around party={r} />} />}
+      detail={(id) => (
+        <RecordDetail kind="parties" id={id} back="/parties" top={(r) => <Guessed party={r} />} extra={(r) => <Around party={r} />} />
+      )}
       add={{ label: "グループを足す", titleLabel: "名前", fields: [], preset: { Kind: "group" } }}
       hint="人と会社・チームは、秘書がやりとりの中で覚えていく。"
       empty="相手はまだいない"

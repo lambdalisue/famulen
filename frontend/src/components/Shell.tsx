@@ -1,8 +1,8 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Title } from "@solidjs/meta";
-import { A, createAsync, revalidate, useLocation } from "@solidjs/router";
+import { createAsync, revalidate, useLocation } from "@solidjs/router";
 import * as icons from "~/lib/icons";
-import { createEffect, createSignal, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
 import { useWaiting } from "~/lib/inbox";
 import { statusQuery, workgroupsQuery } from "~/lib/data";
@@ -14,7 +14,7 @@ import Chat from "./Chat";
 import Mark from "./Mark";
 import { useOwner } from "~/lib/owner";
 import StatusPanel from "./StatusPanel";
-import { ConfirmHost, Icon, LinkButton, List, Loading, SideSheet, Toast } from "~/components/ui";
+import { ConfirmHost, ErrorState, Icon, LinkButton, List, Loading, SideSheet, Toast } from "~/components/ui";
 
 /** How the secretary is, in a word; pressing it opens the whole state. */
 function Alive() {
@@ -24,7 +24,7 @@ function Alive() {
   return (
     <Dialog.Root lazyMount unmountOnExit>
       <Dialog.Trigger class="alive" aria-label="秘書の状態">
-        <span class="dot" style={{ background: busy() ? "#2a78d6" : "#1A8C7F" }} />
+        <span class="dot" classList={{ busy: busy() }} />
         <span role="status">{busy() ? "考えている" : "待っている"}</span>
         <Show when={waiting.count() > 0}>
           <span class="alive-waiting" title="あなたを待っているもの">
@@ -76,7 +76,13 @@ export default function Shell(props: { children?: JSX.Element }) {
     document.body.classList.toggle("sheet-half", sheet() === "half");
     document.body.classList.toggle("sheet-full", sheet() === "full");
   });
-  createEffect(on(() => location.pathname, () => setSheet(""), { defer: true }));
+  createEffect(
+    on(
+      () => location.pathname,
+      () => setSheet(""),
+      { defer: true },
+    ),
+  );
 
   const choose = async (id: string) => {
     chooseWorkgroup(id);
@@ -85,10 +91,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   };
 
   return (
-    <div
-      class="app"
-      style={{ "--workgroup": color(), "--wg-tint": tint(color()) }}
-    >
+    <div class="app" style={{ "--workgroup": color(), "--wg-tint": tint(color()) }}>
       <Title>
         {tab().label} · {aide()}
       </Title>
@@ -100,13 +103,12 @@ export default function Shell(props: { children?: JSX.Element }) {
           <b>{aide()}</b>
           <small>Famulen</small>
         </span>
-        <div class="wg-tabs" role="tablist" aria-label="ワークグループ">
+        <div class="wg-tabs" role="group" aria-label="ワークグループ">
           <For each={workgroups()}>
             {(c) => (
               <button
                 type="button"
-                role="tab"
-                aria-selected={c.id === current()?.id}
+                aria-pressed={c.id === current()?.id}
                 class={`wg-btn${c.id === current()?.id ? " on" : ""}`}
                 onClick={() => choose(c.id)}
               >
@@ -115,9 +117,9 @@ export default function Shell(props: { children?: JSX.Element }) {
               </button>
             )}
           </For>
-          <A class="wg-btn" href="/settings/workgroups" aria-label="ワークグループを足す">
+          <a class="wg-btn" href="/settings/workgroups" aria-label="ワークグループを足す">
             <Icon svg={icons.plus} size={14} />
-          </A>
+          </a>
         </div>
         <span class="wg-hint">
           {current()?.id === "all" || !current()
@@ -129,13 +131,18 @@ export default function Shell(props: { children?: JSX.Element }) {
       <header id="m-head" class="m-head">
         <Show when={wayBack(location.pathname, location.search)}>
           {(back) => (
-            <A class="m-back" href={back().href} aria-label={`${back().label}へ戻る`}>
+            <a class="m-back" href={back().href} aria-label={`${back().label}へ戻る`}>
               <Icon svg={icons.chevronLeft} size={26} />
-            </A>
+            </a>
           )}
         </Show>
         <h1 class="m-title">{mobileTitle()}</h1>
-        <button type="button" class="m-wg" aria-label={`ワークグループを選ぶ（いまは${current()?.name ?? ""}）`} onClick={() => workgroupSheet?.showModal()}>
+        <button
+          type="button"
+          class="m-wg"
+          aria-label={`ワークグループを選ぶ（いまは${current()?.name ?? ""}）`}
+          onClick={() => workgroupSheet?.showModal()}
+        >
           <span class="dot" style={{ background: color() }} />
           {current()?.name}
           <Icon svg={icons.chevronDown} size={16} />
@@ -147,40 +154,48 @@ export default function Shell(props: { children?: JSX.Element }) {
           <nav class="tabs" aria-label="セクション">
             <For each={SECTIONS}>
               {(t) => (
-                <A class={`tab${t.key === tab().key ? " on" : ""}`} href={t.path} end={t.path === "/"}>
+                <a class={`tab${t.key === tab().key ? " on" : ""}`} href={t.path} aria-current={t.key === tab().key ? "page" : undefined}>
                   <Icon svg={t.icon} size={16} />
                   {t.label}
-                </A>
+                </a>
               )}
             </For>
             <span class="gap" />
             <For each={ASIDE}>
               {(t) => (
-                <A class={`tab${t.key === tab().key ? " on" : ""}`} href={t.path}>
+                <a class={`tab${t.key === tab().key ? " on" : ""}`} href={t.path} aria-current={t.key === tab().key ? "page" : undefined}>
                   <Icon svg={t.icon} size={16} />
                   {t.label}
-                </A>
+                </a>
               )}
             </For>
           </nav>
           <div id="pane" class="pane" data-tab={tab().key}>
-            <Suspense fallback={<Loading />}>{props.children}</Suspense>
+            <ErrorBoundary
+              fallback={(error, reset) => (
+                <div class="pane-error">
+                  <ErrorState error={error} onRetry={() => void revalidate().then(reset)} />
+                </div>
+              )}
+            >
+              <Suspense fallback={<Loading />}>{props.children}</Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </div>
       <nav id="m-tabbar" class="m-tabbar" aria-label="セクション">
         <For each={SECTIONS.filter((t) => BOTTOM.includes(t.key))}>
           {(t) => (
-            <A class={`m-tab${t.key === tab().key ? " on" : ""}`} href={t.path} end={t.path === "/"}>
+            <a class={`m-tab${t.key === tab().key ? " on" : ""}`} href={t.path} aria-current={t.key === tab().key ? "page" : undefined}>
               <Icon svg={t.icon} size={24} />
               <span>{t.label}</span>
-            </A>
+            </a>
           )}
         </For>
-        <A class={`m-tab${more() ? " on" : ""}`} href="/more">
+        <a class={`m-tab${more() ? " on" : ""}`} href="/more" aria-current={more() ? "page" : undefined}>
           <Icon svg={icons.layoutGrid} size={24} />
           <span>ほか</span>
-        </A>
+        </a>
       </nav>
       <dialog
         ref={workgroupSheet}
@@ -196,20 +211,18 @@ export default function Shell(props: { children?: JSX.Element }) {
         <List>
           <For each={workgroups()}>
             {(c) => (
-              <div role="listitem" class="item">
-                <button type="button" class="sheet-row" aria-pressed={c.id === current()?.id} onClick={() => choose(c.id)}>
-                  <span class="dot" style={{ background: c.color, width: "12px", height: "12px" }} />
-                  <b class="grow">{c.name}</b>
-                  <Show when={c.id === current()?.id}>
-                    <Icon svg={icons.check} size={18} />
-                  </Show>
-                </button>
-              </div>
+              <button type="button" class="sheet-row" aria-pressed={c.id === current()?.id} onClick={() => choose(c.id)}>
+                <span class="dot" style={{ background: c.color }} />
+                <b class="grow">{c.name}</b>
+                <Show when={c.id === current()?.id}>
+                  <Icon svg={icons.check} size={18} />
+                </Show>
+              </button>
             )}
           </For>
         </List>
         <LinkButton icon={icons.plus} href="/settings/workgroups" onClick={() => workgroupSheet?.close()}>
-ワークグループを足す
+          ワークグループを足す
         </LinkButton>
       </dialog>
       <ConfirmHost />

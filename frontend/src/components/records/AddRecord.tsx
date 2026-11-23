@@ -22,7 +22,14 @@ export default function AddRecord(props: {
   const kinds = createAsync(() => kindsQuery());
   const navigate = useNavigate();
   const [given, setGiven] = createSignal<{ [name: string]: FieldValue }>({});
-  const types = () => props.fields.map((n) => kinds()?.find((k) => k.name === props.kind)?.fields.find((f) => f.name === n)).filter((t) => t !== undefined);
+  const types = () =>
+    props.fields
+      .map((n) =>
+        kinds()
+          ?.find((k) => k.name === props.kind)
+          ?.fields.find((f) => f.name === n),
+      )
+      .filter((t) => t !== undefined);
   const add = async (e: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     e.preventDefault();
     const title = String(new FormData(e.currentTarget).get("title") ?? "").trim();

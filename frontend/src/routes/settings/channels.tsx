@@ -1,4 +1,4 @@
-import { A, createAsync } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { createSignal, For, onMount, Show } from "solid-js";
 import { ChannelSwitch, MainWorkspace } from "~/components/ServiceSections";
 import { ConnectionState } from "~/gen/famulen/v1/services_pb";
@@ -23,13 +23,23 @@ export default function Channels() {
 
   return (
     <>
-      <PageHeader title="チャネル" note={<>
-        {owner.aide()} と話せるところ。このブラウザはいつでも使える。Slack などは
-        <A href="/settings/services">サービス</A>
-        で足すとここに並び、切るとそこからの話しかけを受けなくなる。切っても、サービスのつながりは残る。
-      </>} />
+      <PageHeader
+        title="チャネル"
+        note={
+          <>
+            {owner.aide()} と話せるところ。このブラウザはいつでも使える。Slack などは
+            <a href="/settings/services">サービス</a>
+            で足すとここに並び、切るとそこからの話しかけを受けなくなる。切っても、サービスのつながりは残る。
+          </>
+        }
+      />
       <List>
-        <ListRow icon={icons.deviceLaptop} title="このブラウザ" sub={`コンソール${origin() ? ` · ${origin()}` : ""}`} end={<Tag tone="ok">使える</Tag>} />
+        <ListRow
+          icon={icons.deviceLaptop}
+          title="このブラウザ"
+          sub={`コンソール${origin() ? ` · ${origin()}` : ""}`}
+          end={<Tag tone="ok">使える</Tag>}
+        />
         <For each={channels() ?? []}>
           {(c) => (
             <ListRow
@@ -54,11 +64,11 @@ export default function Channels() {
       </List>
       <Show when={channels() && channels()?.length === 0}>
         <p class="sub">
-          Slack のワークスペースや眼鏡などは、<A href="/settings/services">サービス</A>で足すとここに並ぶ。
+          Slack のワークスペースや眼鏡などは、<a href="/settings/services">サービス</a>で足すとここに並ぶ。
         </p>
       </Show>
       <p class="sub">
-        メンションのあと、そのチャンネルを注視する長さは<A href="/settings/roles/triage">トリアージ</A>で決める。
+        メンションのあと、そのチャンネルを注視する長さは<a href="/settings/roles/triage">トリアージ</a>で決める。
       </p>
     </>
   );

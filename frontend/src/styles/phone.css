@@ -23,12 +23,15 @@
   .rec { padding: 4px 0 12px; }
   .rec .rec-name { font-size: 18px; }
   .rec-glance, .rec-item { background: var(--card); }
+  .rec-glance > .rec-fields { grid-template-columns: repeat(auto-fill, minmax(min(136px, 100%), 1fr)); }
   .page { max-width: none; }
   /* The title of the page is in the bar above it. */
   .page-head h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .page-head-line { min-height: 0; }
   .page-head-line:not(:has(> :not(h1):not(.page-head-actions))):not(:has(.page-head-actions > *)) { display: none; }
   .page-head-actions { margin-left: auto; }
+  /* The way back is in the bar too. */
+  .page-head-line > .back-link { display: none; }
 
   .btn { min-height: 44px; }
   .btn.small { min-height: 40px; }
@@ -44,11 +47,12 @@
   .rec-check { width: 32px; height: 32px; }
   .rec-add { min-height: 40px; font-size: 16px; }
   .records-filter > .search { flex: 1 1 100%; }
-  .records-choices { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
+  .records-choices { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .records-choices .select { flex: none; max-width: 200px; }
   .records-choices .check { flex: none; white-space: nowrap; }
-  .chips-line[role=group] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
-  .rec-tags .chips-line { flex-wrap: wrap; margin: 0; padding: 0; }
+  .chips-line[role=group] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .chips-line[role=group] > * { flex: none; }
+  .rec-tags .chips-line { flex-wrap: wrap; }
   .item { padding-inline: 14px; }
   .item:has(> .item-end > .permission-seg), .item:has(> .item-end .segs), .item:has(> .item-end > .select) { flex-wrap: wrap; }
   .item:has(> .item-end > .permission-seg) > .item-end, .item:has(> .item-end .segs) > .item-end, .item:has(> .item-end > .select) > .item-end { max-width: 100%; flex: 1 1 100%; justify-content: flex-start; }

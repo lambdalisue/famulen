@@ -4,10 +4,24 @@ import type { AccountField, ConnectResult } from "~/gen/famulen/v1/services_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { definitionsQuery, docIn, docUrl, iconNamed, knownQuery } from "~/lib/connections";
-import { hasWords } from "~/lib/words";
+import { byName, hasWords } from "~/lib/words";
 import * as icons from "~/lib/icons";
 import { looksLikeTarget, type ServiceTarget, serviceTargets } from "~/lib/serviceTarget";
-import { Button, Callout, Dialog, DialogActions, DialogTrigger, Disclosure, Field, Icon, SearchBox, Segmented, Tag, TextArea, TextField } from "~/components/ui";
+import {
+  Button,
+  Callout,
+  Dialog,
+  DialogActions,
+  DialogTrigger,
+  Disclosure,
+  Field,
+  Icon,
+  SearchBox,
+  Segmented,
+  Tag,
+  TextArea,
+  TextField,
+} from "~/components/ui";
 
 /** Something to choose in the dialog, from the known list or a definition. */
 type Choice = {
@@ -102,7 +116,7 @@ export default function AddService() {
           keyLabel: "",
           setup: "",
         })),
-    ].sort((a, b) => a.name.localeCompare(b.name));
+    ].sort((a, b) => byName(a.name, b.name));
   });
   const found = () => {
     return choices().filter((c) => hasWords(`${c.id} ${c.name} ${c.what} ${ALSO[c.id] ?? ""}`, search()));
@@ -156,7 +170,7 @@ export default function AddService() {
       size="wide"
       trigger={
         <DialogTrigger variant="primary" icon={icons.plus}>
-サービスを足す
+          サービスを足す
         </DialogTrigger>
       }
     >
@@ -169,13 +183,20 @@ export default function AddService() {
         </Match>
         <Match when={true}>
           <div class="service-add">
-            <SearchBox label="サービスを探す" placeholder="サービスの名前か、URL・コマンド" autofocus value={search()} onInput={(e) => setSearch(e.currentTarget.value)} onKeyDown={(e) => {
-                  if (e.key !== "Enter" || e.isComposing) return;
-                  e.preventDefault();
-                  const [only, ...others] = found();
-                  if (only && others.length === 0) choose(only);
-                  else if (!only && serviceTargets(search()).length > 0) setCustom(search());
-                }} />
+            <SearchBox
+              label="サービスを探す"
+              placeholder="サービスの名前か、URL・コマンド"
+              autofocus
+              value={search()}
+              onInput={(e) => setSearch(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.isComposing) return;
+                e.preventDefault();
+                const [only, ...others] = found();
+                if (only && others.length === 0) choose(only);
+                else if (!only && serviceTargets(search()).length > 0) setCustom(search());
+              }}
+            />
             <div class="service-choices" role="list" aria-label="足せるサービス">
               <For each={found()}>
                 {(c) => (
@@ -226,7 +247,7 @@ export default function AddService() {
 function Back(props: { onBack: () => void }) {
   return (
     <Button icon={icons.chevronLeft} onClick={props.onBack}>
-一覧へ
+      一覧へ
     </Button>
   );
 }
@@ -263,12 +284,23 @@ function Fill(props: { choice: Choice; onBack: () => void; onAdd: (values: Recor
       >
         <For each={c.fields}>
           {(f) => (
-            <Field label={<>{f.label}
-                {f.optional ? "（なくてもよい）" : ""}</>}>
-              <TextField type={f.secret ? "password" : "text"} required={!f.optional} value={values()[f.name] ?? ""} onInput={(e) => {
+            <Field
+              label={
+                <>
+                  {f.label}
+                  {f.optional ? "（なくてもよい）" : ""}
+                </>
+              }
+            >
+              <TextField
+                type={f.secret ? "password" : "text"}
+                required={!f.optional}
+                value={values()[f.name] ?? ""}
+                onInput={(e) => {
                   const v = e.currentTarget.value;
                   setValues((all) => ({ ...all, [f.name]: v }));
-                }} />
+                }}
+              />
             </Field>
           )}
         </For>
@@ -307,12 +339,22 @@ function Custom(props: { text: string; onBack: () => void; onAdded: (r: ConnectR
   const current = createMemo(() => targets()[at()] ?? targets()[0]);
   return (
     <div class="dialog-form">
-      <Field label="URL・コマンド・設定を貼る" hint="サービスの説明の「MCP」の節に、ほかの AI アプリ（Claude など）に入れるものとして書かれている。そのまま貼ると、つなぎ方を読み取る。">
-        <TextArea class="mono service-paste" autofocus spellcheck={false} placeholder={"https://mcp.example.com/mcp\nnpx -y some-mcp-server\n{ \"mcpServers\": { … } }"} value={text()} onInput={(e) => {
+      <Field
+        label="URL・コマンド・設定を貼る"
+        hint="サービスの説明の「MCP」の節に、ほかの AI アプリ（Claude など）に入れるものとして書かれている。そのまま貼ると、つなぎ方を読み取る。"
+      >
+        <TextArea
+          class="mono service-paste"
+          autofocus
+          spellcheck={false}
+          placeholder={'https://mcp.example.com/mcp\nnpx -y some-mcp-server\n{ "mcpServers": { … } }'}
+          value={text()}
+          onInput={(e) => {
             setText(e.currentTarget.value);
             setAt(0);
-          }} />
-        </Field>
+          }}
+        />
+      </Field>
       <Show when={targets().length > 1}>
         <Field label="どれをつなぐか" group>
           <Segmented
@@ -405,32 +447,44 @@ function Details(props: { read: ServiceTarget; onBack: () => void; onAdded: (r: 
           <For each={env().map((_, i) => i)}>
             {(i) => (
               <div class="row service-env">
-                <TextField class="mono" aria-label={`環境変数 ${i + 1} の名前`} placeholder="API_KEY" value={env()[i]?.[0] ?? ""} onInput={(e) => setVariable(i, 0, e.currentTarget.value)} />
-                <TextField class="grow" type="password" aria-label={env()[i]?.[0] ? `${env()[i]?.[0]} の値` : `環境変数 ${i + 1} の値`} value={env()[i]?.[1] ?? ""} onInput={(e) => setVariable(i, 1, e.currentTarget.value)} />
+                <TextField
+                  class="mono"
+                  aria-label={`環境変数 ${i + 1} の名前`}
+                  placeholder="API_KEY"
+                  value={env()[i]?.[0] ?? ""}
+                  onInput={(e) => setVariable(i, 0, e.currentTarget.value)}
+                />
+                <TextField
+                  class="grow"
+                  type="password"
+                  aria-label={env()[i]?.[0] ? `${env()[i]?.[0]} の値` : `環境変数 ${i + 1} の値`}
+                  value={env()[i]?.[1] ?? ""}
+                  onInput={(e) => setVariable(i, 1, e.currentTarget.value)}
+                />
               </div>
             )}
           </For>
           <Button small icon={icons.plus} class="service-more" onClick={() => setEnv((all) => [...all, ["", ""]])}>
-環境変数を足す
+            環境変数を足す
           </Button>
         </Field>
       </Show>
       <Show when={how() !== "local"}>
         <Disclosure startsOpen={how() === "api" || t.key !== "" || t.header !== ""} title="鍵でつなぐ">
-            <div class="dialog-form">
-              <Field label="鍵（API キー・トークン）" hint="サービスの画面で発行したもの。金庫に入る。ログインでつなぐなら要らない。">
-                <TextField type="password" value={key()} onInput={(e) => setKey(e.currentTarget.value)} />
+          <div class="dialog-form">
+            <Field label="鍵（API キー・トークン）" hint="サービスの画面で発行したもの。金庫に入る。ログインでつなぐなら要らない。">
+              <TextField type="password" value={key()} onInput={(e) => setKey(e.currentTarget.value)} />
+            </Field>
+            <Field label="鍵を入れるヘッダー" hint="サービスの説明に X-Api-Key などと書かれているときだけ変える。">
+              <TextField class="mono" placeholder="Authorization" value={header()} onInput={(e) => setHeader(e.currentTarget.value)} />
+            </Field>
+            <Show when={how() === "api"}>
+              <Field label="OpenAPI の URL（なくてもよい）">
+                <TextField class="mono" value={openapi()} onInput={(e) => setOpenapi(e.currentTarget.value)} />
               </Field>
-              <Field label="鍵を入れるヘッダー" hint="サービスの説明に X-Api-Key などと書かれているときだけ変える。">
-                <TextField class="mono" placeholder="Authorization" value={header()} onInput={(e) => setHeader(e.currentTarget.value)} />
-              </Field>
-              <Show when={how() === "api"}>
-                <Field label="OpenAPI の URL（なくてもよい）">
-                  <TextField class="mono" value={openapi()} onInput={(e) => setOpenapi(e.currentTarget.value)} />
-                </Field>
-              </Show>
-            </div>
-          </Disclosure>
+            </Show>
+          </div>
+        </Disclosure>
       </Show>
       <DialogActions before={<Back onBack={props.onBack} />} submit="つなぐ" disabled={busy()} />
     </form>

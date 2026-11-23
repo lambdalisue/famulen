@@ -1,4 +1,4 @@
-import { A, createAsync } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
 import AddModel from "~/components/AddModel";
 import { AgentCli, type Model, ModelKind, Role, type RoleSetting } from "~/gen/famulen/v1/settings_pb";
@@ -39,23 +39,20 @@ export default function Models() {
     setFinding(false);
   };
   const groups = () =>
-    GROUPS.map(([label, holds]) => ({ label, models: (models()?.models ?? []).filter(holds) })).filter(
-      (g) => g.models.length > 0,
-    );
+    GROUPS.map(([label, holds]) => ({ label, models: (models()?.models ?? []).filter(holds) })).filter((g) => g.models.length > 0);
 
   return (
     <>
-      <div class="page-head">
-        <div>
-          <PageHeader title="登録したモデル" note="エージェント（秘書・夢・見張り・トリアージ・見極め）が使えるモデル。このマシンで使えるものは自動で入る。どのエージェントにどれを使うかは、それぞれのエージェントの頁で選ぶ。" />
-        </div>
-        <AddModel candidates={models()?.candidates ?? []} />
-      </div>
+      <PageHeader
+        title="登録したモデル"
+        note="エージェント（秘書・夢・見張り・トリアージ・見極め）が使えるモデル。このマシンで使えるものは自動で入る。どのエージェントにどれを使うかは、それぞれのエージェントの頁で選ぶ。"
+        actions={<AddModel candidates={models()?.candidates ?? []} />}
+      />
       <section class="model-groups">
         <div class="model-groups-head">
           <h2>一覧</h2>
           <Button small icon={icons.refresh} disabled={finding()} onClick={() => void find()}>
-{finding() ? "探している" : "探し直す"}
+            {finding() ? "探している" : "探し直す"}
           </Button>
         </div>
         <For each={groups()} fallback={<EmptyState>まだない</EmptyState>}>
@@ -115,7 +112,7 @@ function ModelRow(props: { model: Model; roles: RoleSetting[] }) {
               {(r, i) => (
                 <>
                   {i() > 0 ? "・" : ""}
-                  <A href={ROLE_PAGES[r.role]}>{r.label}</A>
+                  <a href={ROLE_PAGES[r.role]}>{r.label}</a>
                 </>
               )}
             </For>
@@ -126,14 +123,30 @@ function ModelRow(props: { model: Model; roles: RoleSetting[] }) {
       <Show when={PRICED.includes(m().kind)}>
         <IconButton icon={icons.pencil} label={`${m().name}の鍵を入れ替える`} onClick={() => setReplacing(true)} />
       </Show>
-      <IconButton icon={icons.trash} label={`${m().name}を外す`} variant="danger" disabled={users().length > 0} title={users().length > 0 ? "使っているエージェントがあるので外せない" : "外す"} onClick={() => void whenConfirmed(`モデル「${m().name}」を外す`, "外す", () => act(() => api.models.unregisterModel({ id: m().id }), "外した"), m().found ? "「モデルの追加」で戻せる。" : "鍵も金庫から消える。")} />
+      <IconButton
+        icon={icons.trash}
+        label={`${m().name}を外す`}
+        variant="danger"
+        disabled={users().length > 0}
+        title={users().length > 0 ? "使っているエージェントがあるので外せない" : "外す"}
+        onClick={() =>
+          void whenConfirmed(
+            `モデル「${m().name}」を外す`,
+            "外す",
+            () => act(() => api.models.unregisterModel({ id: m().id }), "外した"),
+            m().found ? "「モデルの追加」で戻せる。" : "鍵も金庫から消える。",
+          )
+        }
+      />
       <Show when={replacing()}>
         <form class="row item-more" onSubmit={replace}>
           <TextField class="grow" name="api_key" type="password" autocomplete="new-password" required aria-label="新しい API キー" />
           <Button small onClick={() => setReplacing(false)}>
             やめる
           </Button>
-          <Button variant="primary" small type="submit">入れ替える</Button>
+          <Button variant="primary" small type="submit">
+            入れ替える
+          </Button>
         </form>
       </Show>
     </div>

@@ -36,9 +36,7 @@ export default function Usage() {
   const [params, setParams] = useSearchParams<{ by?: string; span?: string; day?: string }>();
   const by = (): By => (params.by === "model" ? "model" : "agent");
   const span = (): Span => SPANS.find(([key]) => key === params.span)?.[0] ?? "month";
-  const usage = createAsync(() =>
-    usageQuery(SPANS.find(([key]) => key === span())![2], params.day ?? ""),
-  );
+  const usage = createAsync(() => usageQuery(SPANS.find(([key]) => key === span())![2], params.day ?? ""));
   const models = createAsync(() => modelsQuery());
   const [picked, setPicked] = createSignal<string>();
 
@@ -48,9 +46,7 @@ export default function Usage() {
   };
   const model = (id: string) => [...(models()?.models ?? []), ...(models()?.candidates ?? [])].find((m) => m.id === id);
   const label = (kind: By, key: string) =>
-    kind === "agent"
-      ? (models()?.roles.find((r) => String(r.role) === key)?.label ?? "")
-      : (model(key)?.name ?? key);
+    kind === "agent" ? (models()?.roles.find((r) => String(r.role) === key)?.label ?? "") : (model(key)?.name ?? key);
   const cost = (rows: UsageRow[]) => {
     const monthly = rows.every((r) => (model(r.model)?.monthlyYen ?? 0) > 0);
     return rows.length > 0 && monthly ? "定額" : yen(sum(rows).yen);
@@ -90,9 +86,7 @@ export default function Usage() {
   const metered = createMemo(() => chart(true));
 
   const Swatch = (props: { by: By; key: string }) => (
-    <Show when={usage()}>
-      {(u) => <i class="usage-swatch" style={{ background: colorOf(u(), props.by, props.key) }} />}
-    </Show>
+    <Show when={usage()}>{(u) => <i class="usage-swatch" style={{ background: colorOf(u(), props.by, props.key) }} />}</Show>
   );
   const Cells = (props: { rows: UsageRow[] }) => {
     const s = () => sum(props.rows);
@@ -133,24 +127,28 @@ export default function Usage() {
           onChoose={(v) => show({ span: v === "month" ? undefined : v })}
         />
         <div class="usage-period">
-          <IconButton icon={icons.chevronLeft} label="前へ" onClick={() => {
+          <IconButton
+            icon={icons.chevronLeft}
+            label="前へ"
+            onClick={() => {
               const u = usage();
               if (u) show({ day: shiftDay(u.from, -1) });
-            }} />
+            }}
+          />
           <Show when={usage()}>{(u) => <b>{periodName(span(), u())}</b>}</Show>
-          <IconButton icon={icons.chevronRight} label="次へ" disabled={(usage()?.to ?? "") >= (usage()?.today ?? "")} onClick={() => {
+          <IconButton
+            icon={icons.chevronRight}
+            label="次へ"
+            disabled={(usage()?.to ?? "") >= (usage()?.today ?? "")}
+            onClick={() => {
               const u = usage();
               if (!u) return;
               const day = shiftDay(u.to, 1);
               show({ day: day > u.today ? undefined : day });
-            }} />
+            }}
+          />
         </div>
-        <SegmentedOf
-          label="見方"
-          value={by()}
-          items={BY}
-          onChoose={(v) => setParams({ by: v === "agent" ? undefined : v })}
-        />
+        <SegmentedOf label="見方" value={by()} items={BY} onChoose={(v) => setParams({ by: v === "agent" ? undefined : v })} />
       </div>
       <div class="usage-totals">
         <div class="card">
@@ -168,10 +166,7 @@ export default function Usage() {
           <div class="sub">ほかに定額 1 か月 {yen(usage()?.fixedMonthlyYen ?? 0)}</div>
         </div>
       </div>
-      <Show
-        when={(usage()?.rows.length ?? 0) > 0}
-        fallback={<EmptyState>この期間はまだ使っていない</EmptyState>}
-      >
+      <Show when={(usage()?.rows.length ?? 0) > 0} fallback={<EmptyState>この期間はまだ使っていない</EmptyState>}>
         <Show when={calls()}>
           {(c) => (
             <UsageChart

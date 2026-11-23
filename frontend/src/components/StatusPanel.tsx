@@ -80,13 +80,7 @@ function InputCard(props: { input: InputItem; tz: string }) {
         </span>
         <time class="mono status-input-at">{shortTime(props.input.at, props.tz)}</time>
       </div>
-      <button
-        type="button"
-        class="status-input-text"
-        classList={{ open: open() }}
-        aria-expanded={open()}
-        onClick={() => setOpen(!open())}
-      >
+      <button type="button" class="status-input-text" classList={{ open: open() }} aria-expanded={open()} onClick={() => setOpen(!open())}>
         {props.input.text}
       </button>
     </li>
@@ -104,7 +98,12 @@ export default function StatusPanel() {
   const upcoming = () =>
     (routines() ?? [])
       .filter((r) => r.enabled)
-      .flatMap((r) => r.runs.filter((run) => !run.skipped).slice(0, 1).map((run) => ({ id: r.id, title: r.title, when: r.when, at: run.at })))
+      .flatMap((r) =>
+        r.runs
+          .filter((run) => !run.skipped)
+          .slice(0, 1)
+          .map((run) => ({ id: r.id, title: r.title, when: r.when, at: run.at })),
+      )
       .sort((a, b) => Number(a.at - b.at))
       .slice(0, 8);
   const { approvals, held, count: waiting } = useWaiting();
@@ -154,12 +153,15 @@ export default function StatusPanel() {
                 <span class="grow">
                   起床予約 · {w.note}
                   <Show when={w.why}>
-                    <span class="sub">
-                      {w.why}
-                    </span>
+                    <span class="sub">{w.why}</span>
                   </Show>
                 </span>
-                <IconButton icon={icons.trash} label={`起床予約「${w.note}」を取り消す`} title="取り消す" onClick={() => void whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))} />
+                <IconButton
+                  icon={icons.trash}
+                  label={`起床予約「${w.note}」を取り消す`}
+                  title="取り消す"
+                  onClick={() => void whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
+                />
               </div>
             )}
           </For>
@@ -177,9 +179,7 @@ export default function StatusPanel() {
               <div role="listitem" class="item">
                 <span class="mono sub when">{shortTime(a.createdAt, tz())}</span>
                 <Tag tone="warn">確かめる</Tag>
-                <span class="grow mono">
-                  {a.tool}
-                </span>
+                <span class="grow mono">{a.tool}</span>
               </div>
             )}
           </For>
@@ -188,9 +188,7 @@ export default function StatusPanel() {
               <div role="listitem" class="item">
                 <span class="mono sub when">{shortTime(h.at, tz())}</span>
                 <Tag>止まった</Tag>
-                <span class="grow">
-                  {[...h.text].slice(0, 90).join("")}
-                </span>
+                <span class="grow">{[...h.text].slice(0, 90).join("")}</span>
               </div>
             )}
           </For>
@@ -202,11 +200,16 @@ export default function StatusPanel() {
       <section class="status-section">
         <div class="status-section-head">
           <h2>最近の入力</h2>
-          <Button small icon={icons.download} disabled={busy()} onClick={() => {
+          <Button
+            small
+            icon={icons.download}
+            disabled={busy()}
+            onClick={() => {
               setBusy(true);
               void downloadInputs().finally(() => setBusy(false));
-            }}>
-JSONL で書き出す
+            }}
+          >
+            JSONL で書き出す
           </Button>
         </div>
         <ul class="status-inputs">
