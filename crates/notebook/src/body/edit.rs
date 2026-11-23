@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use anyhow::Context as _;
 
-use super::{Body, Item, LOG, NOTES, same, split_commas};
+use super::{Body, Item, LOG, NOTES, RELATED, same, split_commas};
 
 /// What to write as a field's value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,23 @@ impl Value {
             Value::One(text) => text.trim().is_empty(),
             Value::Many(items) => items.is_empty(),
         }
+    }
+
+    /// Links, with the brackets that tell a free body's `Related` from text.
+    fn bracketed(self) -> Self {
+        let values = match self {
+            Value::One(text) => split_commas(&text),
+            Value::Many(items) => items,
+        };
+        Value::Many(
+            values
+                .into_iter()
+                .map(|v| match v.starts_with("[[") {
+                    true => v,
+                    false => format!("[[{v}]]"),
+                })
+                .collect(),
+        )
     }
 
     fn render(&self, name: &str, indent: &str) -> String {
@@ -115,7 +132,29 @@ impl Body {
 
     /// Write a field under the title, or remove it when its value is empty.
     pub fn set(&mut self, name: &str, value: impl Into<Value>) -> anyhow::Result<()> {
-        let value = value.into();
+        let mut value = value.into();
+        if self.layout.free {
+            anyhow::ensure!(
+                same(name, RELATED),
+                "a record of free text has no field {name}"
+            );
+            value = value.bracketed();
+            let notes = self.notes();
+            let mut next = self.clone();
+            next.set_field(name, value)?;
+            // Closes the gap a removed field leaves.
+            next.set_notes_of_free(&notes)?;
+            anyhow::ensure!(
+                next.notes() == notes,
+                "the text below would read as part of {name}"
+            );
+            *self = next;
+            return Ok(());
+        }
+        self.set_field(name, value)
+    }
+
+    fn set_field(&mut self, name: &str, value: Value) -> anyhow::Result<()> {
         if let Some(span) = self.field(name).map(|i| i.span.clone()) {
             return self.put(span, &value, name, "");
         }
@@ -177,6 +216,24 @@ impl Body {
         self.splice(span, &item.render())
     }
 
+    /// Replace the text of an item of a section, and leave what is nested in
+    /// it and what follows it as they are.
+    pub(crate) fn set_item_text(
+        &mut self,
+        section: &str,
+        index: usize,
+        text: &str,
+    ) -> anyhow::Result<()> {
+        let item = self.item_at(section, index)?;
+        let raw = &self.text[item.span.clone()];
+        let at = raw
+            .find(&item.text)
+            .filter(|_| !item.text.is_empty())
+            .with_context(|| format!("item {index} of {section} is not one line"))?;
+        let start = item.span.start + at;
+        self.splice(start..start + item.text.len(), &one_line(text))
+    }
+
     /// Write a field nested in an item, or remove it when its value is
     /// empty.
     pub fn set_item_field(
@@ -208,13 +265,14 @@ impl Body {
         let notes = notes.replace("\r\n", "\n");
         let notes = notes.trim();
         if self.layout.free {
-            let preamble = self.preamble.clone();
-            self.splice(preamble, "")?;
-            if notes.is_empty() {
-                return Ok(());
-            }
-            let end = self.text.len();
-            return self.insert_block(end, &format!("{notes}\n"));
+            let mut next = self.clone();
+            next.set_notes_of_free(notes)?;
+            anyhow::ensure!(
+                next.values(RELATED) == self.values(RELATED),
+                "the text would read as the links of {RELATED}; give those as the field"
+            );
+            *self = next;
+            return Ok(());
         }
         let before: Vec<String> = self.other_sections();
         let mut next = self.clone();
@@ -237,6 +295,15 @@ impl Body {
         );
         *self = next;
         Ok(())
+    }
+
+    fn set_notes_of_free(&mut self, notes: &str) -> anyhow::Result<()> {
+        self.splice(self.preamble.clone(), "")?;
+        if notes.is_empty() {
+            return Ok(());
+        }
+        let end = self.text.len();
+        self.insert_block(end, &format!("{notes}\n"))
     }
 
     /// Add to the log what `who` did.

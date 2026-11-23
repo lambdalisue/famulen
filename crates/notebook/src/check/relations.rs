@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Findings, Known, line_at};
 use crate::body::{LOG, NOTES, same};
-use crate::link::titled_links;
+use crate::link::found;
 use crate::link_target;
 use crate::records::{Record, record_of, titled_link};
 
@@ -20,17 +20,17 @@ pub(super) fn check(known: &Known, record: &Record, text: &str, findings: &mut F
         known.unknown_workgroup(&workgroup, findings);
     }
     let line_of = |part: &str| text.find(part).map_or(1, |at| line_at(text, at));
-    for link in titled_links(text) {
-        let Some((kind, id)) = record_of(link.target) else {
+    for link in found(text) {
+        let (Some((kind, id)), Some(title)) = (record_of(link.target), link.title) else {
             continue;
         };
         // A name given on purpose in free text, such as a nickname, is not
         // stale.
         if let Some(now) = known.title(kind, id)
-            && titled_link(kind, id, link.title) != titled_link(kind, id, &now)
+            && titled_link(kind, id, title) != titled_link(kind, id, &now)
             && is_structured(record, link.whole)
         {
-            let why = format!("{} is now {now}", link.title);
+            let why = format!("{title} is now {now}");
             findings.warning(line_of(link.whole), "link-title", why);
         }
     }

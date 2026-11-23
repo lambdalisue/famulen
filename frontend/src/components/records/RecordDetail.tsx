@@ -3,7 +3,7 @@ import { createEffect, createSignal, For, Index, type JSX, on, Show } from "soli
 import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
 import Segs from "~/components/Segs";
-import type { SectionType } from "~/gen/famulen/v1/records_pb";
+import type { RecordLink, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act, say } from "~/lib/act";
 import { api } from "~/lib/api";
 import { personaQuery, workgroupsQuery } from "~/lib/data";
@@ -12,17 +12,21 @@ import {
   type Field,
   fieldOf,
   type FieldType,
-  hrefOf,
   KIND_NAMES,
   kindsQuery,
   nameOf,
   type Rec,
   type RecordItem,
   recordQuery,
+  RELATED,
 } from "~/lib/records";
 import { setSelection } from "~/lib/view";
-import { A } from "@solidjs/router";
 import FieldEdit, { FieldView, type Typed } from "./FieldEdit";
+import Backlinks from "./links/Backlinks";
+import { KnownLinks } from "./links/known";
+import LinkedText from "./links/LinkedText";
+import LinkTextarea from "./links/LinkTextarea";
+import RelatedLinks from "./links/RelatedLinks";
 
 type PlainField = { name: string; value: string; values: string[] };
 type PlainItem = { text: string; fields: PlainField[] };
@@ -87,7 +91,9 @@ function Fields(props: { types: FieldType[]; fields: Field[]; aide: string; skip
           {(f) => (
             <div class="rec-field">
               <dt>{nameOf(f.name)}</dt>
-              <dd>{f.value}</dd>
+              <dd>
+                <LinkedText text={f.value} />
+              </dd>
             </div>
           )}
         </For>
@@ -296,7 +302,7 @@ function Details(props: { fields: Field[]; onSave: (change: (fields: PlainField[
 }
 
 /** Free Markdown: read as Arto draws it, written as plain text. */
-function Notes(props: { text: string; label: string; empty: string; onSave: (text: string) => Promise<boolean> }) {
+function Notes(props: { text: string; label: string; empty: string; links: RecordLink[]; onSave: (text: string) => Promise<boolean> }) {
   const [draft, setDraft] = createSignal<string | undefined>();
   const [preview, setPreview] = createSignal(false);
   const save = async () => {
@@ -333,74 +339,13 @@ function Notes(props: { text: string; label: string; empty: string; onSave: (tex
         </Show>
       </header>
       <Show when={draft() === undefined || preview()} fallback={
-        <textarea
-          class="input rec-notes"
-          aria-label={props.label}
-          placeholder="Markdown で書ける"
-          value={draft()}
-          onInput={(e) => setDraft(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
-          }}
-        />
+        <LinkTextarea label={props.label} value={draft() ?? ""} onInput={setDraft} onSave={() => void save()} />
       }>
         <Show when={(preview() && draft() !== undefined ? draft() : props.text)} fallback={<p class="empty">{props.empty}</p>}>
-          {(text) => <Markdown text={text()} />}
+          {(text) => <Markdown text={text()} links={props.links} />}
         </Show>
       </Show>
     </section>
-  );
-}
-
-const FROM: { [from: string]: string } = {
-  Parent: "子のタスク",
-  "Blocked by": "これを待つタスク",
-  Related: "関わるもの",
-  "Member of": "属する人",
-  Relations: "関係",
-  Covers: "これを対象にする契約",
-  Attendees: "参加する予定",
-  Assignee: "任せているタスク",
-  Notes: "備考で触れているもの",
-  Calendar: "予定",
-  "": "触れているもの",
-};
-
-function Links(props: { record: Rec }) {
-  const groups = () => {
-    const by = new Map<string, Rec["backlinks"]>();
-    for (const l of props.record.backlinks) {
-      const key = FROM[l.from] ?? nameOf(l.from);
-      by.set(key, [...(by.get(key) ?? []), l]);
-    }
-    return [...by];
-  };
-  return (
-    <Show when={groups().length > 0}>
-      <section class="rec-section">
-        <h3>つながり</h3>
-        <For each={groups()}>
-          {([name, links]) => (
-            <div class="rec-links">
-              <span class="sub">{name}</span>
-              <span class="chips-line">
-                <For each={links}>
-                  {(l) => (
-                    <Show when={hrefOf(l.kind, l.id)} fallback={<span class="tag">{l.title}</span>}>
-                      {(href) => (
-                        <A class="tag link" href={href()}>
-                          {l.title}
-                        </A>
-                      )}
-                    </Show>
-                  )}
-                </For>
-              </span>
-            </div>
-          )}
-        </For>
-      </section>
-    </Show>
   );
 }
 
@@ -434,7 +379,9 @@ function Log(props: { record: Rec; aide: string; onAdd: (line: string) => Promis
               <Show when={l.who}>
                 <span class="sub">{who(l.who)}</span>
               </Show>
-              <span class="rec-log-text">{l.text}</span>
+              <span class="rec-log-text">
+                <LinkedText text={l.text} />
+              </span>
             </li>
           )}
         </For>
@@ -536,6 +483,7 @@ export default function RecordDetail(props: {
   return (
     <Show when={record()} fallback={<p class="empty">この記録はもうない。</p>}>
       {(r) => (
+        <KnownLinks.Provider value={() => r().links}>
         <article class="rec">
           <header class="rec-title">
             <div class="row">
@@ -617,9 +565,9 @@ export default function RecordDetail(props: {
             <Show when={kind()}>
               {(k) => (
                 <>
-                  <Show when={k().fields.length > 0 || r().fields.length > 0}>
+                  <Show when={!k().free}>
                     <section class="rec-section">
-                      <Fields types={k().fields} fields={r().fields} aide={aide()} onSave={(name, v) => void save({ fields: [{ name, ...v }] })} />
+                      <Fields types={k().fields} fields={r().fields} aide={aide()} skip={[RELATED]} onSave={(name, v) => void save({ fields: [{ name, ...v }] })} />
                     </section>
                   </Show>
                   <For each={k().sections.filter((s) => r().sections.some((x) => same(x.name, s.name)) || addedSections().includes(s.name))}>
@@ -667,7 +615,16 @@ export default function RecordDetail(props: {
                 </>
               )}
             </Show>
-            <Links record={r()} />
+            <RelatedLinks
+              record={r()}
+              onSave={(change) =>
+                void save((now) => {
+                  const values = change(fieldOf(now, RELATED)?.values ?? []);
+                  return { fields: [{ name: RELATED, value: "", values }] };
+                })
+              }
+            />
+            <Backlinks record={r()} />
             <Show when={!kind()?.free}>
               <section class="rec-section">
                 <h3>ほかの項目</h3>
@@ -680,6 +637,7 @@ export default function RecordDetail(props: {
               text={r().notes}
               label={kind()?.free ? "本文" : "備考"}
               empty={kind()?.free ? "まだ何も書いていない" : "備考はまだない"}
+              links={r().links}
               onSave={async (notes) => (await save({ notes })) !== undefined}
             />
             {props.extra?.(r())}
@@ -695,6 +653,7 @@ export default function RecordDetail(props: {
             </p>
           </Show>
         </article>
+        </KnownLinks.Provider>
       )}
     </Show>
   );

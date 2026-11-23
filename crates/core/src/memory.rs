@@ -15,7 +15,7 @@ pub use famulen_notebook::{Entry, EpisodeState, Src};
 use std::path::{Path, PathBuf};
 
 /// What long-term memory holds about a party, with the file each item is in:
-/// every memory whose prose links to the party's record, and every one
+/// every memory whose prose or summary links to the party's record, and every one
 /// tagged with the party.
 pub fn party_memories(dir: &Path, party: &str) -> anyhow::Result<Vec<(PathBuf, Entry)>> {
     let target = format!("{}/parties/{party}", famulen_notebook::RECORDS);
@@ -27,7 +27,12 @@ pub fn party_memories(dir: &Path, party: &str) -> anyhow::Result<Vec<(PathBuf, E
             let path = f.path;
             f.entries
                 .into_iter()
-                .filter(move |e| linked || e.get("party") == Some(party))
+                .filter({
+                    let target = target.clone();
+                    move |e| {
+                        linked || e.get("party") == Some(party) || links(e.text()).contains(&target)
+                    }
+                })
                 .map(move |e| (path.clone(), e))
         })
         .collect())
@@ -66,6 +71,10 @@ mod tests {
                 ),
             ),
             (
+                "long/semantic/tanaka-work.md",
+                long("m5", "\"[[records/parties/p7]] は経理\"", "", "経理の人。"),
+            ),
+            (
                 "long/prospective/send-papers.md",
                 long("m4", "田中さんに資料を送る", "party: p7\n", "資料を送る。"),
             ),
@@ -83,6 +92,7 @@ mod tests {
             ids,
             [
                 (Path::new("long/semantic/tanaka-sweets.md"), "m1"),
+                (Path::new("long/semantic/tanaka-work.md"), "m5"),
                 (Path::new("long/prospective/send-papers.md"), "m4"),
             ]
         );

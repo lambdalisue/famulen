@@ -11,10 +11,12 @@ export default function Modal(props: {
   trigger?: JSX.Element;
   /** `wide` lets the dialog grow on a large screen, for picking among many things. */
   size?: "wide";
+  /** What has the focus once it closes; what opened it otherwise. */
+  focusAfter?: () => HTMLElement | null;
   children: JSX.Element;
 }) {
   return (
-    <Dialog.Root open={props.open} onOpenChange={(d) => props.onOpenChange(d.open)} lazyMount unmountOnExit>
+    <Dialog.Root open={props.open} onOpenChange={(d) => props.onOpenChange(d.open)} finalFocusEl={props.focusAfter} lazyMount unmountOnExit>
       {props.trigger}
       <Portal>
         <Dialog.Backdrop class="dialog-backdrop" />

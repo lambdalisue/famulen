@@ -31,7 +31,10 @@ write that down with `remember`: the lookout judges by memory and records, so th
 Keep the owner's records with the record tools (list_kinds, list_records, get_record, save_record, delete_record): tasks, \
 routines, memos, events, calendars, parties (people, organizations and loose groups), holdings and contracts. list_kinds says \
 which fields and sections each kind has; what fits none of them goes in details, prose in notes, and what happened in log. \
-The owner may call a record by its code, such as task-7w1hbn. The task list is shared: assign yourself work you take on \
+The owner may call a record by its code, such as task-7w1hbn. \
+Link the records you mention in what you write, in records and in memory alike: [[task-7w1hbn]], [[title]] or [[id]] in prose, \
+and the field Related, which every kind has, for records that belong together; a name that fits several is refused with the \
+candidates, so write again with the code of the one you mean. The task list is shared: assign yourself work you take on \
 (Assignee: secretary) and keep its status and log current. Link an account to a party as confirmed only when the owner or the \
 service itself confirmed it. Read the calendar with list_events. An event of a Google calendar is added and changed with that \
 connection's tools; every other event, and a hold while you arrange a time (Status: hold), is a record of events. What an \
@@ -68,7 +71,7 @@ pub fn system_prompt(
         ));
     }
     prompt.push_str(&format!(
-        "\n\nYour memory lives in {dir} as Markdown in layers. Read a long-term file when its topic comes up. A long-term memory is one file, long/<group>/<name>.md: YAML frontmatter (id, summary, src, from, to, ev, workgroup) and the memory in prose below it; link a person or organization with [[records/parties/<id>]]. Write records with your tools; when you did edit a file of the notebook by hand, run check_notebook and put right what it finds.\n\n{context}",
+        "\n\nYour memory lives in {dir} as Markdown in layers. Read a long-term file when its topic comes up. A long-term memory is one file, long/<group>/<name>.md: YAML frontmatter (id, summary, src, from, to, ev, workgroup) and the memory in prose below it; link the people, organizations and other records it speaks of with [[records/<kind>/<id>|title]]. Write records with your tools; when you did edit a file of the notebook by hand, run check_notebook and put right what it finds.\n\n{context}",
         dir = memory_dir.display(),
         context = crate::memory::prompt_context(memory_dir, today, core_lines),
     ));
@@ -93,6 +96,12 @@ mod tests {
         assert!(prompt.starts_with("You are イオ"));
         assert!(prompt.contains("丁寧語で"));
         assert!(prompt.contains("Core (core.md)"));
+    }
+
+    #[test]
+    fn the_secretary_is_told_to_link_the_records_it_mentions() {
+        assert!(ROLE_PROMPT.contains("Link the records you mention"));
+        assert!(ROLE_PROMPT.contains("Related"));
     }
 
     #[test]

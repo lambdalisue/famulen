@@ -262,3 +262,69 @@ fn a_memory_whose_writer_is_unknown_is_not_written() {
 
     assert_eq!(files(), before);
 }
+
+#[test]
+fn records_are_linked_by_code_or_title_and_the_links_are_listed_both_ways() {
+    let dir = temp("links");
+    ok(&dir, &["init"]);
+    let task = ok(&dir, &["add", "tasks", "--title", "見積もり"]);
+    let task = task.trim();
+    let code = format!("task-{}", &task[20..]);
+    let memo = ok(
+        &dir,
+        &[
+            "add",
+            "memos",
+            "--title",
+            "覚え",
+            "--text",
+            "[[見積もり]] の続き",
+            "--field",
+            &format!("Related=[{code}]"),
+        ],
+    );
+    let memo = memo.trim();
+    ok(&dir, &["remember", "core", &format!("[[{code}]] を先に")]);
+
+    let file = ok(&dir, &["get", &format!("records/memos/{memo}.md")]);
+    let link = format!("[[records/tasks/{task}|見積もり]]");
+    assert!(
+        file.contains(&format!("- Related: {link}\n\n{link} の続き\n")),
+        "{file}"
+    );
+    let shown = ok(&dir, &["links", "tasks", &code, "--json"]);
+    let shown: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    let back = shown["backlinks"].as_array().unwrap();
+    assert_eq!(back.len(), 3, "{shown}");
+    assert_eq!(back[2]["source"], "memory/core");
+    assert_eq!(back[0]["from"], "Related");
+    let out = ok(&dir, &["links", "memos", memo]);
+    assert!(
+        out.contains(&format!("->\trecords/tasks/{task}\t見積もり\tRelated")),
+        "{out}"
+    );
+
+    ok(
+        &dir,
+        &[
+            "keep",
+            "semantic",
+            "estimate",
+            "--summary",
+            &format!("[[{code}]] の覚え"),
+            "--text",
+            "詳細",
+        ],
+    );
+    let kept = ok(&dir, &["get", "memory/long/semantic/estimate.md"]);
+    assert!(kept.contains(&format!("{link} の覚え")), "{kept}");
+
+    ok(&dir, &["add", "memos", "--title", "見積もり"]);
+    let refused = run(
+        &dir,
+        &["add", "memos", "--title", "x", "--text", "[[見積もり]]"],
+    );
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains(&code));
+    assert_eq!(ok(&dir, &["check"]), "");
+}

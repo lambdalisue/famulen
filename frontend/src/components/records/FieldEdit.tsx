@@ -1,37 +1,17 @@
 import { Switch } from "@ark-ui/solid/switch";
-import { A, createAsync } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
 import Icon from "~/components/Icon";
 import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { choiceOf, dateText, type Field, type FieldType, hrefOf, linkOf, linkTo, moneyText, OWNER, SECRETARY } from "~/lib/records";
+import { choiceOf, dateText, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY } from "~/lib/records";
+import RecordChip from "./links/RecordChip";
 import RecordPicker from "./RecordPicker";
 
 export type Typed = { value: string; values: string[] };
 
 const one = (value: string): Typed => ({ value, values: [] });
 const many = (values: string[]): Typed => ({ value: "", values });
-
-/** Words the notebook gives a meaning of their own. */
-const WORDS: { [text: string]: string } = { me: "あなた", "previous unfinished": "前の回がまだ済んでいない" };
-
-/** A link to a record as a chip that opens it. */
-function RecordChip(props: { text: string }) {
-  const link = () => linkOf(props.text);
-  return (
-    <Show when={link()} fallback={<span>{WORDS[props.text] ?? props.text}</span>}>
-      {(l) => (
-        <Show when={hrefOf(l().kind, l().id)} fallback={<span class="tag">{l().title || l().id}</span>}>
-          {(href) => (
-            <A class="tag link" href={href()}>
-              {l().title || l().id}
-            </A>
-          )}
-        </Show>
-      )}
-    </Show>
-  );
-}
 
 /** A field's value as it is read. */
 export function FieldView(props: { type: FieldType; field: Field | undefined; aide: string }) {
@@ -126,7 +106,7 @@ function LinksEdit(props: { label: string; of: string; values: string[]; single:
       </For>
       <RecordPicker
         label={`${props.label}を選ぶ`}
-        kinds={props.of ? [props.of] : ["tasks", "memos", "parties", "holdings", "contracts", "events", "routines"]}
+        kinds={props.of ? [props.of] : undefined}
         onPick={(r) => {
           const link = linkTo(r);
           if (!props.values.includes(link)) save(props.single ? [link] : [...props.values, link]);

@@ -8,6 +8,9 @@ export type { Field, FieldType, LinkAccountRequest, Rec, RecordItem, RecordKind 
 export const OWNER = "owner";
 export const SECRETARY = "secretary";
 
+/** The field every kind has: the records it has to do with. */
+export const RELATED = "Related";
+
 export const recordsQuery = query(
   async (kind: string, workgroup: string) => (await api.records.listRecords({ kind, workgroup })).records,
   "records",
@@ -49,7 +52,7 @@ export function sectionOf(r: Rec, section: string): { fields: Field[] } | undefi
 
 /** The kind, id and title a wiki link to a record names. */
 export function linkOf(text: string): { kind: string; id: string; title: string } | undefined {
-  const m = /^\[\[records\/([^/\]|]+)\/([^/\]|]+)(?:\|([^\]]*))?\]\]$/.exec(text.trim());
+  const m = /^\[\[records\/([^/\]|]+)\/([^/\]|]+?)(?:\.md)?(?:\|([^\]]*))?\]\]$/.exec(text.trim());
   return m ? { kind: m[1], id: m[2], title: m[3] ?? "" } : undefined;
 }
 

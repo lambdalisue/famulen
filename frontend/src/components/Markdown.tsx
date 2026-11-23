@@ -1,15 +1,17 @@
 import { useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
+import type { RecordLink } from "~/gen/famulen/v1/records_pb";
 import { draw, notebookHref } from "~/lib/markdown";
 import "./Markdown.css";
 
 /**
  * Markdown drawn as Arto draws it; until that is ready, the text itself.
  * `inline` sets it into the line it stands in, such as a title or an item of
- * a list; `attributes` sets apart what memory items carry at their end.
+ * a list; `attributes` sets apart what memory items carry at their end; `links`
+ * says what the records it links to are called now.
  */
-export default function Markdown(props: { text: string; inline?: boolean; attributes?: boolean }) {
+export default function Markdown(props: { text: string; inline?: boolean; attributes?: boolean; links?: RecordLink[] }) {
   let viewer: HTMLElement | undefined;
   const navigate = useNavigate();
   const [drawn, setDrawn] = createSignal(false);
@@ -21,7 +23,7 @@ export default function Markdown(props: { text: string; inline?: boolean; attrib
     let turn = 0;
     createEffect(() => {
       const text = props.text;
-      const how = { inline: props.inline, attributes: props.attributes };
+      const how = { inline: props.inline, attributes: props.attributes, links: props.links };
       const mine = ++turn;
       const place = document.createElement("div");
       if (!viewer) return;
@@ -40,8 +42,14 @@ export default function Markdown(props: { text: string; inline?: boolean; attrib
   const onClick = (e: MouseEvent) => {
     if (e.target instanceof Element && e.target.closest(".md-link, a")) e.stopPropagation();
   };
+  const onKeyDown = (e: KeyboardEvent) => {
+    const path = e.key === "Enter" && e.target instanceof HTMLElement ? e.target.dataset.mdLink : undefined;
+    if (!path) return;
+    e.stopPropagation();
+    window.handleMarkdownLinkClick?.(path, 0);
+  };
   return (
-    <Dynamic component={props.inline ? "span" : "div"} class={props.inline ? "md md-inline" : "md"} onClick={onClick}>
+    <Dynamic component={props.inline ? "span" : "div"} class={props.inline ? "md md-inline" : "md"} onClick={onClick} onKeyDown={onKeyDown}>
       <Show when={!drawn()}>
         <Dynamic component={props.inline ? "span" : "pre"} class="md-plain">
           {props.text}

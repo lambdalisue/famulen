@@ -78,7 +78,13 @@ impl Api {
         let records = &self.app.records;
         let mut links: Vec<RecordLink> = Vec::new();
         for (kind, id) in core::linked(r) {
-            links.extend(names.link(records, &kind, &id, String::new()));
+            let link = names.link(records, &kind, &id, String::new());
+            links.push(link.unwrap_or_else(|| RecordLink {
+                kind,
+                id,
+                missing: true,
+                ..Default::default()
+            }));
         }
         let code = names
             .link(records, &r.kind, &r.id, String::new())
@@ -136,10 +142,24 @@ impl Api {
         let r = records.need(kind, id)?;
         let mut names = Names::default();
         let mut out = self.record(&r, &mut names);
-        for b in records.backlinks(kind, &r.id)? {
+        let to_it = self.app.index.backlinks(kind, &r.id)?;
+        for b in to_it.records {
             out.backlinks
                 .extend(names.link(records, &b.kind, &b.id, b.from));
         }
+        out.memories = to_it
+            .memories
+            .into_iter()
+            .map(|m| MemoryLink {
+                file: m
+                    .path
+                    .split_once('/')
+                    .map_or(m.path.clone(), |(_, file)| file.to_owned()),
+                id: m.id,
+                title: m.title,
+                ..Default::default()
+            })
+            .collect();
         if kind == TASKS {
             let all = by_id(records.list(TASKS)?);
             for id in core::Records::blockers(&all, &r) {

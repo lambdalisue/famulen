@@ -10,7 +10,6 @@ fields:
   Waiting for: text
   Parent: link:tasks
   Blocked by: links:tasks
-  Related: links
 ---
 
 # タスク

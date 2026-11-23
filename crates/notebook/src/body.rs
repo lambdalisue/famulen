@@ -14,9 +14,15 @@ use ox_content_allocator::Allocator;
 use ox_content_ast::{List, ListItem, Node, Span};
 use ox_content_parser::{Parser, ParserOptions};
 
+use crate::link::is_link;
+
 pub const DETAILS: &str = "Details";
 pub const NOTES: &str = "Notes";
 pub const LOG: &str = "Log";
+
+/// The field every kind has: the records it has to do with. Under the title
+/// of a free body, it is the one thing that is not text.
+pub const RELATED: &str = "Related";
 
 /// The sections every kind with a structured body may have, after its own.
 pub const COMMON_SECTIONS: [&str; 3] = [DETAILS, NOTES, LOG];
@@ -163,6 +169,17 @@ impl Body {
             fields_span = Some(range(list.span));
             at += 1;
         }
+        if layout.free
+            && title.is_some()
+            && let Some(Node::List(list)) = nodes.get(at).copied()
+            && !list.ordered
+            && let Some(first) = list.children.iter().next()
+            && let related = item(&text, first)
+            && is_related(&related)
+        {
+            fields_span = Some(related.span.clone());
+            fields = vec![related];
+        }
         let preamble_start = fields_span
             .as_ref()
             .or(title.as_ref().map(|(_, r)| r))
@@ -268,6 +285,15 @@ impl Body {
         parts.join("\n\n")
     }
 
+    /// Where what stands between the fields and the first section is.
+    pub(crate) fn preamble(&self) -> Range<usize> {
+        self.preamble.clone()
+    }
+
+    pub(crate) fn title_end(&self) -> usize {
+        self.title.as_ref().map_or(0, |(_, span)| span.end)
+    }
+
     /// The line, from one, that a place in the body is on.
     pub fn line_of(&self, at: usize) -> usize {
         self.text[..at.min(self.text.len())].matches('\n').count() + 1
@@ -277,6 +303,21 @@ impl Body {
 /// Whether two names of a field or section are the same.
 pub fn same(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Whether an item is the `Related` of a free body: one that holds only
+/// links, so that text of the owner's that merely starts with the word stays
+/// text.
+fn is_related(item: &Item) -> bool {
+    let values = item.values();
+    let only_links = if item.items.is_empty() {
+        item.rest.is_empty()
+    } else {
+        item.field().is_some_and(|(_, value)| value.is_empty())
+            && item.items.iter().all(|i| i.rest.is_empty())
+            && item.rest.lines().count() == item.items.len()
+    };
+    item.is_field(RELATED) && !values.is_empty() && only_links && values.iter().all(|v| is_link(v))
 }
 
 /// Split at commas that are not inside a wiki link.
@@ -470,6 +511,49 @@ mod tests {
         let mut b = b;
         b.set_notes("## Log\n\n別").unwrap();
         assert_eq!(b.text(), "# メモ\n\n## Log\n\n別\n");
+    }
+
+    #[test]
+    fn the_related_of_a_free_body_is_read_and_written_apart_from_its_text() {
+        let free = Layout {
+            free: true,
+            ..Layout::default()
+        };
+        let mut b = Body::parse("# メモ\n\n- a\n- b\n", &free).unwrap();
+
+        b.set(
+            RELATED,
+            vec!["memo-7w1hbn".to_owned(), "[[x|甲]]".to_owned()],
+        )
+        .unwrap();
+
+        assert_eq!(
+            b.text(),
+            "# メモ\n\n- Related: [[memo-7w1hbn]], [[x|甲]]\n\n- a\n- b\n"
+        );
+        assert_eq!(b.values(RELATED), ["[[memo-7w1hbn]]", "[[x|甲]]"]);
+        assert_eq!(b.notes(), "- a\n- b");
+        b.set_notes("別\n\n続き").unwrap();
+        assert_eq!(b.values(RELATED).len(), 2);
+        assert_eq!(b.notes(), "別\n\n続き");
+        b.set(RELATED, "").unwrap();
+        assert_eq!(b.text().trim_end(), "# メモ\n\n別\n\n続き".trim_end());
+        assert!(b.set("Status", "x").is_err());
+        assert!(b.set_notes("- Related: [[x]]").is_err());
+
+        for notes in [
+            "- Related: [[x]] を確認して [[y]]",
+            "- Related: [[x]]\n\n  続き",
+            "- Related:\n  - [[x]]\n  - [[y]]\n\n  続き",
+        ] {
+            let b = Body::parse(format!("# メモ\n\n{notes}\n"), &free).unwrap();
+            assert_eq!(b.notes(), notes);
+        }
+        let listed = Body::parse("# メモ\n\n- Related:\n  - [[x]]\n  - [[y]]\n", &free).unwrap();
+        assert_eq!(listed.values(RELATED), ["[[x]]", "[[y]]"]);
+
+        let b = Body::parse("# メモ\n\n- Related: ただの文\n", &free).unwrap();
+        assert_eq!(b.notes(), "- Related: ただの文");
     }
 
     #[test]

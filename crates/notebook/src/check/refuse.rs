@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use super::relations::{ACYCLIC, ByKey, leads_to_itself};
 use super::{Findings, Severity, record, text_findings};
-use crate::records::{Record, Records};
+use crate::records::{Names, Record, Records};
 
 /// Refuse a record's new text when it is wrong where the text it replaces
 /// was not.
@@ -15,10 +15,11 @@ pub(crate) fn refuse_new_errors(
 ) -> anyhow::Result<()> {
     let kind = records.kind(&written.kind)?;
     let rel = written.rel();
+    let names = Names::new(records.clone());
     let wrong = |text: &str| -> BTreeSet<(&'static str, String)> {
         let mut findings = Findings::of(&rel);
         record::check(&kind, &written.id, text, &mut findings);
-        text_findings(records.notebook(), text, &mut findings);
+        text_findings(&names, text, &mut findings);
         findings
             .all
             .into_iter()
