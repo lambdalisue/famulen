@@ -1,0 +1,24 @@
+{
+  "envelope_id": "57d6a792-4d35-4d0b-b6aa-3361493e1caf",
+  "type": "events_api",
+  "accepts_response_payload": false,
+  "retry_attempt": 0,
+  "retry_reason": "",
+  "payload": {
+    "token": "verification",
+    "team_id": "T0ACME",
+    "api_app_id": "A0123456789",
+    "event": {
+      "type": "message",
+      "channel": "D0OWNERDM",
+      "channel_type": "im",
+      "user": "U0OWNER",
+      "text": "明日の予定を教えて",
+      "ts": "1795324049.000100",
+      "client_msg_id": "c3a1"
+    },
+    "type": "event_callback",
+    "event_id": "Ev0EXAMPLE",
+    "event_time": 1795324049
+  }
+}

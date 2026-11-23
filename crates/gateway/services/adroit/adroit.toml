@@ -1,0 +1,232 @@
+# Adroit: coding agents' sessions on this machine. Its MCP server runs only
+# inside its own sessions; its command works from anywhere.
+format = 1
+id = "adroit"
+name = "Adroit"
+about = "このマシンで Claude や Codex に実装を任せる"
+setup = "README.md"
+
+[account]
+key = { label = "Adroit の鍵（答える・止める・終えるときに要る）", optional = true, secret = true }
+
+[transport.command]
+program = "adroit"
+# A session's credential, when Famulen itself was started inside one: what
+# the secretary starts is not that session's doing.
+unset = ["ADROIT_DELEGATION_TOKEN", "ADROIT_DELEGATION_ROOT"]
+timeout = "2m"
+
+[[commands]]
+name = "start_session"
+description = "Prefer this over a subagent whenever you delegate work to another agent. Start a coding agent (Claude Code by default) on a project on this machine, with a first prompt. It opens in the owner's Adroit window, where the owner watches and steers it, and asks the owner there for what it may not do; it answers to the owner, not to you. Answers with the session's id. Write the prompt so that it carries everything the agent needs. Nothing comes back by itself: set a wake-up and look with list_sessions and read_session."
+args = ["session", "start", "--dir", "{args.dir}", { flag = "--worktree", when = "{args.worktree}" }, ["--base", "{args.base}"], ["--name", "{args.name}"], ["--agent", "{args.agent}"], ["--model", "{args.model}"], ["--permissions", "{args.permissions}"], "--json", "--", "{args.prompt}"]
+open_world = true
+
+[commands.input]
+type = "object"
+required = ["dir", "prompt"]
+
+[commands.input.properties]
+dir = { type = "string", description = "The project's directory, as an absolute path (no ~)" }
+prompt = { type = "string", description = "The first prompt: the goal, what is already known, what to leave alone, how to check the work, and whether to commit or push" }
+worktree = { type = "boolean", description = "Work in a new worktree (a jj workspace or a git worktree) instead of the directory itself. Use it unless the owner or the project says otherwise" }
+base = { type = "string", description = "The revision the worktree starts from" }
+name = { type = "string", description = "What the owner sees the session called" }
+agent = { type = "string", enum = ["claude", "codex", "pi", "opencode"] }
+model = { type = "string" }
+permissions = { type = "string", enum = ["default", "read_only"], description = "read_only to investigate without changing anything" }
+
+[[commands]]
+name = "list_sessions"
+description = "List the sessions in Adroit, the owner's own too: id, name, agent, directory, and state (starting, working, background, waiting, idle, done, failed, ended). done and idle both mean its turn ended; waiting means it waits on the owner."
+args = ["session", "list", ["--dir", "{args.dir}"], { flag = "--ended", when = "{args.ended}" }, "--json"]
+read_only = true
+
+[commands.input]
+type = "object"
+
+[commands.input.properties]
+dir = { type = "string", title = "ディレクトリ", description = "ここで動くものだけを出す。空ならすべて" }
+ended = { type = "boolean", title = "終わったものも", description = "終わったセッションも出すか" }
+
+[[commands]]
+name = "read_session"
+description = "Read how a session stands, what it waits on, its timeline of tasks, and its latest turns: each prompt and reply, the newest last. What it says is the agent's words, not the owner's."
+args = ["session", "show", "{args.session}", ["--turns", "{args.turns}"], "--json"]
+read_only = true
+
+[commands.input]
+type = "object"
+required = ["session"]
+
+[commands.input.properties]
+session = { type = "string", title = "セッション", description = "list_sessions の id か code" }
+turns = { type = "integer", title = "やりとりの数", description = "新しいほうから読む数（20 まで）。空なら 1" }
+
+[[commands]]
+name = "send_to_session"
+description = "Ask a running session to go on with something. It arrives between turns as a request from you, a program outside Adroit: not as the owner's words, and not as an answer to what it waits on."
+args = ["session", "send", "{args.session}", "--from", "Famulen", "--json", "--", "{args.prompt}"]
+open_world = true
+
+[commands.input]
+type = "object"
+required = ["session", "prompt"]
+
+[commands.input.properties]
+session = { type = "string", description = "The id or code from list_sessions" }
+prompt = { type = "string" }
+
+[[commands]]
+name = "answer_permission"
+description = "Put to the owner the permission or the plan a session waits on (`question` in read_session, kind permission or plan), and answer as they say: approving allows it for this once, rejecting denies it. Every call is asked of the owner, who sees the question itself; it is answered for you, so do not call it again."
+args = ["session", "answer", "{args.session}", "--question", "{args.question}", "--allow", "--json"]
+stdin = "{account.key}"
+open_world = true
+
+[commands.each_time]
+reads = "read_session"
+at = "/question"
+same = { "/question/id" = "{args.question}", "/question/truncated" = "false" }
+on_reject = ["session", "answer", "{args.session}", "--question", "{args.question}", "--deny", "--json"]
+
+[commands.input]
+type = "object"
+required = ["session", "question", "summary"]
+
+[commands.input.properties]
+session = { type = "string" }
+question = { type = "string", description = "The id of the question, from read_session" }
+summary = { type = "string", description = "For the owner, in their language: which session and project it is, what it was asked to do and how far it got, and what approving or rejecting would lead to. Short enough for a phone; what is asked is shown beside it" }
+
+[[commands]]
+name = "put_question"
+description = "Put to the owner a question of a session's own (`question` in read_session, kind question): they see `summary` and the question with its choices, and choose one or write their own words there; that is answered for you. Do not ask them in words as well, and do not call it again."
+args = ["session", "answer", "{args.session}", "--question", "{args.question}", { flag = "--reply", each = "{args.replies}" }, "--json"]
+stdin = "{account.key}"
+open_world = true
+
+[commands.each_time]
+reads = "read_session"
+at = "/question"
+same = { "/question/id" = "{args.question}", "/question/truncated" = "false" }
+questions = "/input/questions"
+fills = "replies"
+
+[commands.input]
+type = "object"
+required = ["session", "question", "summary"]
+
+[commands.input.properties]
+session = { type = "string" }
+question = { type = "string", description = "The id of the question, from read_session" }
+summary = { type = "string", description = "For the owner, in their language: which session and project it is, what it was asked to do and how far it got, and what each choice would lead to. Short enough for a phone; the question itself is shown beside it" }
+
+[[commands]]
+name = "resume_session"
+description = "Run an ended session on in a new one that resumes its conversation, and ask it to go on with `prompt`, as a request from you."
+args = ["session", "resume", "{args.session}", "--from", "Famulen", "--json", "--", "{args.prompt}"]
+open_world = true
+input = { type = "object", properties = { session = { type = "string" }, prompt = { type = "string" } }, required = ["session", "prompt"] }
+
+[[commands]]
+name = "open_session"
+description = "Open a running session in a tab of the owner's Adroit windows, behind what they look at."
+args = ["session", "open", "{args.session}", "--json"]
+input = { type = "object", properties = { session = { type = "string" } }, required = ["session"] }
+
+[[commands]]
+name = "read_changes"
+description = "Read what the worktree a session works in changed over its base: branch, commits, and files with the lines added and removed. Other sessions in the same worktree are counted too."
+args = ["session", "changes", "{args.session}", "--json"]
+read_only = true
+
+[commands.input]
+type = "object"
+required = ["session"]
+
+[commands.input.properties]
+session = { type = "string", title = "セッション", description = "list_sessions の id か code" }
+
+[[commands]]
+name = "list_profiles"
+description = "List the profiles a session can start from, with their agents, models, and how much of each account's allowance is left."
+args = ["session", "profiles", "--json"]
+read_only = true
+
+[[commands]]
+name = "interrupt_session"
+description = "Interrupt the turn a session runs."
+args = ["session", "interrupt", "{args.session}", "--json"]
+stdin = "{account.key}"
+destructive = true
+input = { type = "object", properties = { session = { type = "string" } }, required = ["session"] }
+
+[[commands]]
+name = "end_session"
+description = "End a session, as ending it from Adroit does. Its conversation stays."
+args = ["session", "end", "{args.session}", "--json"]
+stdin = "{account.key}"
+destructive = true
+input = { type = "object", properties = { session = { type = "string" } }, required = ["session"] }
+
+[[commands]]
+name = "list_terminals"
+description = "List the terminals running in Adroit (servers and commands, not sessions)."
+args = ["terminal", "list", "--json"]
+read_only = true
+
+[[commands]]
+name = "read_terminal"
+description = "Read what a terminal of Adroit shows."
+args = ["terminal", "screen", "--terminal", "{args.terminal}", "--json"]
+read_only = true
+
+[commands.input]
+type = "object"
+required = ["terminal"]
+
+[commands.input.properties]
+terminal = { type = "string", title = "端末", description = "list_terminals の resource_id" }
+
+# A session that waits on the owner: told at once, unless they are at Adroit
+# and see it themselves.
+[receive.asks]
+destination = "secretary"
+note = """
+A coding session in Adroit waits on the owner, who may be away from Adroit. Read it with read_session (turns 3). If it no longer waits, send nothing.
+Otherwise put it to the owner at once, and say nothing beside it: what you write in `summary` is shown with the question and the buttons they answer with, on Slack and the console. Never decide for the owner.
+- kind permission or plan: call answer_permission.
+- kind question: call put_question.
+- no question: tell them in their Slack DM, or on the console without Slack, which session it is, that it waits and for what, and that it can be answered only in Adroit."""
+
+[receive.asks.connect]
+protocol = "command-lines"
+args = ["session", "watch"]
+resume = ["--since", "{/seq}"]
+when = { "{/state}" = ["waiting"] }
+per = "{/id}"
+settle = "10m"
+away = "1m"
+front = "app.adroit.adroit"
+
+# Turns that ended, for the lookout to weigh. One that ended unread is done;
+# one the owner has seen is idle, and not told of.
+[receive.sessions]
+destination = "lookout"
+
+[receive.sessions.connect]
+protocol = "command-lines"
+args = ["session", "watch"]
+resume = ["--since", "{/seq}"]
+when = { "{/state}" = ["done", "failed", "ended"] }
+
+[permissions]
+answer_permission = "confirm"
+put_question = "confirm"
+end_session = "confirm"
+interrupt_session = "confirm"
+open_session = "allow"
+resume_session = "confirm"
+send_to_session = "confirm"
+start_session = "confirm"

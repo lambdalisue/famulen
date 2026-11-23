@@ -1,0 +1,8 @@
+{
+  "access_token": "gho_example-access-token",
+  "expires_in": 28800,
+  "refresh_token": "ghr_example-refresh-token",
+  "refresh_token_expires_in": 15897600,
+  "scope": "notifications,project,read:org,repo",
+  "token_type": "bearer"
+}

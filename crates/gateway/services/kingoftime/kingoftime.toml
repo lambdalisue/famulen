@@ -1,0 +1,91 @@
+# KING OF TIME: the company's attendance, through its Web API. It offers no
+# MCP server. Every call but a time record is refused from 8:30 to 10:00 and
+# from 17:30 to 18:30 JST.
+format = 1
+id = "kingoftime"
+name = "KING OF TIME"
+about = "勤怠・打刻・シフト（KoT）"
+setup = "README.md"
+
+[login]
+key = { label = "アクセストークン", header = "Authorization", value = "Bearer {token}" }
+
+[transport]
+http = { base = "https://api.kingtime.jp/v1.0" }
+
+[[tools]]
+name = "get_company"
+description = "Read the company and its settings."
+method = "GET"
+path = "/company"
+
+[[tools]]
+name = "list_employees"
+description = "List the employees; each has the `key` the other tools take."
+method = "GET"
+path = "/employees"
+query = { date = "{args.date}", division = "{args.division}" }
+input = { type = "object", properties = { date = { type = "string", title = "日付", description = "YYYY-MM-DD の形。空なら今日" }, division = { type = "string", title = "所属のコード", description = "この所属だけを読む。空ならすべて" } } }
+
+[[tools]]
+name = "get_employee"
+description = "Read one employee by the employee code."
+method = "GET"
+path = "/employees/{args.code}"
+input = { type = "object", properties = { code = { type = "string", title = "従業員コード", description = "例：1000" } }, required = ["code"] }
+
+[[tools]]
+name = "list_divisions"
+description = "List the divisions."
+method = "GET"
+path = "/divisions"
+
+[[tools]]
+name = "list_daily_workings"
+description = "Read the hours worked each day, in minutes."
+method = "GET"
+path = "/daily-workings"
+query = { start = "{args.start}", end = "{args.end}", division = "{args.division}" }
+input = { type = "object", properties = { start = { type = "string", title = "はじめの日", description = "YYYY-MM-DD の形。空なら今日。3 年前から" }, end = { type = "string", title = "おわりの日", description = "YYYY-MM-DD の形。空なら今日。はじめの日から 62 日まで" }, division = { type = "string", title = "所属のコード", description = "この所属だけを読む。空ならすべて" } } }
+
+[[tools]]
+name = "list_time_records"
+description = "Read the clock-ins and clock-outs of each day."
+method = "GET"
+path = "/daily-workings/timerecord"
+query = { start = "{args.start}", end = "{args.end}", employeeKeys = "{args.employeeKeys}", division = "{args.division}" }
+input = { type = "object", properties = { start = { type = "string", title = "はじめの日", description = "YYYY-MM-DD の形。空なら今日。3 年前から" }, end = { type = "string", title = "おわりの日", description = "YYYY-MM-DD の形。空なら今日。はじめの日から 62 日まで" }, employeeKeys = { type = "string", title = "従業員のキー", description = ", で区切る。list_employees の key" }, division = { type = "string", title = "所属のコード", description = "この所属だけを読む。空ならすべて" } } }
+
+[[tools]]
+name = "get_monthly_workings"
+description = "Read the hours worked in a month."
+method = "GET"
+path = "/monthly-workings/{args.month}"
+query = { division = "{args.division}" }
+input = { type = "object", properties = { month = { type = "string", title = "月", description = "YYYY-MM の形" }, division = { type = "string", title = "所属のコード", description = "この所属だけを読む。空ならすべて" } }, required = ["month"] }
+
+[[tools]]
+name = "list_schedules"
+description = "Read the schedules of each day."
+method = "GET"
+path = "/daily-schedules"
+query = { start = "{args.start}", end = "{args.end}", division = "{args.division}" }
+input = { type = "object", properties = { start = { type = "string", title = "はじめの日", description = "YYYY-MM-DD の形。空なら今日。3 年前から" }, end = { type = "string", title = "おわりの日", description = "YYYY-MM-DD の形。空なら今日。はじめの日から 62 日まで" }, division = { type = "string", title = "所属のコード", description = "この所属だけを読む。空ならすべて" } } }
+
+[[tools]]
+name = "list_holiday_types"
+description = "List the kinds of holiday."
+method = "GET"
+path = "/holiday-types"
+
+[[tools]]
+name = "record_time"
+description = "Clock an employee in or out: `code` is 1 in, 2 out, 3 break start, 4 break end, 7 going out, 8 back."
+method = "POST"
+path = "/daily-workings/timerecord/{args.employeeKey}"
+body = { date = "{args.date}", time = "{args.time}", code = "{args.code}" }
+input = { type = "object", properties = { employeeKey = { type = "string" }, date = { type = "string", description = "The work date, YYYY-MM-DD" }, time = { type = "string", description = "2026-05-10T10:00:00+09:00" }, code = { type = "string", enum = ["1", "2", "3", "4", "7", "8"] } }, required = ["employeeKey", "date", "time", "code"] }
+open_world = true
+
+[permissions]
+record_time = "confirm"

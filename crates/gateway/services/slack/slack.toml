@@ -1,0 +1,126 @@
+# Slack: a workspace with the bot the owner talks to and the owner's own
+# account, from one install of the Slack app.
+format = 1
+id = "slack"
+name = "Slack"
+about = "チャンネルの発言と DM、秘書との会話"
+setup = "README.md"
+
+[account]
+display = "{account.team_name}"
+
+[app]
+id = "slack"
+client_id = { env = "FAMULEN_SLACK_CLIENT_ID" }
+client_secret = { env = "FAMULEN_SLACK_CLIENT_SECRET", secret = true }
+app_token = { env = "FAMULEN_SLACK_APP_TOKEN", secret = true }
+
+[login.oauth2]
+authorize = "https://slack.com/oauth/v2/authorize"
+token = "https://slack.com/api/oauth.v2.access"
+query = { scope = "app_mentions:read,channels:history,chat:write,groups:history,im:history,im:read,im:write,reactions:write", user_scope = "channels:history,channels:read,groups:history,groups:read,im:history,mpim:history,search:read,users:read" }
+tokens = { bot = "{/access_token}", user = "{/authed_user/access_token}" }
+values = { team = "{/team/id}", team_name = "{/team/name}", user = "{/authed_user/id}", bot_user = "{/bot_user_id}", app = "{/app_id}" }
+same = ["team"]
+
+[transport]
+http = { base = "https://slack.com/api", auth = "bot" }
+
+[[tools]]
+name = "post_message"
+description = "Post a message to a channel or a DM, in a thread when `thread` is given."
+method = "POST"
+path = "/chat.postMessage"
+body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}" }
+input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" } }, required = ["channel", "text"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "update_message"
+description = "Replace the text and blocks of a message the bot posted."
+method = "POST"
+path = "/chat.update"
+body = { channel = "{args.channel}", ts = "{args.ts}", text = "{args.text}", blocks = "{args.blocks}" }
+input = { type = "object", properties = { channel = { type = "string" }, ts = { type = "string" }, text = { type = "string" }, blocks = { type = "array" } }, required = ["channel", "ts", "text"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "open_dm"
+description = "Open the DM with a member; the answer's channel.id is where to post."
+method = "POST"
+path = "/conversations.open"
+body = { users = "{args.user}" }
+input = { type = "object", properties = { user = { type = "string" } }, required = ["user"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "set_status"
+description = "Show a status under the thread of a message until the bot replies there or two minutes pass; an empty `status` takes it away."
+method = "POST"
+path = "/assistant.threads.setStatus"
+body = { channel_id = "{args.channel}", thread_ts = "{args.thread}", status = "{args.status}" }
+input = { type = "object", properties = { channel = { type = "string" }, thread = { type = "string" }, status = { type = "string" } }, required = ["channel", "thread", "status"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "add_reaction"
+description = "Add an emoji reaction to a message."
+method = "POST"
+path = "/reactions.add"
+body = { channel = "{args.channel}", timestamp = "{args.ts}", name = "{args.name}" }
+input = { type = "object", properties = { channel = { type = "string" }, ts = { type = "string" }, name = { type = "string" } }, required = ["channel", "ts", "name"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "search_messages"
+description = "Search messages as the owner."
+method = "GET"
+path = "/search.messages"
+query = { query = "{args.query}", sort = "timestamp", sort_dir = "desc", count = "{args.count}" }
+input = { type = "object", properties = { query = { type = "string", title = "検索の言葉", description = "Slack の検索欄と同じ書き方。例：in:#general 障害" }, count = { type = "integer", title = "件数", description = "一度に読む数。空なら 20 件" } }, required = ["query"] }
+auth = "user"
+ok = "{/ok}"
+
+[[tools]]
+name = "read_channel"
+description = "Read the latest messages of a channel as the owner."
+method = "GET"
+path = "/conversations.history"
+query = { channel = "{args.channel}", limit = "{args.limit}", oldest = "{args.oldest}" }
+input = { type = "object", properties = { channel = { type = "string", title = "チャンネルの ID", description = "C で始まる ID。Slack のチャンネルの詳細の下に出ている" }, limit = { type = "integer", title = "件数", description = "一度に読む数。空なら 100 件" }, oldest = { type = "string", title = "どこから", description = "この時刻印（1700000000.000000 の形）より後の発言を読む" } }, required = ["channel"] }
+auth = "user"
+ok = "{/ok}"
+
+[[tools]]
+name = "list_channels"
+description = "List the channels the owner is in."
+method = "GET"
+path = "/users.conversations"
+query = { types = "public_channel,private_channel", exclude_archived = "true", limit = "200", cursor = "{args.cursor}" }
+input = { type = "object", properties = { cursor = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" } } }
+auth = "user"
+ok = "{/ok}"
+
+[[tools]]
+name = "user_info"
+description = "Read a Slack user's name and profile; the bot is a user too."
+method = "GET"
+path = "/users.info"
+query = { user = "{args.user}" }
+input = { type = "object", properties = { user = { type = "string", title = "人の ID", description = "U で始まる ID" } }, required = ["user"] }
+auth = "user"
+ok = "{/ok}"
+
+[receive.events]
+destination = "channel"
+
+[receive.events.connect]
+protocol = "slack-socket-mode"
+token = "{app.app_token}"
+account = { team = ["{/payload/team_id}", "{/payload/team/id}"] }
+
+[permissions]
+post_message = "allow"
+update_message = "allow"
+open_dm = "allow"
+add_reaction = "allow"

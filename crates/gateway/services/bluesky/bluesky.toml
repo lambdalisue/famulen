@@ -1,0 +1,81 @@
+# Bluesky: the owner's account, through an app password.
+format = 1
+id = "bluesky"
+name = "Bluesky"
+about = "タイムライン・通知・投稿"
+setup = "README.md"
+
+[account]
+handle = { label = "ハンドル（@ なし。例：name.bsky.social）" }
+app_password = { label = "アプリパスワード", secret = true }
+display = "{account.handle}"
+
+[login.session]
+post = "https://bsky.social/xrpc/com.atproto.server.createSession"
+body = { identifier = "{account.handle}", password = "{account.app_password}" }
+tokens = { access = "{/accessJwt}" }
+values = { did = "{/did}" }
+lifetime = "1h"
+
+[transport]
+http = { base = "https://bsky.social/xrpc" }
+
+[[tools]]
+name = "get_timeline"
+description = "Read the owner's home timeline, the newest first."
+method = "GET"
+path = "/app.bsky.feed.getTimeline"
+query = { limit = "{args.limit}", cursor = "{args.cursor}" }
+input = { type = "object", properties = { limit = { type = "integer", title = "件数", description = "一度に読む数（100 まで）。空なら 50 件" }, cursor = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" } } }
+
+[[tools]]
+name = "list_notifications"
+description = "Read the owner's notifications: replies, mentions, quotes, likes, follows."
+method = "GET"
+path = "/app.bsky.notification.listNotifications"
+query = { limit = "{args.limit}", cursor = "{args.cursor}" }
+input = { type = "object", properties = { limit = { type = "integer", title = "件数", description = "一度に読む数（100 まで）。空なら 50 件" }, cursor = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" } } }
+
+[[tools]]
+name = "search_posts"
+description = "Search posts."
+method = "GET"
+path = "/app.bsky.feed.searchPosts"
+query = { q = "{args.query}", sort = "latest", limit = "{args.limit}" }
+input = { type = "object", properties = { query = { type = "string", title = "検索の言葉", description = "Bluesky の検索欄と同じ書き方。例：from:name.bsky.social 花見" }, limit = { type = "integer", title = "件数", description = "一度に読む数（100 まで）。空なら 25 件" } }, required = ["query"] }
+
+[[tools]]
+name = "get_author_feed"
+description = "Read one account's posts, the newest first."
+method = "GET"
+path = "/app.bsky.feed.getAuthorFeed"
+query = { actor = "{args.actor}", limit = "{args.limit}" }
+input = { type = "object", properties = { actor = { type = "string", title = "ハンドル", description = "@ なし。例：name.bsky.social" }, limit = { type = "integer", title = "件数", description = "一度に読む数（100 まで）。空なら 50 件" } }, required = ["actor"] }
+
+[[tools]]
+name = "get_post_thread"
+description = "Read a post with its replies, by the post's at:// URI."
+method = "GET"
+path = "/app.bsky.feed.getPostThread"
+query = { uri = "{args.uri}" }
+input = { type = "object", properties = { uri = { type = "string", title = "投稿の URI", description = "at:// で始まる、投稿の URI" } }, required = ["uri"] }
+
+[[tools]]
+name = "get_profile"
+description = "Read an account's profile."
+method = "GET"
+path = "/app.bsky.actor.getProfile"
+query = { actor = "{args.actor}" }
+input = { type = "object", properties = { actor = { type = "string", title = "ハンドル", description = "@ なし。例：name.bsky.social" } }, required = ["actor"] }
+
+[[tools]]
+name = "create_post"
+description = "Post as the owner, up to 300 characters. `reply` is {root: {uri, cid}, parent: {uri, cid}}; `facets` make links and mentions."
+method = "POST"
+path = "/com.atproto.repo.createRecord"
+body = { repo = "{account.did}", collection = "app.bsky.feed.post", record = { "$type" = "app.bsky.feed.post", text = "{args.text}", createdAt = "{args.created_at}", langs = "{args.langs}", reply = "{args.reply}", facets = "{args.facets}" } }
+input = { type = "object", properties = { text = { type = "string" }, created_at = { type = "string", description = "Now, in ISO 8601, such as 2026-05-10T10:00:00Z" }, langs = { type = "array", items = { type = "string" }, description = "Such as [\"ja\"]" }, reply = { type = "object" }, facets = { type = "array" } }, required = ["text", "created_at"] }
+open_world = true
+
+[permissions]
+create_post = "confirm"

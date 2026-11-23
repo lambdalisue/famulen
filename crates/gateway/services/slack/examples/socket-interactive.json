@@ -1,0 +1,18 @@
+{
+  "envelope_id": "57d6a792-4d35-4d0b-b6aa-3361493e1cb0",
+  "type": "interactive",
+  "accepts_response_payload": true,
+  "payload": {
+    "type": "block_actions",
+    "user": { "id": "U0OWNER", "username": "owner", "name": "owner", "team_id": "T0ACME" },
+    "api_app_id": "A0123456789",
+    "token": "verification",
+    "container": { "type": "message", "message_ts": "1795324049.000100", "channel_id": "D0OWNERDM", "is_ephemeral": false },
+    "trigger_id": "1.2.3",
+    "team": { "id": "T0ACME", "domain": "acme" },
+    "enterprise": null,
+    "is_enterprise_install": false,
+    "channel": { "id": "D0OWNERDM", "name": "directmessage" },
+    "actions": [{ "action_id": "famulen.approval.approve", "block_id": "b", "value": "12", "type": "button" }]
+  }
+}

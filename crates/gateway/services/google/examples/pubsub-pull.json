@@ -1,0 +1,12 @@
+{
+  "receivedMessages": [
+    {
+      "ackId": "ack-example-1",
+      "message": {
+        "data": "eyJlbWFpbEFkZHJlc3MiOiJtZUBleGFtcGxlLmNvbSIsImhpc3RvcnlJZCI6OTg3NjV9",
+        "messageId": "1234567890",
+        "publishTime": "2026-11-22T09:00:00.000Z"
+      }
+    }
+  ]
+}

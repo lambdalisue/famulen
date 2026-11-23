@@ -1,0 +1,54 @@
+# GitHub: the owner's account through GitHub's own MCP server, logged in with
+# the owner's OAuth App. A GitHub App's token cannot read notifications.
+format = 1
+id = "github"
+name = "GitHub"
+about = "リポジトリ・Issue・プルリクエスト・通知"
+setup = "README.md"
+
+[account]
+display = "{account.login}"
+
+[app]
+id = "github"
+client_id = { env = "FAMULEN_GITHUB_CLIENT_ID" }
+client_secret = { env = "FAMULEN_GITHUB_CLIENT_SECRET", secret = true }
+
+[login.oauth2]
+authorize = "https://github.com/login/oauth/authorize"
+token = "https://github.com/login/oauth/access_token"
+scopes = ["repo", "read:org", "notifications", "project"]
+query = { prompt = "select_account" }
+values = { login = "{/login}" }
+same = ["login"]
+refresh = true
+
+[login.whoami]
+get = "https://api.github.com/user"
+values = { login = "{/login}" }
+
+[transport.mcp_remote]
+url = "https://api.githubcopilot.com/mcp/"
+headers = { X-MCP-Toolsets = "context,repos,issues,pull_requests,users,notifications,actions,discussions,labels,orgs,projects" }
+
+# What others see, or what cannot be taken back.
+[permissions]
+actions_run_trigger = "confirm"
+add_comment_to_pending_review = "confirm"
+add_issue_comment = "confirm"
+add_reply_to_pull_request_comment = "confirm"
+create_branch = "confirm"
+create_or_update_file = "confirm"
+create_pull_request = "confirm"
+create_repository = "confirm"
+delete_file = "confirm"
+fork_repository = "confirm"
+issue_write = "confirm"
+mark_all_notifications_read = "confirm"
+merge_pull_request = "confirm"
+pull_request_review_write = "confirm"
+push_files = "confirm"
+sub_issue_write = "confirm"
+update_issue_comment = "confirm"
+update_pull_request = "confirm"
+update_pull_request_branch = "confirm"

@@ -1,0 +1,37 @@
+# kintone: Cybozu's own MCP server, run on this machine. Cybozu offers no
+# remote one.
+format = 1
+id = "kintone"
+name = "kintone"
+about = "アプリとレコード"
+setup = "README.md"
+
+[account]
+url = { label = "kintone の URL（https://example.cybozu.com）" }
+username = { label = "ログイン名（API トークンを使うなら空）", optional = true }
+password = { label = "パスワード（API トークンを使うなら空）", optional = true, secret = true }
+api_token = { label = "API トークン（いくつかあれば , で区切る）", optional = true, secret = true }
+display = "{account.url}"
+
+[transport.mcp_local]
+command = "npx"
+args = ["-y", "@kintone/mcp-server@1.11.4"]
+env = { KINTONE_BASE_URL = "{account.url}", KINTONE_USERNAME = "{account.username}", KINTONE_PASSWORD = "{account.password}", KINTONE_API_TOKEN = "{account.api_token}" }
+
+# What others see, or what cannot be taken back.
+[permissions]
+kintone-add-app = "confirm"
+kintone-add-form-fields = "confirm"
+kintone-add-record-comment = "confirm"
+kintone-add-records = "confirm"
+kintone-add-space-from-template = "confirm"
+kintone-delete-form-fields = "confirm"
+kintone-delete-records = "confirm"
+kintone-delete-space = "confirm"
+kintone-deploy-app = "confirm"
+kintone-update-form-fields = "confirm"
+kintone-update-form-layout = "confirm"
+kintone-update-general-settings = "confirm"
+kintone-update-records = "confirm"
+kintone-update-space = "confirm"
+kintone-update-statuses = "confirm"

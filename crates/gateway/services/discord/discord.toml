@@ -1,0 +1,66 @@
+# Discord: a bot of the owner's own. Discord forbids driving a user's account.
+format = 1
+id = "discord"
+name = "Discord"
+about = "サーバーの発言（bot として）"
+setup = "README.md"
+
+[login]
+key = { label = "bot のトークン", header = "Authorization", value = "Bot {token}" }
+
+[transport]
+http = { base = "https://discord.com/api/v10" }
+
+[[tools]]
+name = "get_bot"
+description = "Read the bot itself."
+method = "GET"
+path = "/users/@me"
+
+[[tools]]
+name = "list_servers"
+description = "List the servers the bot is in."
+method = "GET"
+path = "/users/@me/guilds"
+
+[[tools]]
+name = "list_channels"
+description = "List the channels of a server."
+method = "GET"
+path = "/guilds/{args.server}/channels"
+input = { type = "object", properties = { server = { type = "string", title = "サーバーの ID", description = "list_servers の id" } }, required = ["server"] }
+
+[[tools]]
+name = "list_threads"
+description = "List the active threads of a server."
+method = "GET"
+path = "/guilds/{args.server}/threads/active"
+input = { type = "object", properties = { server = { type = "string", title = "サーバーの ID", description = "list_servers の id" } }, required = ["server"] }
+
+[[tools]]
+name = "read_channel"
+description = "Read the messages of a channel or a thread, the newest first."
+method = "GET"
+path = "/channels/{args.channel}/messages"
+query = { limit = "{args.limit}", before = "{args.before}", after = "{args.after}" }
+input = { type = "object", properties = { channel = { type = "string", title = "チャンネルの ID", description = "Discord の開発者モードで、チャンネルを右クリックして写す" }, limit = { type = "integer", title = "件数", description = "一度に読む数（100 まで）。空なら 50 件" }, before = { type = "string", title = "どこより前", description = "この発言の ID より前を読む" }, after = { type = "string", title = "どこより後", description = "この発言の ID より後を読む" } }, required = ["channel"] }
+
+[[tools]]
+name = "send_message"
+description = "Send a message to a channel, a thread or a DM as the bot; in reply to a message when `reply_to` is given."
+method = "POST"
+path = "/channels/{args.channel}/messages"
+body = { content = "{args.content}", message_reference = "{args.reply_to}", allowed_mentions = { parse = ["users"] } }
+input = { type = "object", properties = { channel = { type = "string" }, content = { type = "string" }, reply_to = { type = "object", description = "{\"message_id\": \"…\"}" } }, required = ["channel", "content"] }
+open_world = true
+
+[[tools]]
+name = "open_dm"
+description = "Open the DM with a user; the answer's id is the channel to send to."
+method = "POST"
+path = "/users/@me/channels"
+body = { recipient_id = "{args.user}" }
+input = { type = "object", properties = { user = { type = "string" } }, required = ["user"] }
+
+[permissions]
+send_message = "confirm"

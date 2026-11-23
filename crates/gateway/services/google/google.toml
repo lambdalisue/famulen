@@ -1,0 +1,179 @@
+# Gmail and Google Calendar of one Google account, with one login. New mail
+# is told through a Google Cloud Pub/Sub subscription the gateway pulls
+# from; calendar changes come to the gateway's HTTP receiver, when it is
+# reachable from Google.
+format = 1
+id = "google"
+name = "Google"
+about = "Gmail・カレンダー"
+setup = "README.md"
+
+[account]
+display = "{account.email}"
+subscription = { label = "Pub/Sub の受け取り口（projects/<プロジェクト>/subscriptions/<名前>）", optional = true }
+topic = { label = "Pub/Sub のトピック（projects/<プロジェクト>/topics/<名前>）", optional = true }
+channel_token = { label = "カレンダーの変化の知らせの合言葉", optional = true, secret = true }
+
+[app]
+id = "google"
+client_id = { env = "FAMULEN_GOOGLE_CLIENT_ID" }
+client_secret = { env = "FAMULEN_GOOGLE_CLIENT_SECRET", secret = true }
+
+[login.oauth2]
+authorize = "https://accounts.google.com/o/oauth2/v2/auth"
+token = "https://oauth2.googleapis.com/token"
+scopes = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/pubsub"]
+query = { access_type = "offline", prompt = "consent" }
+refresh = true
+
+[login.whoami]
+get = "https://openidconnect.googleapis.com/v1/userinfo"
+values = { email = "{/email}" }
+
+[transport]
+http = { base = "https://www.googleapis.com" }
+
+[[tools]]
+name = "watch_mailbox"
+description = "Ask Gmail to tell the Pub/Sub topic about new mail. Expires in 7 days; ask again before then."
+method = "POST"
+path = "/gmail/v1/users/me/watch"
+body = { topicName = "{account.topic}", labelIds = ["INBOX"], labelFilterBehavior = "include" }
+
+[[tools]]
+name = "list_history"
+description = "List what changed in the mailbox since a history id."
+method = "GET"
+path = "/gmail/v1/users/me/history"
+query = { startHistoryId = "{args.since}", historyTypes = "messageAdded", labelId = "INBOX", pageToken = "{args.page}" }
+input = { type = "object", properties = { since = { type = "string", title = "どこから", description = "この履歴番号より後の変化を読む" }, page = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" } }, required = ["since"] }
+
+[[tools]]
+name = "get_message"
+description = "Read one message's headers and snippet."
+method = "GET"
+path = "/gmail/v1/users/me/messages/{args.id}"
+query = { format = "metadata" }
+input = { type = "object", properties = { id = { type = "string", title = "メールの ID", description = "読むメールの ID" } }, required = ["id"] }
+
+[[tools]]
+name = "list_labels"
+description = "List the mailbox's labels."
+method = "GET"
+path = "/gmail/v1/users/me/labels"
+
+[[tools]]
+name = "search_messages"
+description = "Search messages with a Gmail query."
+method = "GET"
+path = "/gmail/v1/users/me/messages"
+query = { q = "{args.query}", maxResults = "{args.max}", pageToken = "{args.page}" }
+input = { type = "object", properties = { query = { type = "string", title = "検索の言葉", description = "Gmail の検索欄と同じ書き方。例：is:unread newer_than:1d" }, max = { type = "integer", title = "件数", description = "一度に読む数。空なら 100 件" }, page = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" } }, required = ["query"] }
+
+[[tools]]
+name = "send_message"
+description = "Send a message given as a base64url RFC 2822 text."
+method = "POST"
+path = "/gmail/v1/users/me/messages/send"
+body = { raw = "{args.raw}", threadId = "{args.thread}" }
+input = { type = "object", properties = { raw = { type = "string" }, thread = { type = "string" } }, required = ["raw"] }
+open_world = true
+
+[[tools]]
+name = "list_calendars"
+description = "List the account's calendars."
+method = "GET"
+path = "/calendar/v3/users/me/calendarList"
+
+[[tools]]
+name = "list_events"
+description = "List a calendar's events between two times, one occurrence each."
+method = "GET"
+path = "/calendar/v3/calendars/{args.calendar}/events"
+query = { timeMin = "{args.from}", timeMax = "{args.to}", singleEvents = "true", orderBy = "startTime", pageToken = "{args.page}", updatedMin = "{args.updated_since}" }
+input = { type = "object", properties = { calendar = { type = "string", title = "カレンダー", description = "カレンダーの ID。メインのカレンダーは primary" }, from = { type = "string", title = "いつから", description = "この時刻より後に終わる予定。例：2026-01-01T00:00:00+09:00" }, to = { type = "string", title = "いつまで", description = "この時刻より前に始まる予定。例：2026-01-31T00:00:00+09:00" }, page = { type = "string", title = "続きの印", description = "前の答えに付いていた、続きを読むための印。ふつうは空でよい" }, updated_since = { type = "string", title = "変わったのがいつから", description = "この時刻より後に変わった予定だけを読む。例：2026-01-01T00:00:00+09:00" } }, required = ["calendar"] }
+
+[[tools]]
+name = "insert_event"
+description = "Add an event to a calendar."
+method = "POST"
+path = "/calendar/v3/calendars/{args.calendar}/events"
+body = { summary = "{args.summary}", start = "{args.start}", end = "{args.end}", description = "{args.description}", location = "{args.location}" }
+input = { type = "object", properties = { calendar = { type = "string" }, summary = { type = "string" }, start = { type = "object" }, end = { type = "object" }, description = { type = "string" }, location = { type = "string" } }, required = ["calendar", "summary", "start", "end"] }
+
+[[tools]]
+name = "get_event"
+description = "Read one event of a calendar, with its organizer and the whole attendee list."
+method = "GET"
+path = "/calendar/v3/calendars/{args.calendar}/events/{args.event}"
+input = { type = "object", properties = { calendar = { type = "string", title = "カレンダー", description = "カレンダーの ID。メインのカレンダーは primary" }, event = { type = "string", title = "予定の ID", description = "読む予定の ID" } }, required = ["calendar", "event"] }
+
+[[tools]]
+name = "respond_to_event"
+description = "Accept, decline or tentatively accept an event as the owner. The attendees given replace the event's whole list, so first read the event with get_event, copy its attendees array as it is, change only the responseStatus (accepted, declined or tentative) of the owner's own entry (the one with self: true), and send the whole array back. Use the series id to answer a whole recurring series, or the instance id (from list_events) to answer one occurrence. To turn down an event the owner does not organize, decline it here rather than deleting it: a deletion only takes it off the owner's calendar, the organizer still has it and does not learn the owner will not come. send_updates says who Google notifies: all, externalOnly or none."
+method = "PATCH"
+path = "/calendar/v3/calendars/{args.calendar}/events/{args.event}"
+query = { sendUpdates = "{args.send_updates}" }
+body = { attendees = "{args.attendees}" }
+input = { type = "object", properties = { calendar = { type = "string" }, event = { type = "string" }, attendees = { type = "array", items = { type = "object" } }, send_updates = { type = "string", enum = ["all", "externalOnly", "none"] } }, required = ["calendar", "event", "attendees", "send_updates"] }
+open_world = true
+
+[[tools]]
+name = "update_event"
+description = "Change an event's summary, start, end, description or location; only the fields given change. Use for events the owner organizes or has alone. send_updates says who Google notifies: all, externalOnly or none."
+method = "PATCH"
+path = "/calendar/v3/calendars/{args.calendar}/events/{args.event}"
+query = { sendUpdates = "{args.send_updates}" }
+body = { summary = "{args.summary}", start = "{args.start}", end = "{args.end}", description = "{args.description}", location = "{args.location}" }
+input = { type = "object", properties = { calendar = { type = "string" }, event = { type = "string" }, summary = { type = "string" }, start = { type = "object" }, end = { type = "object" }, description = { type = "string" }, location = { type = "string" }, send_updates = { type = "string", enum = ["all", "externalOnly", "none"] } }, required = ["calendar", "event", "send_updates"] }
+open_world = true
+
+[[tools]]
+name = "delete_event"
+description = "Delete an event. Use for events the owner organizes or has alone; for an event someone else organizes, decline it with respond_to_event instead, since deleting it only removes it from the owner's calendar. Use the series id to delete a whole recurring series, or the instance id to delete one occurrence. send_updates says who Google notifies: all, externalOnly or none."
+method = "DELETE"
+path = "/calendar/v3/calendars/{args.calendar}/events/{args.event}"
+query = { sendUpdates = "{args.send_updates}" }
+input = { type = "object", properties = { calendar = { type = "string" }, event = { type = "string" }, send_updates = { type = "string", enum = ["all", "externalOnly", "none"] } }, required = ["calendar", "event", "send_updates"] }
+open_world = true
+destructive = true
+
+[[tools]]
+name = "watch_events"
+description = "Ask Google to tell the gateway's calendar receiver when a calendar's events change."
+method = "POST"
+path = "/calendar/v3/calendars/{args.calendar}/events/watch"
+body = { id = "{args.channel}", type = "web_hook", address = "{args.address}", token = "{account.channel_token}" }
+input = { type = "object", properties = { calendar = { type = "string" }, channel = { type = "string" }, address = { type = "string" } }, required = ["calendar", "channel", "address"] }
+
+[[tools]]
+name = "stop_watching"
+description = "Stop a change channel opened with watch_events."
+method = "POST"
+path = "/calendar/v3/channels/stop"
+body = { id = "{args.channel}", resourceId = "{args.resource}" }
+input = { type = "object", properties = { channel = { type = "string" }, resource = { type = "string" } }, required = ["channel", "resource"] }
+
+[receive.mail]
+destination = "lookout"
+
+[receive.mail.connect]
+protocol = "pubsub-pull"
+subscription = "{account.subscription}"
+
+[receive.calendar]
+destination = "calendar"
+
+[receive.calendar.http]
+verify = { token = { value = "{header.X-Goog-Channel-Token}", equals = "{account.channel_token}" } }
+
+[permissions]
+watch_mailbox = "allow"
+list_history = "allow"
+get_message = "allow"
+search_messages = "allow"
+list_calendars = "allow"
+list_events = "allow"
+get_event = "allow"
+watch_events = "allow"
+stop_watching = "allow"

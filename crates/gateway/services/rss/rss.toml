@@ -1,0 +1,32 @@
+# RSS: one public feed per connection, read as it is.
+format = 1
+id = "rss"
+name = "RSS"
+about = "公開フィード（RSS・Atom）を読む"
+setup = "README.md"
+
+[account]
+url = { label = "フィードの URL（例：https://example.com/feed.xml）" }
+display = "{account.url}"
+
+[transport]
+http = { base = "{account.url}" }
+
+[[tools]]
+name = "get_feed"
+description = "Read the feed: RSS or Atom XML, with the entries it holds now."
+method = "GET"
+path = ""
+opens = "get_page"
+
+[[tools]]
+name = "get_page"
+description = "Read one page the feed links to, on the feed's own host."
+method = "GET"
+path = "{args.url}"
+same_host = true
+input = { type = "object", properties = { url = { type = "string", title = "頁の URL", description = "フィードと同じホストの頁。https:// から" } }, required = ["url"] }
+
+[permissions]
+get_feed = "allow"
+get_page = "allow"
