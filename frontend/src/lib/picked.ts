@@ -10,7 +10,8 @@ import { setView } from "./view";
  */
 export function usePicked(of: { kind: () => string; section: () => string; sub?: () => string }) {
   const id = useParam("id");
-  const record = createAsync(() => (id() ? recordQuery(of.kind(), id()) : Promise.resolve(undefined)));
+  // A record that cannot be read is said where it is shown, not here.
+  const record = createAsync(async () => (id() ? recordQuery(of.kind(), id()).catch(() => undefined) : undefined));
   createEffect(() => setView(of.section(), record()?.title ?? of.sub?.()));
   return { id, record };
 }

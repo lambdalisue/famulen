@@ -41,7 +41,7 @@ export function Dialog(props: {
                 </Ark.CloseTrigger>
               </Show>
             </header>
-            <Show when={props.description}>
+            <Show when={"description" in props}>
               <Ark.Description class="sub">{props.description}</Ark.Description>
             </Show>
             {props.children}
@@ -66,7 +66,9 @@ export function DialogTrigger(props: { variant?: ButtonVariant; small?: boolean;
 export function DialogActions(props: { submit?: string; disabled?: boolean; cancel?: string; before?: JSX.Element; variant?: ButtonVariant; onSubmit?: () => void }) {
   return (
     <div class="dialog-actions">
-      {props.before ?? <Ark.CloseTrigger class={buttonClass()}>{props.cancel ?? "やめる"}</Ark.CloseTrigger>}
+      <Show when={"before" in props} fallback={<Ark.CloseTrigger class={buttonClass()}>{props.cancel ?? "やめる"}</Ark.CloseTrigger>}>
+        {props.before}
+      </Show>
       <Show when={props.submit}>
         {(text) => (
           <Button type={props.onSubmit ? "button" : "submit"} variant={props.variant ?? "primary"} disabled={props.disabled} onClick={() => props.onSubmit?.()}>

@@ -1,12 +1,34 @@
 import { query } from "@solidjs/router";
 import { api } from "./api";
-import { addDays, dateLabel, daysBetween, monthOf, spanLabel, today, weekdayIndex } from "./dates";
+import { addDays, dateLabel, daysBetween, hm, localDate, minutesOfDay, monthOf, spanLabel, today, weekdayIndex } from "./dates";
 import { valueOf } from "./records";
 
 export type Unit = "day" | "week" | "month";
 
-export function minutesBetween(start: string, end: string): number {
-  return Math.round((Date.parse(end) - Date.parse(start)) / 60_000);
+const MIDNIGHT = 24 * 60;
+
+type Spans = { start: string; end: string; allDay: boolean };
+
+/** Whether an event takes some of a day; one that ends at midnight does not take the day that begins then. */
+export function onDay(e: Spans, day: string): boolean {
+  const first = localDate(e.start);
+  const last = localDate(e.end);
+  if (first > day) return false;
+  if (first === day) return true;
+  return last > day || (last === day && !e.allDay && minutesOfDay(e.end) > 0);
+}
+
+/** The minutes of a day an event takes, from midnight to midnight where it goes on beyond it. */
+export function minutesOn(e: Spans, day: string): [from: number, to: number] {
+  return [localDate(e.start) < day ? 0 : minutesOfDay(e.start), localDate(e.end) > day ? MIDNIGHT : minutesOfDay(e.end)];
+}
+
+/** When an event is on a day: `10:00–11:30`, `–07:30` on the morning it goes on into, `22:00–` on the evening before. */
+export function timeOn(e: Spans, day: string): string {
+  if (e.allDay) return "終日";
+  const from = localDate(e.start) < day ? "" : hm(e.start);
+  const to = localDate(e.end) > day ? "" : hm(e.end);
+  return from || to ? `${from}–${to}` : "終日";
 }
 
 export type Range = {

@@ -1,20 +1,18 @@
-import { shortTime } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
-import { DelegatedQueue, Delegation } from "~/components/records/Delegated";
-import RecordDetail from "~/components/records/RecordDetail";
+import { createSignal, For, Match, Show, Switch } from "solid-js";
+import { DelegatedPage, DelegatedSummary, Delegation } from "~/components/records/Delegated";
+import RecordDetail from "~/components/records/detail/RecordDetail";
 import RecordsPage, { type Group } from "~/components/records/RecordsPage";
-import { AddRoutine, RoutineRow, Runs } from "~/components/records/RoutineParts";
-import TaskRow from "~/components/records/TaskRow";
-import { act } from "~/lib/act";
-import { api } from "~/lib/api";
+import { AddRoutine, routineParts, Runs } from "~/components/records/RoutineParts";
+import { finish, taskParts } from "~/components/records/TaskRow";
+import { Button, Callout, IconButton, List, ListRow, Segmented, whenConfirmed } from "~/components/ui";
+import { shortTime } from "~/lib/dates";
 import * as icons from "~/lib/icons";
-import { bucketOf, isOver, type Rec, valueOf } from "~/lib/records";
-import { cancelWake, wakesQuery } from "~/lib/routines";
 import { useOwner } from "~/lib/owner";
 import { useParam } from "~/lib/params";
 import { usePicked } from "~/lib/picked";
-import { Button, Icon, IconButton, Segmented } from "~/components/ui";
+import { bucketOf, isOver, type Rec, valueOf } from "~/lib/records";
+import { cancelWake, wakesQuery } from "~/lib/routines";
 
 const RANK: { [p: string]: number } = { high: 0, normal: 1, low: 2 };
 
@@ -24,39 +22,28 @@ function order(a: Rec, b: Rec): number {
   return due(a).localeCompare(due(b)) || rank(a) - rank(b) || a.title.localeCompare(b.title);
 }
 
-function Tabs(props: { tab: string }) {
+type Tab = "once" | "routines" | "delegated";
+
+/** The views of the page, and what each is called. */
+const TABS: [Tab, string][] = [
+  ["once", "一度きり"],
+  ["routines", "定期"],
+  ["delegated", "委託"],
+];
+
+function Tabs(props: { tab: Tab }) {
   const navigate = useNavigate();
-  return (
-    <Segmented
-      label="タスクの種類"
-      items={[
-        ["once", "一度きり"],
-        ["routines", "定期"],
-      ]}
-      value={props.tab}
-      onChoose={(v) => navigate(v === "routines" ? "/tasks?tab=routines" : "/tasks")}
-    />
-  );
+  return <Segmented label="タスクの種類" items={TABS} value={props.tab} onChoose={(v) => navigate(v === "once" ? "/tasks" : `/tasks?tab=${v}`)} />;
 }
 
-/** Finish a task, or take it up again, from its own page. */
+/** Finish a task, or take it up again, from its detail. */
 function Finish(props: { task: Rec }) {
   const over = () => isOver(props.task);
   return (
     <div>
-      <button
-        type="button"
-        class={`btn${over() ? "" : " go"}`}
-        onClick={() =>
-          void act(
-            () => api.records.saveRecord({ kind: "tasks", id: props.task.id, fields: [{ name: "Status", value: over() ? "pending" : "done" }] }),
-            over() ? "戻した" : "済にした",
-          )
-        }
-      >
-        <Icon svg={over() ? icons.arrowBackUp : icons.check} size={14} />
+      <Button variant={over() ? undefined : "go"} icon={over() ? icons.arrowBackUp : icons.check} onClick={() => void finish(props.task)}>
         {over() ? "まだに戻す" : "済にする"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -65,10 +52,9 @@ function Finish(props: { task: Rec }) {
 function Blocked(props: { task: Rec }) {
   return (
     <Show when={props.task.blockers.length > 0}>
-      <div class="callout warn">
-        <Icon svg={icons.lock} size={14} />
+      <Callout tone="warn" icon={icons.lock}>
         {props.task.blockers.map((b) => `「${b.title}」`).join("")}が済むまで待っている
-      </div>
+      </Callout>
     </Show>
   );
 }
@@ -79,25 +65,30 @@ function Wakes() {
   const wakes = createAsync(() => wakesQuery());
   return (
     <Show when={(wakes() ?? []).length > 0}>
-      <section class="rec-group">
+      <section class="stack">
         <h2>{owner.aide()} が待っている</h2>
-        <div class="rec-rows">
+        <List>
           <For each={wakes()}>
             {(w) => (
-              <div class="rec-row" style={{ cursor: "default" }}>
-                <Icon svg={icons.clock} size={16} />
-                <span class="rec-main">
-                  <b>{w.why || w.note}</b>
-                  <Show when={w.why}>
-                    <span class="rec-sub">{w.note}</span>
-                  </Show>
-                </span>
-                <span class="rec-when">{shortTime(w.atUnix, owner.tz())}</span>
-                <IconButton plain icon={icons.trash} label={`起床予約「${w.note}」を取り消す`} onClick={() => void cancelWake(w.id)} />
-              </div>
+              <ListRow
+                icon={icons.clock}
+                title={w.why || w.note}
+                sub={w.why ? w.note : undefined}
+                end={
+                  <>
+                    <span class="rec-when">{shortTime(w.atUnix, owner.tz())}</span>
+                    <IconButton
+                      plain
+                      icon={icons.x}
+                      label={`起床予約「${w.note}」を取り消す`}
+                      onClick={() => void whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
+                    />
+                  </>
+                }
+              />
             )}
           </For>
-        </div>
+        </List>
       </section>
     </Show>
   );
@@ -106,14 +97,17 @@ function Wakes() {
 export default function Tasks() {
   const owner = useOwner();
   const asked = useParam("tab");
-  const tab = () => (asked() === "routines" ? "routines" : "once");
+  const tab = (): Tab => TABS.find(([t]) => t === asked())?.[0] ?? "once";
+  usePicked({
+    kind: () => (tab() === "routines" ? "routines" : "tasks"),
+    section: () => "タスク",
+    sub: () => TABS.find(([t]) => t === tab() && t !== "once")?.[1] ?? "",
+  });
   const [adding, setAdding] = createSignal(false);
-  usePicked({ kind: () => (tab() === "routines" ? "routines" : "tasks"), section: () => "タスク", sub: () => (tab() === "routines" ? "定期" : "") });
 
   const groups = (records: Rec[]): Group[] => {
-    const day = owner.today();
     const sorted = [...records].sort(order);
-    const of = (b: string) => sorted.filter((r) => bucketOf(r, day) === b);
+    const of = (b: string) => sorted.filter((r) => bucketOf(r, owner.today()) === b);
     const done = of("done").sort((a, b) => valueOf(b, "Finished").localeCompare(valueOf(a, "Finished")));
     return [
       { name: "今日", records: of("today") },
@@ -122,6 +116,20 @@ export default function Tasks() {
       { name: "済", records: done, folded: records.some((r) => !isOver(r)) },
     ];
   };
+  const task = (base: string) => (id: string) => (
+    <RecordDetail
+      kind="tasks"
+      id={id}
+      back={base}
+      top={(r) => (
+        <>
+          <Finish task={r} />
+          <Blocked task={r} />
+          <Delegation task={r} />
+        </>
+      )}
+    />
+  );
 
   return (
     <Switch>
@@ -133,22 +141,12 @@ export default function Tasks() {
           tools={<Tabs tab="once" />}
           narrow={["Assignee", "Status", "Priority"]}
           groups={groups}
-          row={(r) => <TaskRow task={r} />}
-          detail={(id) => <RecordDetail kind="tasks" id={id} back="/tasks" top={(r) => (
-            <>
-              <Finish task={r} />
-              <Blocked task={r} />
-              <Delegation task={r} />
-            </>
-          )} />}
+          row={taskParts}
+          detail={task("/tasks")}
           add={{ label: "タスクを足す", titleLabel: "何をするか", fields: ["Due", "Priority", "Assignee"] }}
-          foot={
-            <>
-              <DelegatedQueue />
-              <Wakes />
-            </>
-          }
-          empty="タスクはまだない。上のボタンか、会話で頼んで足す。"
+          head={<DelegatedSummary />}
+          foot={<Wakes />}
+          empty="タスクはまだない。上のボタンか、会話で頼んで足す"
         />
       </Match>
       <Match when={tab() === "routines"}>
@@ -156,20 +154,17 @@ export default function Tasks() {
           kind="routines"
           base="/tasks?tab=routines"
           title="定期タスク"
-          tools={
-            <>
-              <Tabs tab="routines" />
-              <Button variant="primary" icon={icons.plus} onClick={() => setAdding(true)}>
-定期タスクを足す
-              </Button>
-            </>
-          }
+          tools={<Tabs tab="routines" />}
           narrow={["Assignee"]}
-          row={(r) => <RoutineRow routine={r} />}
+          row={routineParts}
           detail={(id) => <RecordDetail kind="routines" id={id} back="/tasks?tab=routines" top={(r) => <Runs routine={r} />} />}
-          empty="定期タスクはまだない。"
+          add={{ label: "定期タスクを足す", onAdd: () => setAdding(true) }}
+          empty="定期タスクはまだない"
         />
         <AddRoutine open={adding()} onOpenChange={setAdding} />
+      </Match>
+      <Match when={tab() === "delegated"}>
+        <DelegatedPage tools={<Tabs tab="delegated" />} detail={task("/tasks?tab=delegated")} />
       </Match>
     </Switch>
   );

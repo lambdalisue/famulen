@@ -6,6 +6,10 @@
  * segments, switches, number fields, disclosures); a text box, a check box and
  * a select are the browser's, styled.
  *
+ * A part asks for what it is given once (`"note" in props`, not `props.note`,
+ * to tell whether it is): elements are made anew each time they are asked for,
+ * and would not match what the server sent.
+ *
  * How things are saved:
  * - A choice, a switch, a number or a short text is saved as it is made: when
  *   it is chosen, or when its field is left or Enter is pressed.
@@ -27,4 +31,5 @@ export { List, ListRow, PickName } from "./List";
 export { RadioCards } from "./RadioCards";
 export { Segmented, SegmentedLinks, SegmentedOf } from "./Segmented";
 export { default as SideSheet } from "./SideSheet";
+export { default as SplitPane } from "./SplitPane";
 export { default as Toast } from "./Toast";

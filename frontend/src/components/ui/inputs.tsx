@@ -14,7 +14,7 @@ export function Field(props: { label: JSX.Element; hint?: JSX.Element; group?: b
     <>
       <span class="field-label">{props.label}</span>
       {props.children}
-      <Show when={props.hint}>
+      <Show when={"hint" in props}>
         <span class="sub">{props.hint}</span>
       </Show>
     </>
@@ -127,11 +127,11 @@ export function NumberField(props: {
         <Ark.Control>
           <Ark.Input class="input number" inputmode="numeric" placeholder={props.none} />
         </Ark.Control>
-        <Show when={props.unit}>
+        <Show when={"unit" in props}>
           <span class="sub">{props.unit}</span>
         </Show>
       </div>
-      <Show when={props.hint}>
+      <Show when={"hint" in props}>
         <span class="sub">{props.hint}</span>
       </Show>
     </Ark.Root>

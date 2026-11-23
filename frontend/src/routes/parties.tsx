@@ -2,18 +2,18 @@ import { addDays, dayOf, hm, localDate, monthOf, shortTime, today } from "~/lib/
 import { createAsync, query } from "@solidjs/router";
 import { createEffect, For, Show } from "solid-js";
 import { EntryRow } from "~/components/MemoryEntry";
-import RecordDetail from "~/components/records/RecordDetail";
+import RecordDetail from "~/components/records/detail/RecordDetail";
 import RecordsPage, { type Group } from "~/components/records/RecordsPage";
+import type { RowParts } from "~/components/records/Row";
 import { CalendarMode } from "~/gen/famulen/v1/calendar_pb";
 import { Speaker } from "~/gen/famulen/v1/console_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { workgroupsQuery } from "~/lib/data";
-import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf, workgroupNames } from "~/lib/records";
+import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf } from "~/lib/records";
 import { usePicked } from "~/lib/picked";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
-import { Button, EmptyState, List, Tag } from "~/components/ui";
+import { Button, Callout, EmptyState, List, Tag } from "~/components/ui";
 
 const PALETTE = ["#0F6E68", "#B4610E", "#5B5FA8", "#8A5A7A", "#3B3A36"];
 
@@ -95,7 +95,7 @@ function Around(props: { party: Rec }) {
                 <div role="listitem" class="item">
                   <span class="mono sub">{shortTime(m.at, around()?.tz ?? "UTC")}</span>
                   <Tag>{m.who === Speaker.OWNER ? "あなた" : aide()}</Tag>
-                  <span class="grow" style={{ "font-size": "13px" }}>
+                  <span class="grow">
                     {Array.from(m.text).slice(0, 120).join("")}
                   </span>
                 </div>
@@ -132,42 +132,40 @@ function Guessed(props: { party: Rec }) {
   );
 }
 
+/** People, companies and groups, each by name. */
+function groups(records: Rec[]): Group[] {
+  const sorted = [...records].sort((a, b) => a.title.localeCompare(b.title, "ja"));
+  const of = (k: string) => sorted.filter((r) => (valueOf(r, "Kind") || "person") === k);
+  return [
+    { name: "人", records: of("person") },
+    { name: "会社・チーム", records: of("org") },
+    { name: "グループ", records: of("group") },
+  ];
+}
+
+const places = (r: Rec) =>
+  itemsOf(r, "Member of")
+    .map((i) => linkOf(i.text)?.title)
+    .filter(Boolean);
+
 export default function Parties() {
-  const workgroups = createAsync(() => workgroupsQuery());
   const all = createAsync(() => recordsQuery("parties", workgroup()));
   usePicked({ kind: () => "parties", section: () => "相手" });
   const index = (r: Rec) => Math.max((all() ?? []).findIndex((x) => x.id === r.id), 0);
-  const groups = (records: Rec[]): Group[] => {
-    const sorted = [...records].sort((a, b) => a.title.localeCompare(b.title, "ja"));
-    const of = (k: string) => sorted.filter((r) => (valueOf(r, "Kind") || "person") === k);
-    return [
-      { name: "人", records: of("person") },
-      { name: "会社・チーム", records: of("org") },
-      { name: "グループ", records: of("group") },
-    ];
-  };
-  const body = (r: Rec) => {
-    const places = () => itemsOf(r, "Member of").map((i) => linkOf(i.text)?.title).filter(Boolean);
-    return (
+  const row = (r: () => Rec): RowParts => ({
+    lead: () => <Avatar party={r()} index={index(r())} />,
+    sub: () => (
       <>
-        <Avatar party={r} index={index(r)} />
-        <span class="rec-main">
-          <b>{r.title}</b>
-          <span class="rec-sub">
-            <For each={toMe(r)}>{(t) => <Tag tone="ok">{t}</Tag>}</For>
-            <Show when={places().length > 0}>
-              <span>{places().join("、")}</span>
-            </Show>
-            <Show when={valuesOf(r, "Aliases").length > 0}>
-              <span>{valuesOf(r, "Aliases").join("、")}</span>
-            </Show>
-            <For each={r.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
-            <span>{workgroupNames(workgroups(), r.workgroups)}</span>
-          </span>
-        </span>
+        <For each={toMe(r())}>{(t) => <Tag tone="ok">{t}</Tag>}</For>
+        <Show when={places(r()).length > 0}>
+          <span>{places(r()).join("、")}</span>
+        </Show>
+        <Show when={valuesOf(r(), "Aliases").length > 0}>
+          <span>{valuesOf(r(), "Aliases").join("、")}</span>
+        </Show>
       </>
-    );
-  };
+    ),
+  });
   return (
     <RecordsPage
       kind="parties"
@@ -175,12 +173,12 @@ export default function Parties() {
       title="相手"
       narrow={["Kind"]}
       groups={groups}
-      row={body}
-      card={body}
+      row={row}
+      cards
       detail={(id) => <RecordDetail kind="parties" id={id} back="/parties" top={(r) => <Guessed party={r} />} extra={(r) => <Around party={r} />} />}
       add={{ label: "グループを足す", titleLabel: "名前", fields: [], preset: { Kind: "group" } }}
       hint="人と会社・チームは、秘書がやりとりの中で覚えていく。"
-      empty="相手はまだいない。秘書がやりとりの中で覚えていく。"
+      empty="相手はまだいない"
     />
   );
 }

@@ -2,19 +2,17 @@ import { dateText } from "~/lib/dates";
 import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
 import * as icons from "~/lib/icons";
-import { choiceOf, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
+import { choiceOf, type FieldLike, type FieldSpec, type FieldValue, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
 import RecordChip from "./links/RecordChip";
 import { useOwner } from "~/lib/owner";
 import RecordPicker from "./RecordPicker";
 import { Icon, Select, Switch, Tag, TextField } from "~/components/ui";
 
-export type Typed = { value: string; values: string[] };
-
-const one = (value: string): Typed => ({ value, values: [] });
-const many = (values: string[]): Typed => ({ value: "", values });
+const one = (value: string): FieldValue => ({ value, values: [] });
+const many = (values: string[]): FieldValue => ({ value: "", values });
 
 /** A field's value as it is read. */
-export function FieldView(props: { type: FieldType; field: Field | undefined; aide: string }) {
+export function FieldView(props: { type: FieldSpec; field: FieldLike | undefined; aide: string }) {
   const value = () => props.field?.value ?? "";
   const t = () => props.type.type;
   return (
@@ -47,7 +45,7 @@ export function FieldView(props: { type: FieldType; field: Field | undefined; ai
   );
 }
 
-function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) => void }) {
+function ListEdit(props: { label: string; values: string[]; onSave: (v: FieldValue) => void }) {
   const [text, setText] = createSignal("");
   const add = () => {
     const v = text().trim();
@@ -81,7 +79,7 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) =
   );
 }
 
-function LinksEdit(props: { label: string; of: string; values: string[]; single: boolean; onSave: (v: Typed) => void }) {
+function LinksEdit(props: { label: string; of: string; values: string[]; single: boolean; onSave: (v: FieldValue) => void }) {
   const without = (v: string) => props.values.filter((x) => x !== v);
   const save = (values: string[]) => props.onSave(values.length === 0 ? one("") : props.single ? one(values[0]) : many(values));
   return (
@@ -108,7 +106,7 @@ function LinksEdit(props: { label: string; of: string; values: string[]; single:
   );
 }
 
-function TimeEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+function TimeEdit(props: { label: string; value: string; onSave: (v: FieldValue) => void }) {
   const day = () => props.value.slice(0, 10);
   const time = () => props.value.slice(11, 16);
   const save = (d: string, t: string) => props.onSave(one(d ? (t ? `${d} ${t}` : d) : ""));
@@ -120,7 +118,7 @@ function TimeEdit(props: { label: string; value: string; onSave: (v: Typed) => v
   );
 }
 
-function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+function MoneyEdit(props: { label: string; value: string; onSave: (v: FieldValue) => void }) {
   const amount = () => props.value.split(" ")[0] ?? "";
   const currency = () => props.value.split(" ")[1] || "JPY";
   const save = (a: string, c: string) => props.onSave(one(a.trim() ? `${a.trim()} ${c}` : ""));
@@ -135,7 +133,7 @@ function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => 
 }
 
 /** The control that changes a field, by what the field holds. */
-export default function FieldEdit(props: { type: FieldType; label: string; field: Field | undefined; onSave: (v: Typed) => void }) {
+export default function FieldEdit(props: { type: FieldSpec; label: string; field: FieldLike | undefined; onSave: (v: FieldValue) => void }) {
   const owner = useOwner();
   const value = () => props.field?.value ?? "";
   const values = () => props.field?.values ?? [];

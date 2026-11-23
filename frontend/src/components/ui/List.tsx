@@ -57,11 +57,11 @@ export function ListRow(props: {
             </a>
           )}
         </Show>
-        <Show when={props.sub}>
+        <Show when={"sub" in props}>
           <div class="item-sub">{props.sub}</div>
         </Show>
       </div>
-      <Show when={props.end}>
+      <Show when={"end" in props}>
         <div class="item-end">{props.end}</div>
       </Show>
       <Show when={props.leads}>

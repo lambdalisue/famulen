@@ -1,106 +1,116 @@
-import { dateText, daysLeft , nearness } from "~/lib/dates";
-import { createAsync } from "@solidjs/router";
-import { createEffect, For, Show } from "solid-js";
-import { workgroupsQuery } from "~/lib/data";
-import { choiceOf, deadlinesOf, excerptOf, isPast, linkOf, moneyText, type Rec, sectionOf, valueOf, workgroupNames } from "~/lib/records";
-import { usePicked } from "~/lib/picked";
-import RecordDetail from "./RecordDetail";
-import { useOwner } from "~/lib/owner";
-import RecordsPage, { type Group } from "./RecordsPage";
+import { Show, For } from "solid-js";
 import { Tag } from "~/components/ui";
+import { dateText, daysLeft, nearness } from "~/lib/dates";
+import { useOwner } from "~/lib/owner";
+import { usePicked } from "~/lib/picked";
+import { choiceOf, deadlinesOf, excerptOf, isPast, linkOf, moneyText, type Rec, sectionOf, valueOf } from "~/lib/records";
+import RecordDetail from "./detail/RecordDetail";
+import RecordsPage, { type Group } from "./RecordsPage";
+import type { RowParts } from "./Row";
+
+const next = (r: Rec) => (isPast(r) ? undefined : deadlinesOf(r)[0]);
+const soonest = (r: Rec) => next(r)?.on ?? "9999";
+const order = (a: Rec, b: Rec) => soonest(a).localeCompare(soonest(b)) || a.title.localeCompare(b.title, "ja");
+
+/** What a thing is and where it came from. */
+function thingFacts(r: Rec): string[] {
+  const got = sectionOf(r, "Acquired");
+  const from = valueOf(got, "From");
+  return [
+    [valueOf(r, "Maker"), valueOf(r, "Model")].filter(Boolean).join(" "),
+    valueOf(r, "Place"),
+    valueOf(got, "On") ? `${dateText(valueOf(got, "On"))}${from ? ` ${linkOf(from)?.title ?? from}` : ""}` : "",
+    moneyText(valueOf(got, "Price")),
+  ];
+}
+
+/** What a contract is, and what it costs. */
+function contractFacts(r: Rec): string[] {
+  const price = valueOf(r, "Price");
+  const cycle = valueOf(r, "Cycle");
+  return [
+    [valueOf(r, "Provider"), valueOf(r, "Plan")].filter(Boolean).join(" "),
+    price ? `${moneyText(price)}${cycle ? ` / ${choiceOf(cycle)}` : ""}` : "",
+    valueOf(r, "Auto renew") === "yes" ? "自動更新" : "",
+  ];
+}
+
+const KINDS = {
+  holdings: {
+    title: "物",
+    base: "/things",
+    facts: thingFacts,
+    overLabel: "手放した物も",
+    add: { label: "物を足す", titleLabel: "名前", fields: ["Category", "Status", "Place"] },
+    empty: "物はまだない",
+  },
+  contracts: {
+    title: "契約",
+    base: "/contracts",
+    facts: contractFacts,
+    overLabel: "終わった契約も",
+    add: { label: "契約を足す", titleLabel: "名前", fields: ["Category", "Provider", "Price", "Cycle"] },
+    empty: "契約はまだない",
+  },
+};
+
+/** By category, those with the soonest deadline first. */
+function groups(records: Rec[]): Group[] {
+  const by = new Map<string, Rec[]>();
+  const sorted = [...records].sort(order);
+  for (const r of sorted) {
+    const c = valueOf(r, "Category") || "分類なし";
+    by.set(c, [...(by.get(c) ?? []), r]);
+  }
+  if (by.size <= 1) return [{ name: "", records: sorted }];
+  return [...by]
+    .sort(([a, ra], [b, rb]) => soonest(ra[0]).localeCompare(soonest(rb[0])) || a.localeCompare(b, "ja"))
+    .map(([name, rs]) => ({ name, records: rs }));
+}
 
 /** Things, or contracts: the same page over a different kind. */
 export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) {
-  const things = () => props.kind === "holdings";
-  const title = () => (things() ? "物" : "契約");
-  const base = () => (things() ? "/things" : "/contracts");
+  const of = () => KINDS[props.kind];
   const owner = useOwner();
-  const workgroups = createAsync(() => workgroupsQuery());
-  const day = owner.today;
-  usePicked({ kind: () => props.kind, section: title });
-
-  const next = (r: Rec) => (isPast(r) ? undefined : deadlinesOf(r)[0]);
-  const order = (a: Rec, b: Rec) => (next(a)?.on ?? "9999").localeCompare(next(b)?.on ?? "9999") || a.title.localeCompare(b.title, "ja");
-  const groups = (records: Rec[]): Group[] => {
-    const by = new Map<string, Rec[]>();
-    for (const r of [...records].sort(order)) {
-      const c = valueOf(r, "Category") || "分類なし";
-      by.set(c, [...(by.get(c) ?? []), r]);
-    }
-    if (by.size <= 1) return [{ name: "", records: [...records].sort(order) }];
-    const soon = (rs: Rec[]) => next(rs[0])?.on ?? "9999";
-    return [...by]
-      .sort(([a, ra], [b, rb]) => soon(ra).localeCompare(soon(rb)) || a.localeCompare(b, "ja"))
-      .map(([name, rs]) => ({ name, records: rs }));
-  };
-  /** What a thing is and where it came from, or what a contract is and costs. */
-  const facts = (r: Rec): string[] => {
-    const text = (name: string) => valueOf(r, name);
-    const got = sectionOf(r, "Acquired");
-    const from = valueOf(got, "From");
-    return things()
-      ? [
-          [text("Maker"), text("Model")].filter(Boolean).join(" "),
-          text("Place"),
-          valueOf(got, "On") ? `${dateText(valueOf(got, "On"))}${from ? ` ${linkOf(from)?.title ?? from}` : ""}` : "",
-          moneyText(valueOf(got, "Price")),
-        ]
-      : [
-          [text("Provider"), text("Plan")].filter(Boolean).join(" "),
-          text("Price") ? `${moneyText(text("Price"))}${text("Cycle") ? ` / ${choiceOf(text("Cycle"))}` : ""}` : "",
-          text("Auto renew") === "yes" ? "自動更新" : "",
-        ];
-  };
-  const body = (r: Rec, card: boolean) => (
-    <>
-      <span class="rec-main">
-        <b>{r.title}</b>
-        <span class="rec-sub">
-          <Show when={valueOf(r, "Status") && !["owned", "active"].includes(valueOf(r, "Status"))}>
-            <Tag>{choiceOf(valueOf(r, "Status"))}</Tag>
-          </Show>
-          <Show when={card && valueOf(r, "Category")}>
-            <Tag>{valueOf(r, "Category")}</Tag>
-          </Show>
-          <For each={facts(r).filter(Boolean)}>{(f) => <span>{f}</span>}</For>
-          <For each={r.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
-          <span>{workgroupNames(workgroups(), r.workgroups)}</span>
-        </span>
-        <Show when={card && r.notes}>
-          <span class="rec-excerpt">{excerptOf(r.notes)}</span>
+  usePicked({ kind: () => props.kind, section: () => of().title });
+  const row = (r: () => Rec): RowParts => ({
+    sub: () => (
+      <>
+        <Show when={valueOf(r(), "Status") && !["owned", "active"].includes(valueOf(r(), "Status"))}>
+          <Tag>{choiceOf(valueOf(r(), "Status"))}</Tag>
         </Show>
-      </span>
-      <Show when={next(r)}>
+        <For each={of().facts(r()).filter(Boolean)}>{(f) => <span>{f}</span>}</For>
+      </>
+    ),
+    end: () => (
+      <Show when={next(r())}>
         {(d) => (
           <span class="rec-side">
-            <span class="rec-when" classList={{ late: nearness(d().on, day()) === "late", soon: nearness(d().on, day()) === "soon" }}>
-              {d().what} {daysLeft(d().on, day())}
+            <span class={`rec-when ${nearness(d().on, owner.today())}`}>
+              {d().what} {daysLeft(d().on, owner.today())}
             </span>
-            <span class="sub mono">{d().on}</span>
+            <span class="sub">{dateText(d().on)}</span>
           </span>
         )}
       </Show>
-    </>
-  );
+    ),
+    excerpt: () => excerptOf(r().notes),
+  });
   return (
     <RecordsPage
       kind={props.kind}
-      base={base()}
-      title={title()}
+      base={of().base}
+      title={of().title}
       narrow={["Category", "Status"]}
       over={isPast}
-      overLabel={things() ? "手放した物も" : "終わった契約も"}
+      overLabel={of().overLabel}
       groups={groups}
-      row={(r) => body(r, false)}
-      card={(r) => body(r, true)}
-      detail={(id) => <RecordDetail kind={props.kind} id={id} back={base()} />}
-      add={
-        things()
-          ? { label: "物を足す", titleLabel: "名前", fields: ["Category", "Status", "Place"] }
-          : { label: "契約を足す", titleLabel: "名前", fields: ["Category", "Provider", "Price", "Cycle"] }
-      }
+      row={row}
+      cards
+      detail={(id) => <RecordDetail kind={props.kind} id={id} back={of().base} />}
+      add={of().add}
       hint="期限の 2 週間前になると、タスクになる。"
-      empty={things() ? "物はまだない。" : "契約はまだない。"}
+      empty={of().empty}
     />
   );
 }

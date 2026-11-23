@@ -12,11 +12,11 @@ export function PageHeader(props: { title: JSX.Element; note?: JSX.Element; back
         <Show when={props.back}>{(b) => <BackLink {...b()} />}</Show>
         <h1>{props.title}</h1>
         {props.tags}
-        <Show when={props.actions}>
+        <Show when={"actions" in props}>
           <div class="page-head-actions">{props.actions}</div>
         </Show>
       </div>
-      <Show when={props.note}>
+      <Show when={"note" in props}>
         <div class="sub page-note">{props.note}</div>
       </Show>
     </header>
@@ -34,7 +34,7 @@ export function Section(props: { title: JSX.Element; note?: JSX.Element; action?
           </Show>
           {props.action}
         </div>
-        <Show when={props.note}>
+        <Show when={"note" in props}>
           <p class="sub">{props.note}</p>
         </Show>
       </div>
@@ -51,7 +51,7 @@ export function SubSection(props: { title: JSX.Element; note?: JSX.Element; acti
         <h3>{props.title}</h3>
         {props.action}
       </div>
-      <Show when={props.note}>
+      <Show when={"note" in props}>
         <p class="sub">{props.note}</p>
       </Show>
       {props.children}

@@ -25,8 +25,8 @@ export function Button(props: ComponentProps<"button"> & Look) {
 }
 
 /** A button of an icon alone; its label is what it is called and what the pointer shows. */
-export function IconButton(props: Omit<ComponentProps<"button">, "aria-label" | "title"> & { icon: string; label: string; title?: string; variant?: ButtonVariant; plain?: boolean }) {
-  const [own, rest] = splitProps(props, ["icon", "label", "title", "variant", "plain", "class", "type"]);
+export function IconButton(props: Omit<ComponentProps<"button">, "aria-label" | "title"> & { icon: string; label: string; title?: string; variant?: ButtonVariant; plain?: boolean; size?: number }) {
+  const [own, rest] = splitProps(props, ["icon", "label", "title", "variant", "plain", "size", "class", "type"]);
   return (
     <button
       {...rest}
@@ -35,7 +35,7 @@ export function IconButton(props: Omit<ComponentProps<"button">, "aria-label" | 
       aria-label={own.label}
       title={own.title ?? own.label}
     >
-      <Icon svg={own.icon} size={16} />
+      <Icon svg={own.icon} size={own.size ?? 16} />
     </button>
   );
 }

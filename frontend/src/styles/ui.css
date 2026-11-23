@@ -107,7 +107,8 @@ button.tag { cursor: pointer; font-family: inherit; min-height: 24px; }
 .page-head-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); min-height: 36px; }
 .page-head-line > h1 { min-width: 0; overflow-wrap: anywhere; }
 .page-head-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
-.page-note { max-width: var(--measure); display: flex; flex-direction: column; gap: var(--s2); }
+.page-note { max-width: var(--measure); }
+.page-note p + p { margin-top: 6px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; }
 .card.stack { gap: var(--s3); }
 .prefs { display: flex; flex-direction: column; gap: var(--s4); }
@@ -128,6 +129,7 @@ button.tag { cursor: pointer; font-family: inherit; min-height: 24px; }
 .item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .item-title { max-width: 100%; border: 0; background: transparent; padding: 0; text-align: left; font-size: var(--t-md); font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .item-sub { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); max-width: 100%; font-size: var(--t-sm); color: var(--muted); overflow-wrap: anywhere; }
+.item-sub:empty, .item-end:empty, .sub:empty { display: none; }
 .item-end { flex: none; max-width: 60%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s2); position: relative; z-index: 1; }
 .item.picks { cursor: pointer; }
 .item.picks:hover { background: var(--panel); }

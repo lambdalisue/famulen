@@ -12,6 +12,25 @@ export const OWNER = "owner";
 export const SECRETARY = "secretary";
 export const WORKER = "worker";
 
+/** What a field holds, as it is saved. */
+export type FieldValue = { value: string; values: string[] };
+/** A field with what it holds, whether it came from the API or is being put together. */
+export type FieldLike = FieldValue & { name: string };
+/** What a field may hold. */
+export type FieldSpec = Pick<FieldType, "name" | "type" | "choices" | "of">;
+/** An item of a section, as it is saved. */
+export type ItemLike = { text: string; fields: FieldLike[] };
+
+export const plainField = (f: FieldLike): FieldLike => ({ name: f.name, value: f.value, values: f.values });
+export const plainItem = (i: ItemLike): ItemLike => ({ text: i.text, fields: i.fields.map(plainField) });
+export const isEmpty = (v: FieldValue) => !v.value && v.values.length === 0;
+
+/** Set a field among others, or take it out when it is left empty. */
+export function withField(fields: readonly FieldLike[], name: string, v: FieldValue): FieldLike[] {
+  const left = fields.filter((f) => !same(f.name, name)).map(plainField);
+  return isEmpty(v) ? left : [...left, { name, ...v }];
+}
+
 /** The field every kind has: the records it has to do with. */
 export const RELATED = "Related";
 
@@ -36,15 +55,15 @@ export const routinesQuery = query(async () => (await api.routines.listRoutines(
 /** Names of fields and sections are read whatever their case. */
 export const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-export function fieldOf(r: { fields: Field[] } | undefined, name: string): Field | undefined {
+export function fieldOf<T extends FieldLike>(r: { fields: T[] } | undefined, name: string): T | undefined {
   return r?.fields.find((f) => same(f.name, name));
 }
 
-export function valueOf(r: { fields: Field[] } | undefined, name: string): string {
+export function valueOf(r: { fields: FieldLike[] } | undefined, name: string): string {
   return fieldOf(r, name)?.value ?? "";
 }
 
-export function valuesOf(r: { fields: Field[] } | undefined, name: string): string[] {
+export function valuesOf(r: { fields: FieldLike[] } | undefined, name: string): string[] {
   return fieldOf(r, name)?.values ?? [];
 }
 
@@ -52,7 +71,12 @@ export function itemsOf(r: Rec, section: string): RecordItem[] {
   return r.sections.find((s) => same(s.name, section))?.items ?? [];
 }
 
-export function sectionOf(r: Rec, section: string): { fields: Field[] } | undefined {
+/** A section of a record, by its name. */
+export function sectionIn(r: Rec, name: string) {
+  return r.sections.find((s) => same(s.name, name));
+}
+
+export function sectionOf(r: Rec, section: string): { fields: FieldLike[] } | undefined {
   return r.sections.find((s) => same(s.name, section));
 }
 

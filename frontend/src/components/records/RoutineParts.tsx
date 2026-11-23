@@ -8,7 +8,8 @@ import * as icons from "~/lib/icons";
 import { assigneeOf, newWorkgroups, OWNER, SECRETARY, type Rec, routinesQuery, valueOf } from "~/lib/records";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
-import { Button, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
+import { Button, Callout, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
+import type { RowParts } from "./Row";
 
 const useRuns = () => {
   const routines = createAsync(() => routinesQuery());
@@ -18,63 +19,79 @@ const useRuns = () => {
 const skip = (routine: string, run: RoutineRun) =>
   act(() => api.routines.skipRun({ routine, at: run.at, undo: run.skipped }), run.skipped ? "戻した" : "この回を飛ばす");
 
-/** One routine in a list. */
-export function RoutineRow(props: { routine: Rec }) {
+/** Whether a routine runs at all. */
+function Running(props: { routine: Rec }) {
+  const r = () => props.routine;
+  return (
+    <Switch
+      hidden
+      checked={isOn(r())}
+      onChange={(on) =>
+        void act(() => api.records.saveRecord({ kind: "routines", id: r().id, fields: [{ name: "Enabled", value: on ? "yes" : "no" }] }), on ? "動かす" : "止めた")
+      }
+    >
+      {r().title}を動かす
+    </Switch>
+  );
+}
+
+const isOn = (r: Rec) => valueOf(r, "Enabled") !== "no";
+
+/** When a routine next runs, with a way to leave that run out. */
+function Next(props: { routine: Rec }) {
   const runs = useRuns();
   const owner = useOwner();
-  const info = () => runs(props.routine.id);
-  const next = () => info()?.runs[0];
-  const on = () => valueOf(props.routine, "Enabled") !== "no";
+  const next = () => (isOn(props.routine) ? runs(props.routine.id)?.runs[0] : undefined);
+  const aides = () => (valueOf(props.routine, "Assignee") || OWNER) === SECRETARY;
   return (
-    <>
-      <Switch
-        hidden
-        checked={on()}
-        onChange={(d) =>
-          void act(
-            () => api.records.saveRecord({ kind: "routines", id: props.routine.id, fields: [{ name: "Enabled", value: d ? "yes" : "no" }] }),
-            d ? "動かす" : "止めた",
-          )
-        }
-      >
-        {props.routine.title}を動かす
-      </Switch>
-      <span class="rec-main">
-        <b style={on() ? {} : { color: "#8C8A82" }}>{props.routine.title}</b>
-        <span class="rec-sub">
-          <span>{info()?.when}</span>
-          <Show when={info()?.problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
-          <For each={props.routine.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
-        </span>
-      </span>
-      <span class="rec-side">
-        <Show when={on() && next()}>
+    <span class="rec-side">
+      <Show when={next()}>
+        {(n) => (
+          <span class="rec-when">
+            {n().skipped ? "飛ばす " : "次 "}
+            {shortTime(n().at, owner.tz())}
+          </span>
+        )}
+      </Show>
+      <span class="row">
+        <Show when={next()}>
           {(n) => (
-            <span class="rec-when">
-              {n().skipped ? "飛ばす " : "次 "}
-              {shortTime(n().at, owner.tz())}
-            </span>
+            <button
+              type="button"
+              class="tag"
+              aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
+              onClick={() => void skip(props.routine.id, n())}
+            >
+              <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
+              {n().skipped ? "戻す" : "次を飛ばす"}
+            </button>
           )}
         </Show>
-        <span class="row">
-          <Show when={on() && next()}>
-            {(n) => (
-              <button
-                type="button"
-                class="tag"
-                aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
-                onClick={() => void skip(props.routine.id, n())}
-              >
-                <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
-                {n().skipped ? "戻す" : "次を飛ばす"}
-              </button>
-            )}
-          </Show>
-          <Tag tone={(valueOf(props.routine, "Assignee") || OWNER) === SECRETARY ? "aide" : undefined}>{assigneeOf(props.routine, owner.aide())}</Tag>
-        </span>
+        <Tag tone={aides() ? "aide" : undefined}>{assigneeOf(props.routine, owner.aide())}</Tag>
       </span>
+    </span>
+  );
+}
+
+function When(props: { routine: Rec }) {
+  const runs = useRuns();
+  const info = () => runs(props.routine.id);
+  return (
+    <>
+      <span>{info()?.when}</span>
+      <Show when={info()?.problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
     </>
   );
+}
+
+/** One routine in a list. */
+export function routineParts(r: () => Rec): RowParts {
+  return {
+    lead: () => <Running routine={r()} />,
+    title: () => <span classList={{ quiet: !isOn(r()) }}>{r().title}</span>,
+    sub: () => <When routine={r()} />,
+    end: () => <Next routine={r()} />,
+  };
 }
 
 /** The runs to come, each skipped or put back on its own. */
@@ -87,13 +104,12 @@ export function Runs(props: { routine: Rec }) {
       {(info) => (
         <section class="rec-section">
           <h3>これからの回</h3>
-          <div class="callout">
+          <Callout icon={icons.repeat} action={<Show when={info().problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>}>
             <b>{info().when || "時刻がまだない"}</b>
             <Show when={info().lastRun > 0n}>
-              <span class="sub">前に動いたのは {shortTime(info().lastRun, tz())}</span>
+              <span class="sub"> 前に動いたのは {shortTime(info().lastRun, tz())}</span>
             </Show>
-            <Show when={info().problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
-          </div>
+          </Callout>
           <For each={info().runs}>
             {(r) => (
               <div class="run" classList={{ skipped: r.skipped }}>

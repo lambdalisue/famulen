@@ -8,6 +8,7 @@ import { useWaiting } from "~/lib/inbox";
 import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
+import { isNarrow } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import Mark from "./Mark";
@@ -58,9 +59,8 @@ export default function Shell(props: { children?: JSX.Element }) {
     followEvents(workgroup);
     // The narrow layout's rules read these from <body>: while typing, the
     // bottom bar gives way to the keyboard.
-    const narrow = () => window.matchMedia("(max-width: 700px)").matches;
     const focusIn = (e: FocusEvent) => {
-      if (narrow() && e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.add("typing");
+      if (isNarrow() && e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.add("typing");
     };
     const focusOut = (e: FocusEvent) => {
       if (e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.remove("typing");

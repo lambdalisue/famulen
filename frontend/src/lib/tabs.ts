@@ -1,4 +1,5 @@
 import * as icons from "./icons";
+import { withParams } from "./params";
 
 export type Tab = {
   key: string;
@@ -46,18 +47,12 @@ export function tabNamed(name: string): Tab | undefined {
  * Pages under ほか lead back to their index, details to their list.
  */
 export function wayBack(path: string, search: string): { href: string; label: string } | undefined {
-  const detail = new URLSearchParams(search).has("id");
   if (path === "/settings/menu" || path === "/memory/menu") return { href: "/more", label: "ほか" };
+  if (path === "/settings/services" && search) return { href: "/settings/services", label: "サービス" };
   if (path.startsWith("/settings")) return { href: "/settings/menu", label: "設定" };
   if (path.startsWith("/memory")) return { href: "/memory/menu", label: "記憶" };
-  for (const [prefix, label] of [["/tasks", "タスク"], ["/memos", "メモ"]]) {
-    if (path === prefix && detail) {
-      const routines = new URLSearchParams(search).get("tab") === "routines";
-      return { href: routines ? `${prefix}?tab=routines` : prefix, label };
-    }
-  }
-  for (const [prefix, label] of [["/parties", "相手"], ["/things", "物"], ["/contracts", "契約"]]) {
-    if (path === prefix) return detail ? { href: prefix, label } : { href: "/more", label: "ほか" };
-  }
-  return undefined;
+  const params = new URLSearchParams(search);
+  const picked = ["id", "event", "record"].filter((p) => params.has(p));
+  if (picked.length > 0) return { href: withParams(`${path}${search}`, Object.fromEntries(picked.map((p) => [p, ""]))), label: tabOf(path).label };
+  return BOTTOM.includes(tabOf(path).key) || path === MORE.path ? undefined : { href: MORE.path, label: MORE.label };
 }
