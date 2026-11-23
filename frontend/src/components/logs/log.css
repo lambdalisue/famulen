@@ -1,0 +1,14 @@
+.log-day { font-size:12px; font-weight:600; color: var(--muted); padding:10px 4px 0; }
+.log-turn { display:flex; flex-direction:column; gap:8px; cursor:pointer; }
+.log-turn .asked { font-weight:600; white-space:pre-wrap; overflow-wrap:anywhere; }
+.log-turn .reply { white-space:pre-wrap; font-size:13px; color: var(--ink2); overflow-wrap:anywhere; }
+.log-turn:not(.open) .asked { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.log-turn:not(.open) .reply { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.log-steps { display:flex; flex-wrap:wrap; gap:4px; }
+.log-steps .tag { display:inline-flex; align-items:center; gap:4px; }
+.log-step-detail { display:flex; flex-direction:column; gap:6px; padding-left:10px; border-left:2px solid var(--line); }
+.log-step-detail pre { font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; margin:2px 0 0; }
+.log-event { display:flex; gap:8px; align-items:baseline; padding:2px 4px; font-size:13px; }
+.log-event .detail-text { flex:1; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.log-open { display:flex; justify-content:flex-start; }
+.log-pages { display:flex; align-items:center; justify-content:space-between; gap:8px; }
