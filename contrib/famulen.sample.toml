@@ -1,0 +1,36 @@
+# An optional config file: `famulen famulen.toml`. Every setting may be left
+# out, and the environment wins over the file. What can also be chosen on the
+# console wins over both. Secrets are never kept here.
+
+# Where the database, the agent's working directory and, by default, the
+# notebook live.
+# FAMULEN_DATA_DIR wins over it. Default: ~/.local/share/famulen.
+# data_dir = "/var/lib/famulen"
+
+# Where the notebook lives: what Famulen remembers and records about you.
+# This is where it starts; move it on the console's 秘書 page, which wins.
+# FAMULEN_NOTEBOOK_DIR wins over this. Default: notebook/ in data_dir.
+# notebook_dir = "~/notes/famulen"
+
+# Schedules run, and the agent reads the time, in this time zone.
+# FAMULEN_TIMEZONE wins over it. Default: this machine's time zone.
+# timezone = "Asia/Tokyo"
+
+# Where you open the console, for logins to come back to
+# (<this>/oauth/callback). FAMULEN_CONSOLE_URL wins over it.
+# console_url = "https://famulen.example.ts.net"
+
+[claude]
+# The Claude Code executable, logged in with your subscription.
+bin = "claude"
+# The model when none is assigned to the secretary on the console, and how
+# much it thinks when its assignment does not say. Claude Code's defaults
+# when unset.
+# model = "opus"
+# effort = "medium"
+
+[api]
+# Where the API listens. It has no login: keep it where only the console
+# reaches it. FAMULEN_LISTEN wins over this.
+listen = "127.0.0.1:7790"
+

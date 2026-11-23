@@ -1,0 +1,27 @@
+# A systemd user unit for running the backend on a server without containers.
+# The console is a program of its own; run it beside the backend (see
+# frontend/Dockerfile).
+#
+#   mkdir -p ~/.config/systemd/user ~/.config/famulen
+#   cp famulen.service ~/.config/systemd/user/
+#   cp famulen.sample.toml ~/.config/famulen/famulen.toml   # then edit it
+#   cp ../.env.sample ~/.config/famulen/env                   # then fill it in
+#   chmod 600 ~/.config/famulen/env
+#   systemctl --user enable --now famulen
+#   loginctl enable-linger "$USER"   # keep it running after you log out
+#
+# It runs as your user so that Claude Code uses your own login.
+
+[Unit]
+Description=Famulen, an AI aide that serves one owner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/famulen/env
+ExecStart=%h/.local/bin/famulen %h/.config/famulen/famulen.toml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

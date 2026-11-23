@@ -1,0 +1,47 @@
+# Famulen on the owner's server: the backend and the console side by side.
+#
+#   cp .env.sample .env   # then fill it in (docs/setup/README.md)
+#   docker compose up -d --build
+#
+# The console listens on localhost only. Put it behind something that gives
+# it https and keeps it to you (Tailscale Serve, a reverse proxy with login),
+# and set FAMULEN_CONSOLE_URL in .env to that address.
+
+services:
+  backend:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - data:/data
+      - claude:/home/node/.claude
+    # The secretary's shell commands run in Claude Code's sandbox (bubblewrap),
+    # which needs a user namespace and a fresh /proc of its own. Docker's
+    # default seccomp profile refuses the first and its masked /proc the
+    # second, and without them every shell command fails. The profile is
+    # Docker's default (moby/profiles seccomp/default.json) with only the
+    # namespace and mount syscalls let through; the container still runs as
+    # node with no added capabilities.
+    security_opt:
+      - seccomp=./contrib/seccomp-sandbox.json
+      - systempaths=unconfined
+    restart: unless-stopped
+
+  console:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      FAMULEN_API_URL: http://backend:7790
+      FAMULEN_CONSOLE_URL: ${FAMULEN_CONSOLE_URL:-}
+      FAMULEN_CONSOLE_HOSTS: ${FAMULEN_CONSOLE_HOSTS:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  data:
+  claude:
