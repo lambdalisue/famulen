@@ -1,3 +1,4 @@
+import { shortTime } from "~/lib/dates";
 import { A, createAsync, revalidate } from "@solidjs/router";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Questions from "~/components/Questions";
@@ -5,12 +6,14 @@ import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, For, on, onMount, Show } from "solid-js";
 import { ApprovalAnswer, type ConsoleMessage, Speaker } from "~/gen/famulen/v1/console_pb";
+import { message } from "~/lib/act";
 import { api } from "~/lib/api";
 import { workgroup } from "~/lib/workgroup";
-import { inboxQuery, messagesQuery, personaQuery } from "~/lib/data";
+import { inboxQuery, messagesQuery } from "~/lib/data";
+import { useWaiting } from "~/lib/inbox";
 import { pushed } from "~/lib/events";
 import { tabNamed } from "~/lib/tabs";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 import { selection, setSelection, view } from "~/lib/view";
 
 /** How the gateway names a held change to a service definition. */
@@ -170,23 +173,22 @@ function Inbox(props: { aide: string }) {
 
 /** The conversation column. It stays mounted while pages change. */
 export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }) {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const loaded = createAsync(() => messagesQuery(workgroup()));
-  const inbox = createAsync(() => inboxQuery());
   const [extra, setExtra] = createSignal<ConsoleMessage[]>([]);
   const [text, setText] = createSignal("");
   const [error, setError] = createSignal("");
   let list: HTMLDivElement | undefined;
   let say: HTMLTextAreaElement | undefined;
 
-  const aide = () => persona()?.name || "秘書";
-  const tz = () => persona()?.timezone ?? "UTC";
+  const aide = owner.aide;
+  const tz = owner.tz;
   const messages = () => {
     const seen = new Set((loaded() ?? []).map((m) => m.id));
     return [...(loaded() ?? []), ...extra().filter((m) => !seen.has(m.id))];
   };
   const last = () => [...messages()].reverse().find((m) => m.who === Speaker.AIDE);
-  const pending = () => inbox()?.approvals.length ?? 0;
+  const waiting = useWaiting();
 
   const nearBottom = () => !list || list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   const toBottom = () => {
@@ -223,7 +225,7 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
       setExtra((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]));
       queueMicrotask(toBottom);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(message(err));
     }
   };
 
@@ -257,8 +259,8 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
             {last() ? ` · ${shortTime(last()!.at, tz())}` : ""}
           </span>
           <span class="grow peek-text">{last()?.text.split("\n")[0] ?? "まだ話していない"}</span>
-          <Show when={pending() > 0}>
-            <span class="tag warn">確認 {pending()}</span>
+          <Show when={waiting.count() > 0}>
+            <span class="tag warn">確認 {waiting.count()}</span>
           </Show>
         </span>
       </button>

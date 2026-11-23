@@ -5,31 +5,31 @@ import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
-import { inboxQuery, personaQuery, statusQuery, workgroupsQuery } from "~/lib/data";
+import { useWaiting } from "~/lib/inbox";
+import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
-import { view } from "~/lib/view";
+import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import Toast from "./Toast";
 import Mark from "./Mark";
 import SideSheet from "./SideSheet";
+import { useOwner } from "~/lib/owner";
 import StatusPanel from "./StatusPanel";
 
 /** How the secretary is, in a word; pressing it opens the whole state. */
 function Alive() {
   const status = createAsync(() => statusQuery());
-  const inbox = createAsync(() => inboxQuery());
+  const waiting = useWaiting();
   const busy = () => status()?.state === "running";
-  const waiting = () =>
-    (inbox()?.approvals ?? []).filter((a) => a.status === "pending").length + (inbox()?.held ?? []).length;
   return (
     <Dialog.Root lazyMount unmountOnExit>
       <Dialog.Trigger class="alive" aria-label="秘書の状態">
         <span class="dot" style={{ background: busy() ? "#2a78d6" : "#1A8C7F" }} />
         <span role="status">{busy() ? "考えている" : "待っている"}</span>
-        <Show when={waiting() > 0}>
+        <Show when={waiting.count() > 0}>
           <span class="alive-waiting" title="あなたを待っているもの">
-            {waiting()}
+            {waiting.count()}
           </span>
         </Show>
         <Icon svg={icons.chevronDown} size={12} />
@@ -45,16 +45,16 @@ function Alive() {
 export default function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
   const workgroups = createAsync(() => workgroupsQuery());
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const [sheet, setSheet] = createSignal<"" | "half" | "full">("");
   let workgroupSheet: HTMLDialogElement | undefined;
 
   const tab = () => tabOf(location.pathname);
   const current = () => workgroups()?.find((c) => c.id === workgroup()) ?? workgroups()?.[0];
   const color = () => current()?.color ?? "#0F6E68";
-  const aide = () => persona()?.name || "秘書";
+  const aide = owner.aide;
   const more = () => !BOTTOM.includes(tab().key);
-  const mobileTitle = () => view().split(" · ")[1] || tab().label;
+  const mobileTitle = () => pageTitle() || tab().label;
 
   onMount(() => {
     followEvents(workgroup);

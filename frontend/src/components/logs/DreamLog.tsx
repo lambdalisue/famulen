@@ -1,9 +1,9 @@
+import { dateTimeText } from "~/lib/dates";
 import { A, createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
-import { nightLabel } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
 
 const dreamLogQuery = query(async (before: number) => {
@@ -31,7 +31,7 @@ function counts(d: Dream): string {
 /** Each night the dream ran: how it went and how much it changed. */
 export default function DreamLog() {
   const pages = createPages(dreamLogQuery);
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <>
       <p class="sub">
@@ -42,7 +42,7 @@ export default function DreamLog() {
           {(d) => (
             <div class="item dream-log-entry">
               <span class="mono sub" style={{ width: "90px" }}>
-                {nightLabel(d.at, persona()?.timezone ?? "")}
+                {dateTimeText(d.at, owner.tz())}
               </span>
               <div class="grow">
                 <div style={{ "font-size": "13px", "overflow-wrap": "anywhere" }}>{d.status}</div>

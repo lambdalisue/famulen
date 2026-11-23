@@ -1,3 +1,4 @@
+import { shortTime } from "~/lib/dates";
 import { Collapsible } from "@ark-ui/solid/collapsible";
 import { createAsync, query } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
@@ -8,9 +9,8 @@ import { Permission } from "~/gen/famulen/v1/services_pb";
 import type { Secret } from "~/gen/famulen/v1/vault_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 const vaultQuery = query(() => api.vault.listSecrets({}), "vault");
@@ -223,10 +223,10 @@ function SecretaryPermissions() {
 }
 
 export default function Vault() {
-  setView("設定 · 金庫");
+  setView("設定", "金庫");
   const vault = createAsync(() => vaultQuery());
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   const added = () => (vault()?.secrets ?? []).filter((s) => !s.automatic);
   const automatic = () => (vault()?.secrets ?? []).filter((s) => s.automatic);
 

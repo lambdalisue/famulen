@@ -1,3 +1,4 @@
+import { minutesNow, clock, dayOf, hm, localDate, minutesOfDay, weekday } from "~/lib/dates";
 import { createAsync, useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import Icon from "~/components/Icon";
@@ -6,22 +7,11 @@ import EventSheet, { whenOf } from "~/components/records/EventSheet";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import {
-  calendarQuery,
-  dayOf,
-  hm,
-  hourNow,
-  lanes,
-  localDate,
-  minutesBetween,
-  minutesOfDay,
-  type Unit,
-  unitOf,
-  weekday,
-} from "~/lib/calendar";
-import { personaQuery } from "~/lib/data";
+import { calendarQuery, lanes, minutesBetween, type Unit, unitOf } from "~/lib/calendar";
 import * as icons from "~/lib/icons";
+import { oneParam } from "~/lib/params";
 import { setSelection, setView } from "~/lib/view";
+import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
 
 const UNITS: [Unit, string][] = [
@@ -36,10 +26,6 @@ const HOUR_PX = 48;
 const MIN_MINUTES = 20;
 /** How many events a day of the month shows before the rest are counted. */
 const IN_MONTH = 4;
-
-function one(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
-}
 
 const faint = (e: CalendarEvent) => e.mode === CalendarMode.FAINT;
 const hold = (e: CalendarEvent) => e.status === "hold";
@@ -61,17 +47,17 @@ function laneStyle(top: number, height: number, lane: number, n: number) {
 export default function Calendar() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const unit = () => unitOf(one(params.unit));
-  const at = () => one(params.at) ?? "";
+  const unit = () => unitOf(oneParam(params.unit));
+  const at = () => oneParam(params.at);
   const data = createAsync(() => calendarQuery(workgroup(), unit(), at()));
-  const persona = createAsync(() => personaQuery());
-  const aide = () => persona()?.name || "秘書";
+  const owner = useOwner();
+  const aide = owner.aide;
   const href = (u: Unit, d: string) => `/calendar?unit=${u}&at=${d}`;
   let scroller: HTMLDivElement | undefined;
   let scrolledFor = "";
 
   onMount(() => {
-    if (one(params.unit) === undefined && window.matchMedia("(max-width: 700px)").matches) {
+    if (!oneParam(params.unit) && window.matchMedia("(max-width: 700px)").matches) {
       navigate(`/calendar?unit=day${at() ? `&at=${at()}` : ""}`, { replace: true });
     }
   });
@@ -79,7 +65,7 @@ export default function Calendar() {
   createEffect(() => {
     const d = data();
     if (!d) return;
-    setView(`カレンダー · ${UNITS.find(([u]) => u === unit())?.[1] ?? "週"} · ${d.range.title}`);
+    setView("カレンダー", UNITS.find(([u]) => u === unit())?.[1], d.range.title);
   });
 
   createEffect(() => {
@@ -87,7 +73,7 @@ export default function Calendar() {
     const key = d ? `${unit()}:${d.range.start}` : "";
     if (!d || !scroller || key === scrolledFor) return;
     scrolledFor = key;
-    const hour = d.range.days.includes(d.today) ? Math.max(hourNow(d.tz) - 1, 0) : HOUR_SHOWN;
+    const hour = d.range.days.includes(d.today) ? Math.max(Math.floor(minutesNow(d.tz) / 60) - 1, 0) : HOUR_SHOWN;
     const el = scroller;
     queueMicrotask(() => {
       const mark = el.querySelector<HTMLElement>(`[data-hour="${hour}"]`);
@@ -103,7 +89,7 @@ export default function Calendar() {
 
   const [adding, setAdding] = createSignal("");
   const shown = () => {
-    const uid = one(params.event);
+    const uid = oneParam(params.event);
     return uid ? data()?.events.find((e) => e.uid === uid) : undefined;
   };
   const here = () => href(unit(), data()?.at ?? at());
@@ -269,7 +255,7 @@ export default function Calendar() {
               </span>
             </div>
             <AddEvent day={adding()} open={!!adding()} onOpenChange={(o) => !o && setAdding("")} />
-            <EventSheet event={shown()} record={one(params.record) ?? ""} back={here()} onClose={() => navigate(here(), { scroll: false })} />
+            <EventSheet event={shown()} record={oneParam(params.record)} back={here()} onClose={() => navigate(here(), { scroll: false })} />
           </>
         );
       }}
@@ -279,10 +265,7 @@ export default function Calendar() {
 
 /** The line where it is now, moving with the clock. */
 function Now(props: { tz: string }) {
-  const minutes = () => {
-    const t = new Intl.DateTimeFormat("ja-JP", { timeZone: props.tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
-    return Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-  };
+  const minutes = () => minutesNow(props.tz);
   const [at, setAt] = createSignal(0);
   onMount(() => {
     setAt(minutes());

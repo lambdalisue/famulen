@@ -14,6 +14,7 @@ import { DreamFrequency, type DreamSettings } from "~/gen/famulen/v1/memory_pb";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
+import { WEEKDAYS } from "~/lib/dates";
 import { createDraft } from "~/lib/draft";
 import { check, chevronDown } from "~/lib/icons";
 import { dreamSettingsQuery } from "~/lib/memory";
@@ -24,8 +25,6 @@ const FREQUENCIES: [DreamFrequency, string, string][] = [
   [DreamFrequency.EVERY_OTHER_DAY, "other", "一日おき"],
   [DreamFrequency.WEEKLY, "weekly", "週に一度"],
 ];
-
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 /** The times offered, every half hour; a time saved otherwise is offered too. */
 const TIMES = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
@@ -235,7 +234,7 @@ function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
 
 /** Dreaming: putting the day's memories in order overnight. */
 export default function Dream() {
-  setView("設定 · 夢");
+  setView("設定", "夢");
   const plan = createAsync(() => dreamSettingsQuery());
   const save = (change: Change) => {
     const p = plan();

@@ -1,20 +1,21 @@
-import { createAsync, useNavigate, useSearchParams } from "@solidjs/router";
+import { shortTime } from "~/lib/dates";
+import { createAsync, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
 import Icon from "~/components/Icon";
 import { DelegatedQueue, Delegation } from "~/components/records/Delegated";
 import RecordDetail from "~/components/records/RecordDetail";
-import RecordsPage, { type Group, oneParam } from "~/components/records/RecordsPage";
+import RecordsPage, { type Group } from "~/components/records/RecordsPage";
 import { AddRoutine, RoutineRow, Runs } from "~/components/records/RoutineParts";
 import TaskRow from "~/components/records/TaskRow";
 import Segs from "~/components/Segs";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { bucketOf, isOver, type Rec, recordQuery, valueOf } from "~/lib/records";
+import { bucketOf, isOver, type Rec, valueOf } from "~/lib/records";
 import { cancelWake, wakesQuery } from "~/lib/routines";
-import { shortTime, today } from "~/lib/time";
-import { setView } from "~/lib/view";
+import { useOwner } from "~/lib/owner";
+import { useParam } from "~/lib/params";
+import { usePicked } from "~/lib/picked";
 
 const RANK: { [p: string]: number } = { high: 0, normal: 1, low: 2 };
 
@@ -75,12 +76,12 @@ function Blocked(props: { task: Rec }) {
 
 /** What the secretary put off until a time of its own choosing. */
 function Wakes() {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const wakes = createAsync(() => wakesQuery());
   return (
     <Show when={(wakes() ?? []).length > 0}>
       <section class="rec-group">
-        <h2>{persona()?.name || "秘書"} が待っている</h2>
+        <h2>{owner.aide()} が待っている</h2>
         <div class="rec-rows">
           <For each={wakes()}>
             {(w) => (
@@ -92,7 +93,7 @@ function Wakes() {
                     <span class="rec-sub">{w.note}</span>
                   </Show>
                 </span>
-                <span class="rec-when">{shortTime(w.atUnix, persona()?.timezone ?? "UTC")}</span>
+                <span class="rec-when">{shortTime(w.atUnix, owner.tz())}</span>
                 <button type="button" class="rec-edit" aria-label={`起床予約「${w.note}」を取り消す`} onClick={() => void cancelWake(w.id)}>
                   <Icon svg={icons.trash} size={13} />
                 </button>
@@ -106,21 +107,14 @@ function Wakes() {
 }
 
 export default function Tasks() {
-  const [params] = useSearchParams();
-  const persona = createAsync(() => personaQuery());
-  const tab = () => (oneParam(params.tab) === "routines" ? "routines" : "once");
-  const picked = createAsync(() => {
-    const id = oneParam(params.id);
-    return id ? recordQuery(tab() === "routines" ? "routines" : "tasks", id) : Promise.resolve(undefined);
-  });
+  const owner = useOwner();
+  const asked = useParam("tab");
+  const tab = () => (asked() === "routines" ? "routines" : "once");
   const [adding, setAdding] = createSignal(false);
-  createEffect(() => {
-    const what = picked()?.title ?? (tab() === "routines" ? "定期" : "");
-    setView(what ? `タスク · ${what}` : "タスク");
-  });
+  usePicked({ kind: () => (tab() === "routines" ? "routines" : "tasks"), section: () => "タスク", sub: () => (tab() === "routines" ? "定期" : "") });
 
   const groups = (records: Rec[]): Group[] => {
-    const day = today(persona()?.timezone ?? "UTC");
+    const day = owner.today();
     const sorted = [...records].sort(order);
     const of = (b: string) => sorted.filter((r) => bucketOf(r, day) === b);
     const done = of("done").sort((a, b) => valueOf(b, "Finished").localeCompare(valueOf(a, "Finished")));

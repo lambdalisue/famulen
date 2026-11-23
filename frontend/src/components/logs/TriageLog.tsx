@@ -1,8 +1,8 @@
+import { shortTime } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
 
 const triageLogQuery = query(async (before: number) => {
@@ -13,7 +13,7 @@ const triageLogQuery = query(async (before: number) => {
 /** What triage decided of each message in an attended channel. */
 export default function TriageLog() {
   const pages = createPages(triageLogQuery);
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <>
       <p class="sub">注視しているチャンネルの発言ごとに、秘書宛てと見て秘書に渡したか、見送ったか。発言は最初の行だけが残る。</p>
@@ -22,7 +22,7 @@ export default function TriageLog() {
           {(d) => (
             <div class="item triage-log-entry">
               <span class="mono sub" style={{ width: "90px" }}>
-                {shortTime(d.at, persona()?.timezone ?? "")}
+                {shortTime(d.at, owner.tz())}
               </span>
               <span class={`tag${d.addressed ? " aide" : ""}`}>{d.addressed ? "秘書へ" : "見送った"}</span>
               <div class="grow">

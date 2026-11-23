@@ -92,7 +92,7 @@ function DefaultInterval(props: { value: LookoutDefault }) {
 
 /** Watching the outside world and passing on only what concerns the owner. */
 export default function Lookout() {
-  setView("設定 · 見張り");
+  setView("設定", "見張り");
   const w = createAsync(() => lookoutQuery());
   const [adding, setAdding] = createSignal(false);
 

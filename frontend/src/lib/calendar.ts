@@ -1,87 +1,12 @@
 import { query } from "@solidjs/router";
 import { api } from "./api";
+import { addDays, dateLabel, daysBetween, monthOf, spanLabel, today, weekdayIndex } from "./dates";
 import { valueOf } from "./records";
-import { today } from "./time";
 
 export type Unit = "day" | "week" | "month";
 
-export const WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"];
-
-/*
- * Dates here are plain calendar days (YYYY-MM-DD) and times come from the
- * backend already in the owner's time zone, so they are read off the string
- * rather than through `Date`, which would bring in the browser's zone.
- */
-
-function utc(d: string): Date {
-  return new Date(`${d}T00:00:00Z`);
-}
-
-export function addDays(d: string, n: number): string {
-  const t = utc(d);
-  t.setUTCDate(t.getUTCDate() + n);
-  return t.toISOString().slice(0, 10);
-}
-
-function daysBetween(from: string, to: string): number {
-  return Math.round((utc(to).getTime() - utc(from).getTime()) / 86_400_000);
-}
-
-/** 0 for Monday. */
-function weekdayIndex(d: string): number {
-  return (utc(d).getUTCDay() + 6) % 7;
-}
-
-export function weekday(d: string): string {
-  return WEEKDAYS[weekdayIndex(d)];
-}
-
-export function dayOf(d: string): number {
-  return Number(d.slice(8, 10));
-}
-
-export function monthOf(d: string): number {
-  return Number(d.slice(5, 7));
-}
-
-/** `11月22日（日）`. */
-export function dateLabel(d: string): string {
-  return `${monthOf(d)}月${dayOf(d)}日（${weekday(d)}）`;
-}
-
-/** The local date of an RFC 3339 time written in the owner's zone. */
-export function localDate(at: string): string {
-  return at.slice(0, 10);
-}
-
-/** `09:30` of an RFC 3339 time written in the owner's zone. */
-export function hm(at: string): string {
-  return at.slice(11, 16);
-}
-
-export function minutesOfDay(at: string): number {
-  return Number(at.slice(11, 13)) * 60 + Number(at.slice(14, 16));
-}
-
 export function minutesBetween(start: string, end: string): number {
   return Math.round((Date.parse(end) - Date.parse(start)) / 60_000);
-}
-
-/** `09:30` of a Unix time in `tz`. */
-export function clock(at: bigint | number, tz: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: tz || "UTC",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(Number(at) * 1000));
-}
-
-/** The hour it is now in `tz`. */
-export function hourNow(tz: string): number {
-  return Number(
-    new Intl.DateTimeFormat("en-US", { timeZone: tz || "UTC", hour: "2-digit", hourCycle: "h23" }).format(new Date()),
-  );
 }
 
 export type Range = {
@@ -105,7 +30,7 @@ function rangeOf(unit: Unit, at: string): Range {
     end = addDays(at, 7);
     prev = addDays(at, -7);
     next = end;
-    title = `${monthOf(at)}月${dayOf(at)}日 – ${monthOf(addDays(end, -1))}月${dayOf(addDays(end, -1))}日`;
+    title = spanLabel(at, addDays(end, -1));
   } else if (unit === "month") {
     const first = `${at.slice(0, 8)}01`;
     const following = addDays(first, 32).slice(0, 8) + "01";

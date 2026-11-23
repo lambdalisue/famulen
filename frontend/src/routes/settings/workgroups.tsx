@@ -13,8 +13,9 @@ import { CalendarMode } from "~/gen/famulen/v1/calendar_pb";
 import { type AccountSetting, type Member, MemberKind } from "~/gen/famulen/v1/workgroups_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery, workgroupsQuery } from "~/lib/data";
+import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 const COLORS: [string, string][] = [
@@ -190,7 +191,7 @@ function MemberRow(props: { workgroup: string; member: Member }) {
 
 /** What holds for every workgroup at once. */
 function WholeDetail() {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <div class="wg-detail">
       <header class="wg-title" style={{ "--c": "var(--ink)" }}>
@@ -198,7 +199,7 @@ function WholeDetail() {
         <h2>全体</h2>
       </header>
       <p class="sub">ここで決めることは、どのワークグループを選んでいても同じように効く。</p>
-      <Show when={persona()}>{(p) => <ZoneSection timezone={p().timezone} />}</Show>
+      <Show when={owner.persona()}>{(p) => <ZoneSection timezone={p().timezone} />}</Show>
     </div>
   );
 }
@@ -212,7 +213,7 @@ export default function Workgroups() {
     const id = currentId();
     return id !== WHOLE ? workgroupQuery(id) : undefined;
   });
-  setView("設定 · ワークグループ");
+  setView("設定", "ワークグループ");
 
   const [adding, setAdding] = createSignal(false);
   const [editing, setEditing] = createSignal(false);

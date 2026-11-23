@@ -1,3 +1,4 @@
+import { shortTime, weekday, WEEKDAYS } from "~/lib/dates";
 import { Switch } from "@ark-ui/solid/switch";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
@@ -7,10 +8,9 @@ import Segs from "~/components/Segs";
 import type { RoutineRun } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { assigneeOf, newWorkgroups, type Rec, routinesQuery, valueOf } from "~/lib/records";
-import { shortTime } from "~/lib/time";
+import { assigneeOf, newWorkgroups, OWNER, SECRETARY, type Rec, routinesQuery, valueOf } from "~/lib/records";
+import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
 
 const useRuns = () => {
@@ -24,7 +24,7 @@ const skip = (routine: string, run: RoutineRun) =>
 /** One routine in a list. */
 export function RoutineRow(props: { routine: Rec }) {
   const runs = useRuns();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const info = () => runs(props.routine.id);
   const next = () => info()?.runs[0];
   const on = () => valueOf(props.routine, "Enabled") !== "no";
@@ -58,7 +58,7 @@ export function RoutineRow(props: { routine: Rec }) {
           {(n) => (
             <span class="rec-when">
               {n().skipped ? "飛ばす " : "次 "}
-              {shortTime(n().at, persona()?.timezone ?? "UTC")}
+              {shortTime(n().at, owner.tz())}
             </span>
           )}
         </Show>
@@ -76,7 +76,7 @@ export function RoutineRow(props: { routine: Rec }) {
               </button>
             )}
           </Show>
-          <span class={`tag${assigneeOf(props.routine, "秘書") === "秘書" ? " aide" : ""}`}>{assigneeOf(props.routine, persona()?.name || "秘書")}</span>
+          <span class={`tag${(valueOf(props.routine, "Assignee") || OWNER) === SECRETARY ? " aide" : ""}`}>{assigneeOf(props.routine, owner.aide())}</span>
         </span>
       </span>
     </>
@@ -86,8 +86,8 @@ export function RoutineRow(props: { routine: Rec }) {
 /** The runs to come, each skipped or put back on its own. */
 export function Runs(props: { routine: Rec }) {
   const runs = useRuns();
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   return (
     <Show when={runs(props.routine.id)}>
       {(info) => (
@@ -130,12 +130,11 @@ const REPEATS: [string, string][] = [
   ["monthly", "毎月"],
   ["cron", "細かく"],
 ];
-const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 /** Add a routine: what, when in words, and what to do then. */
 export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const [repeat, setRepeat] = createSignal("weekdays");
   const [who, setWho] = createSignal("secretary");
   const add = async (e: SubmitEvent & { currentTarget: HTMLFormElement }) => {
@@ -183,7 +182,7 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
           <div class="row">
             <Show when={repeat() === "weekly"}>
               <select class="input" name="weekday" aria-label="曜日">
-                <For each={DAYS}>{(d, i) => <option value={i()} selected={i() === 1}>{d}曜</option>}</For>
+                <For each={WEEKDAYS}>{(d, i) => <option value={i()} selected={i() === 1}>{d}曜</option>}</For>
               </select>
             </Show>
             <Show when={repeat() === "monthly"}>
@@ -199,7 +198,7 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
           <Segs
             label="担当"
             items={[
-              ["secretary", persona()?.name || "秘書"],
+              ["secretary", owner.aide()],
               ["owner", "あなた"],
             ]}
             value={who()}

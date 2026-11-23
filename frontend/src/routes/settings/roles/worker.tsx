@@ -80,7 +80,7 @@ function Ended() {
 
 /** Workers: what does the tasks that were delegated. */
 export default function Worker() {
-  setView("設定 · 手代");
+  setView("設定", "手代");
   const settings = createAsync(() => workerSettingsQuery());
   return (
     <>

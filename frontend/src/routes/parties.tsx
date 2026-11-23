@@ -1,17 +1,17 @@
-import { createAsync, query, useSearchParams } from "@solidjs/router";
+import { addDays, dayOf, hm, localDate, monthOf, shortTime, today } from "~/lib/dates";
+import { createAsync, query } from "@solidjs/router";
 import { createEffect, For, Show } from "solid-js";
 import { EntryRow } from "~/components/MemoryEntry";
 import RecordDetail from "~/components/records/RecordDetail";
-import RecordsPage, { type Group, oneParam } from "~/components/records/RecordsPage";
+import RecordsPage, { type Group } from "~/components/records/RecordsPage";
 import { CalendarMode } from "~/gen/famulen/v1/calendar_pb";
 import { Speaker } from "~/gen/famulen/v1/console_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { addDays, dayOf, hm, localDate, monthOf } from "~/lib/calendar";
-import { personaQuery, workgroupsQuery } from "~/lib/data";
-import { itemsOf, linkOf, type Rec, recordQuery, recordsQuery, valueOf, valuesOf, workgroupNames } from "~/lib/records";
-import { shortTime, today } from "~/lib/time";
-import { setView } from "~/lib/view";
+import { workgroupsQuery } from "~/lib/data";
+import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf, workgroupNames } from "~/lib/records";
+import { usePicked } from "~/lib/picked";
+import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
 
 const PALETTE = ["#0F6E68", "#B4610E", "#5B5FA8", "#8A5A7A", "#3B3A36"];
@@ -56,8 +56,8 @@ function Avatar(props: { party: Rec; index: number }) {
 /** The accounts still to be confirmed, and what memory and the days ahead hold. */
 function Around(props: { party: Rec }) {
   const p = () => props.party;
-  const persona = createAsync(() => personaQuery());
-  const aide = () => persona()?.name || "秘書";
+  const owner = useOwner();
+  const aide = owner.aide;
   const around = createAsync(() => partyAroundQuery(workgroup(), p().id, [p().title, ...valuesOf(p(), "Aliases")].join("\n")));
   const memories = createAsync(() => partyMemoriesQuery(p().id));
   return (
@@ -132,14 +132,9 @@ function Guessed(props: { party: Rec }) {
 }
 
 export default function Parties() {
-  const [params] = useSearchParams();
   const workgroups = createAsync(() => workgroupsQuery());
   const all = createAsync(() => recordsQuery("parties", workgroup()));
-  const picked = createAsync(() => {
-    const id = oneParam(params.id);
-    return id ? recordQuery("parties", id) : Promise.resolve(undefined);
-  });
-  createEffect(() => setView(picked() ? `相手 · ${picked()?.title}` : "相手"));
+  usePicked({ kind: () => "parties", section: () => "相手" });
   const index = (r: Rec) => Math.max((all() ?? []).findIndex((x) => x.id === r.id), 0);
   const groups = (records: Rec[]): Group[] => {
     const sorted = [...records].sort((a, b) => a.title.localeCompare(b.title, "ja"));

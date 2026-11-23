@@ -1,11 +1,11 @@
+import { shortTime } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
 import type { GatewayLogEntry } from "~/gen/famulen/v1/vault_pb";
 import { api } from "~/lib/api";
 import { connectionsQuery } from "~/lib/connections";
-import { personaQuery } from "~/lib/data";
-import { shortTime } from "~/lib/time";
 import "./log.css";
+import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
 
 type Filter = { actor: string; connection: string; decision: string };
@@ -80,8 +80,8 @@ function Entry(props: { e: GatewayLogEntry; tz: string; names: Map<string, strin
 export default function GatewayLog(props: { actor?: string }) {
   const [filter, setFilter] = createSignal<Filter>({ actor: props.actor ?? "", connection: "", decision: "" });
   const pages = createPages((before) => gatewayLogQuery(filter(), before));
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   const connections = createAsync(() => connectionsQuery());
   const names = () => new Map((connections()?.connections ?? []).map((c) => [c.id, c.name]));
   const choose = (key: keyof Filter, value: string) => {

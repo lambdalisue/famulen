@@ -10,9 +10,10 @@ import RoleModel from "~/components/RoleModel";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act, look, say } from "~/lib/act";
 import { api } from "~/lib/api";
-import { homeQuery, notebookPlaceQuery, personaQuery, slackNamesQuery, writableQuery } from "~/lib/data";
+import { homeQuery, notebookPlaceQuery, slackNamesQuery, writableQuery } from "~/lib/data";
 import { coveringPlace, isUnder, wholePath } from "~/lib/places";
 import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 /** Ways of speaking the owner picks from; the text is what the secretary is told. */
@@ -438,8 +439,8 @@ function NotebookSection() {
 }
 
 export default function Secretary() {
-  setView("設定 · 秘書");
-  const persona = createAsync(() => personaQuery());
+  setView("設定", "秘書");
+  const owner = useOwner();
   return (
     <>
       <h1>秘書</h1>
@@ -448,7 +449,7 @@ export default function Secretary() {
       </p>
       <div class="prefs">
         <RoleModel role={Role.SECRETARY} cap="上限は目安で、超えても会話は止めない。値段のあるモデルは円で、ないモデルは回数で数える。" />
-        <Show when={persona()}>
+        <Show when={owner.persona()}>
           {(p) => (
             <>
               <NameSection name={p().name} />

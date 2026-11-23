@@ -29,7 +29,7 @@ const GROUPS: [string, (m: Model) => boolean][] = [
 ];
 
 export default function Models() {
-  setView("設定 · 登録したモデル");
+  setView("設定", "登録したモデル");
   const models = createAsync(() => modelsQuery());
 
   const [finding, setFinding] = createSignal(false);

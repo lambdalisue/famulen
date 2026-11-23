@@ -2,6 +2,7 @@ import { Dialog } from "@ark-ui/solid/dialog";
 import { createSignal, type JSX, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import Icon from "~/components/Icon";
+import { keep, kept } from "~/lib/storage";
 import * as icons from "~/lib/icons";
 
 const NARROWEST = 320;
@@ -27,13 +28,12 @@ export default function SideSheet(props: {
   const key = () => `famulen.sheet.${props.name}`;
   const [width, setWidth] = createSignal(WIDTH);
   onMount(() => {
-    const kept = Number(localStorage.getItem(key()));
-    if (kept > 0) setWidth(clamp(kept));
+    const was = Number(kept(key()));
+    if (was > 0) setWidth(clamp(was));
   });
-  const keep = (w: number) => {
+  const set = (w: number) => {
     setWidth(w);
-    if (w === WIDTH) localStorage.removeItem(key());
-    else localStorage.setItem(key(), String(w));
+    keep(key(), w === WIDTH ? undefined : String(w));
   };
 
   let dragging = false;
@@ -50,13 +50,13 @@ export default function SideSheet(props: {
       if (!dragging) return;
       dragging = false;
       e.currentTarget.releasePointerCapture(e.pointerId);
-      keep(width());
+      set(width());
     },
     onKeyDown: (e: KeyboardEvent) => {
       const by = { ArrowLeft: STEP, ArrowRight: -STEP }[e.key];
       if (by === undefined) return;
       e.preventDefault();
-      keep(clamp(width() + by));
+      set(clamp(width() + by));
     },
   };
 
@@ -77,7 +77,7 @@ export default function SideSheet(props: {
             onPointerMove={edge.onPointerMove}
             onPointerUp={edge.onPointerUp}
             onPointerCancel={edge.onPointerUp}
-            onDblClick={() => keep(WIDTH)}
+            onDblClick={() => set(WIDTH)}
             onKeyDown={edge.onKeyDown}
           />
           <header class="status-pop-head">
@@ -89,7 +89,7 @@ export default function SideSheet(props: {
                 aria-label="元の幅に戻す"
                 title="元の幅に戻す"
                 disabled={width() === WIDTH}
-                onClick={() => keep(WIDTH)}
+                onClick={() => set(WIDTH)}
               >
                 <Icon svg={icons.arrowAutofitWidth} size={16} />
               </button>

@@ -1,3 +1,4 @@
+import { addDays, dateLabel, hm, localDate } from "~/lib/dates";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { A, createAsync, useNavigate } from "@solidjs/router";
 import { For, Show } from "solid-js";
@@ -8,7 +9,6 @@ import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { ask } from "~/lib/ask";
-import { addDays, dateLabel, hm, localDate } from "~/lib/calendar";
 import * as icons from "~/lib/icons";
 import { choiceOf, hrefOf } from "~/lib/records";
 import RecordDetail from "./RecordDetail";

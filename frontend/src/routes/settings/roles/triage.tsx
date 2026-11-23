@@ -6,14 +6,14 @@ import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { workspacesQuery } from "~/lib/connections";
-import { personaQuery } from "~/lib/data";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 /** How long a channel stays attended after the secretary is mentioned in it. */
 function AttentionSection() {
   const workspaces = createAsync(() => workspacesQuery());
-  const persona = createAsync(() => personaQuery());
-  const name = () => persona()?.name ?? "秘書";
+  const owner = useOwner();
+  const name = owner.aide;
   return (
     <section class="pref">
       <div class="pref-head">
@@ -46,7 +46,7 @@ function AttentionSection() {
 
 /** Triage: whether a message in a watched Slack channel is meant for the secretary. */
 export default function Triage() {
-  setView("設定 · トリアージ");
+  setView("設定", "トリアージ");
   return (
     <>
       <h1>トリアージ</h1>

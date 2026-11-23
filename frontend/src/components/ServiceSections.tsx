@@ -1,3 +1,4 @@
+import { clock } from "~/lib/dates";
 import Keyed from "~/components/Keyed";
 import { Switch } from "@ark-ui/solid/switch";
 import { A, createAsync, query } from "@solidjs/router";
@@ -8,7 +9,7 @@ import LookoutInterval from "~/components/LookoutInterval";
 import type { Channel } from "~/gen/famulen/v1/services_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { calendarsQuery, clock } from "~/lib/calendar";
+import { calendarsQuery } from "~/lib/calendar";
 import { channelsQuery, workspacesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
 

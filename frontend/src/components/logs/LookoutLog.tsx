@@ -1,13 +1,13 @@
+import { shortTime } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import { type LookoutDecision, LookoutOutcome } from "~/gen/famulen/v1/lookout_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { shortTime } from "~/lib/time";
 import { setSelection } from "~/lib/view";
+import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
 
 const lookoutLogQuery = query(async (before: number) => {
@@ -23,7 +23,7 @@ function passedOn(d: LookoutDecision): boolean {
 /** What the lookout decided about each item it read, and the owner's answers to it. */
 export default function LookoutLog() {
   const pages = createPages(lookoutLogQuery);
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <>
       <p class="sub">
@@ -34,7 +34,7 @@ export default function LookoutLog() {
             {(d) => (
               <div class="item" onClick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)}>
                 <span class="mono sub" style={{ width: "90px" }}>
-                  {shortTime(d.at, persona()?.timezone ?? "")}
+                  {shortTime(d.at, owner.tz())}
                 </span>
                 <span class={`tag${d.passedOn ? " aide" : ""}`}>{d.outcome}</span>
                 <div class="grow">

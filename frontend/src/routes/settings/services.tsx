@@ -1,6 +1,7 @@
+import { shortTime } from "~/lib/dates";
 import { Collapsible } from "@ark-ui/solid/collapsible";
 import { A, createAsync, useNavigate, useSearchParams } from "@solidjs/router";
-import { createSignal, For, type JSX, Show } from "solid-js";
+import { createEffect, createSignal, For, type JSX, Show } from "solid-js";
 import AddService from "~/components/AddService";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Icon from "~/components/Icon";
@@ -28,9 +29,9 @@ import {
   kindQuery,
   knownQuery,
 } from "~/lib/connections";
-import { personaQuery } from "~/lib/data";
+import { hasWords } from "~/lib/words";
 import * as icons from "~/lib/icons";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 import { setSelection, setView } from "~/lib/view";
 
 const OWN = "famulen";
@@ -93,16 +94,15 @@ async function goLogin(run: () => Promise<{ loginUrl: string } | undefined>) {
 }
 
 function ServiceList() {
-  setView("設定 · サービス");
+  setView("設定", "サービス");
   const list = createAsync(() => connectionsQuery());
   const known = createAsync(() => knownQuery());
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const [search, setSearch] = createSignal("");
   const connections = () => list()?.connections ?? [];
   const found = () => {
-    const terms = search().normalize("NFKC").toLowerCase().split(/\s+/).filter(Boolean);
     return connections()
-      .filter((c) => terms.every((t) => `${c.name} ${c.kind} ${c.account}`.normalize("NFKC").toLowerCase().includes(t)))
+      .filter((c) => hasWords(`${c.name} ${c.kind} ${c.account}`, search()))
       .sort((a, b) => a.name.localeCompare(b.name) || a.account.localeCompare(b.account));
   };
   const iconOf = (kind: string) => iconNamed(known()?.find((k) => k.id === kind)?.icon ?? `brand-${kind}`);
@@ -175,7 +175,7 @@ function ServiceList() {
           <A class="item" href={`/settings/services?id=${OWN}`} style={plain}>
             <Icon svg={icons.shieldCheck} size={18} />
             <div class="grow">
-              <b>{persona()?.name ?? "Famulen"} 自身の道具</b>
+              <b>{owner.aide()} 自身の道具</b>
               <br />
               <span class="sub">会話・記録・記憶・予定・Slack</span>
             </div>
@@ -205,8 +205,8 @@ const CHANGE_KIND: Record<string, string> = { change: "変えた", revert: "戻�
  */
 function DefinitionChanges() {
   const changes = createAsync(() => definitionChangesQuery());
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   const byDefinition = () => {
     const groups = new Map<string, DefinitionChange[]>();
     for (const c of changes() ?? []) groups.set(c.definition, [...(groups.get(c.definition) ?? []), c]);
@@ -452,7 +452,7 @@ function ToolRow(props: { t: ToolSetting; scope: string; owner: string; readOnly
 /** The secretary's model CLI's built-in tools and the owner's permission for each. */
 function BuiltinTools() {
   const tools = createAsync(() => builtinToolsQuery());
-  setView("設定 · サービス · 組み込みの道具");
+  setView("設定", "サービス", "組み込みの道具");
   return (
     <>
       <div class="row">
@@ -478,7 +478,7 @@ function BuiltinTools() {
 function KindDetail(props: { kind: string }) {
   const detail = createAsync(() => kindQuery(props.kind));
   const scope = () => `kind:${props.kind}`;
-  setView(`設定 · サービス種 · ${props.kind}`);
+  setView("設定", "サービス種", props.kind);
   return (
     <>
       <div class="row">
@@ -532,9 +532,9 @@ function ServiceDetail(props: { id: string }) {
   /** The definition says what the account is, so it is not the owner's to write. */
   const defined = () => c()?.transportKind === TransportKind.DEFINITION && Boolean(c()?.account);
   const navigate = useNavigate();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
 
-  setView(`設定 · サービス · ${props.id}`);
+  createEffect(() => setView("設定", "サービス", { told: props.id, shown: c()?.name ?? props.id }));
 
   const edit = (field: "name" | "kind" | "account", value: string) =>
     act(() =>
@@ -713,7 +713,7 @@ function ServiceDetail(props: { id: string }) {
                 <CalendarsSection
                   connection={props.id}
                   account={conn().account || conn().name}
-                  timezone={persona()?.timezone ?? "UTC"}
+                  timezone={owner.tz()}
                 />
               </Show>
               <LookoutSection connection={props.id} />

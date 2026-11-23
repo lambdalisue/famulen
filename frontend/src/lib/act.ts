@@ -13,7 +13,8 @@ export function say(text: string, bad = false) {
   timer = setTimeout(() => setToastText(undefined), bad ? 4000 : 1800);
 }
 
-function message(e: unknown): string {
+/** What went wrong, without the code the protocol puts before it. */
+export function message(e: unknown): string {
   return e instanceof Error ? e.message.replace(/^\[\w+\]\s*/, "") : String(e);
 }
 

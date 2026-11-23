@@ -28,32 +28,6 @@ export function visible(item: MemoryItem, workgroup: string): boolean {
   return workgroup === "all" || marked.length === 0 || marked.includes(workgroup);
 }
 
-/** `11月22日 04:00` in `tz`. */
-export function nightLabel(at: bigint, tz: string): string {
-  const parts = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: tz || "UTC",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(Number(at) * 1000));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("month")}月${get("day")}日 ${get("hour")}:${get("minute")}`;
-}
-
-/** `2026-11-22 04:00` in `tz`. */
-export function stamp(at: bigint, tz: string): string {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: tz || "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(Number(at) * 1000));
-}
-
 /** Where a wiki link to a memory file opens. */
 export function memoryHref(target: string): string | undefined {
   const m = /^(?:\.?\/)?memory\/(.+?)(?:\.md)?(?:#.*)?$/.exec(target);

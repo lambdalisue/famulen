@@ -3,6 +3,8 @@ import { query } from "@solidjs/router";
 import type { Field, FieldType, LinkAccountRequest, Record as Rec, RecordItem, RecordKind } from "~/gen/famulen/v1/records_pb";
 import type { Workgroup } from "~/gen/famulen/v1/workgroups_pb";
 import { api } from "./api";
+import { daysBetween } from "./dates";
+import { hasWords } from "./words";
 
 export type { Field, FieldType, LinkAccountRequest, Rec, RecordItem, RecordKind };
 
@@ -31,7 +33,8 @@ export const recordQuery = query(async (kind: string, id: string) => {
 export const kindsQuery = query(async () => (await api.records.listKinds({})).kinds, "kinds");
 export const routinesQuery = query(async () => (await api.routines.listRoutines({})).routines, "routines");
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** Names of fields and sections are read whatever their case. */
+export const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 export function fieldOf(r: { fields: Field[] } | undefined, name: string): Field | undefined {
   return r?.fields.find((f) => same(f.name, name));
@@ -254,8 +257,7 @@ export function bucketOf(r: Rec, today: string): Bucket {
   const due = valueOf(r, "Due").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return "later";
   if (due <= today) return "today";
-  const days = (Date.parse(`${due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000;
-  return days < 7 ? "week" : "later";
+  return daysBetween(today, due) < 7 ? "week" : "later";
 }
 
 /** Who does a task, in a word. */
@@ -264,7 +266,19 @@ export function assigneeOf(r: Rec, aide: string): string {
   return linkOf(who)?.title || choiceOf(who || OWNER, aide);
 }
 
-/** The deadlines of a thing or contract that are still to come round, soonest first. */
+/** Whether a thing was let go, or a contract is over: its deadlines no longer matter. */
+export const isPast = (r: Rec) => ["released", "ended"].includes(valueOf(r, "Status"));
+
+/** Text of Markdown on one line, as a list shows it. */
+export function excerptOf(markdown: string, length = 160): string {
+  return plainText(markdown)
+    .replace(/[#>*`|_~-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, length);
+}
+
+/** Every deadline of a thing or contract, soonest first. */
 export function deadlinesOf(r: Rec): { what: string; on: string }[] {
   return itemsOf(r, "Deadlines")
     .map((i) => ({ what: i.text, on: valueOf(i, "On") }))
@@ -272,18 +286,9 @@ export function deadlinesOf(r: Rec): { what: string; on: string }[] {
     .sort((a, b) => a.on.localeCompare(b.on));
 }
 
-/** `3 日後`, `今日`, `5 日過ぎた`. */
-export function daysLeft(on: string, today: string): string {
-  const days = Math.round((Date.parse(`${on.slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
-  if (Number.isNaN(days)) return "";
-  if (days === 0) return "今日";
-  if (days === 1) return "明日";
-  return days > 0 ? `${days} 日後` : `${-days} 日過ぎた`;
-}
-
 /** Whether every word is somewhere in the record. */
 export function matches(r: Rec, words: string): boolean {
-  const hay = [
+  const said = [
     r.title,
     r.code,
     r.notes,
@@ -291,13 +296,8 @@ export function matches(r: Rec, words: string): boolean {
     ...r.fields.map((f) => f.value),
     ...r.details.flatMap((f) => [f.name, f.value]),
     ...r.sections.flatMap((s) => [...s.fields.map((f) => f.value), ...s.items.flatMap((i) => [i.text, ...i.fields.map((f) => f.value)])]),
-  ]
-    .join("\n")
-    .toLowerCase();
-  return words
-    .toLowerCase()
-    .split(/\s+/)
-    .every((w) => hay.includes(w));
+  ];
+  return hasWords(said.join("\n"), words);
 }
 
 /** The names of the workgroups a record is in, joined for a sub line. */
@@ -311,14 +311,6 @@ export function workgroupNames(workgroups: Workgroup[] | undefined, ids: string[
 /** A new record goes into the workgroup on screen, unless that is すべて. */
 export function newWorkgroups(workgroup: string): string[] {
   return workgroup && workgroup !== "all" ? [workgroup] : [];
-}
-
-/** `2026年3月1日`, with its time when it has one. */
-export function dateText(text: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?$/.exec(text.trim());
-  if (!m) return text;
-  const year = Number(m[1]) === new Date().getFullYear() ? "" : `${m[1]}年`;
-  return `${year}${Number(m[2])}月${Number(m[3])}日${m[4] ? ` ${m[4]}` : ""}`;
 }
 
 export function moneyText(text: string): string {

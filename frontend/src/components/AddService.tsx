@@ -9,6 +9,7 @@ import type { AccountField, ConnectResult } from "~/gen/famulen/v1/services_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { definitionsQuery, docIn, docUrl, iconNamed, knownQuery } from "~/lib/connections";
+import { hasWords } from "~/lib/words";
 import * as icons from "~/lib/icons";
 import { looksLikeTarget, type ServiceTarget, serviceTargets } from "~/lib/serviceTarget";
 
@@ -55,8 +56,6 @@ const ALSO: Record<string, string> = {
   slite: "スライト",
   todoist: "トゥドゥイスト todo",
 };
-
-const fold = (text: string) => text.normalize("NFKC").toLowerCase();
 
 /** What a connection asks of the owner when it cannot be added yet. */
 export function Unavailable(props: { text: string }) {
@@ -118,11 +117,7 @@ export default function AddService() {
     ].sort((a, b) => a.name.localeCompare(b.name));
   });
   const found = () => {
-    const terms = fold(search()).split(/\s+/).filter(Boolean);
-    return choices().filter((c) => {
-      const text = fold(`${c.id} ${c.name} ${c.what} ${ALSO[c.id] ?? ""}`);
-      return terms.every((t) => text.includes(t));
-    });
+    return choices().filter((c) => hasWords(`${c.id} ${c.name} ${c.what} ${ALSO[c.id] ?? ""}`, search()));
   };
 
   const added = (r: ConnectResult | undefined) => {

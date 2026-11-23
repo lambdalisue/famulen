@@ -7,7 +7,7 @@ import { setView } from "~/lib/view";
 
 /** Assessing: whether a tool call left to the auto permission may run without asking the owner. */
 export default function Assess() {
-  setView("設定 · 見極め");
+  setView("設定", "見極め");
   return (
     <>
       <h1>見極め</h1>

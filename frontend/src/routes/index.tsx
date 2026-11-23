@@ -1,3 +1,4 @@
+import { addDays, dateLabel, dateText, daysLeft, hm, nearness } from "~/lib/dates";
 import { A, createAsync, query, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import Icon from "~/components/Icon";
@@ -8,19 +9,17 @@ import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { openSheet } from "~/lib/ask";
 import { workgroup } from "~/lib/workgroup";
-import { inboxQuery, personaQuery } from "~/lib/data";
+import { useWaiting } from "~/lib/inbox";
 import * as icons from "~/lib/icons";
-import { bucketOf, daysLeft, deadlinesOf, hrefOf, isOver, OWNER, plainText, type Rec, recordsQuery, SECRETARY, valueOf } from "~/lib/records";
-import { today } from "~/lib/time";
+import { bucketOf, deadlinesOf, hrefOf, excerptOf, isOver, isPast, OWNER, type Rec, recordsQuery, SECRETARY, valueOf } from "~/lib/records";
 import { setView } from "~/lib/view";
+import { useOwner } from "~/lib/owner";
 import "~/components/records/records.css";
 
 const homeQuery = query(() => api.settings.getHome({}), "home");
 
 const eventsQuery = query(async (workgroup: string, day: string) => {
-  const next = new Date(`${day}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  return api.calendar.listEvents({ from: day, to: next.toISOString().slice(0, 10), workgroup });
+  return api.calendar.listEvents({ from: day, to: addDays(day, 1), workgroup });
 }, "home-events");
 
 const workingQuery = query(async () => (await api.memory.getLayer({ layer: "working" })).working, "home-working");
@@ -31,23 +30,10 @@ const dueQuery = query(async (workgroup: string) => {
     api.records.listRecords({ kind: "contracts", workgroup }),
   ]);
   return [...things.records, ...contracts.records]
-    .filter((r) => !["released", "ended"].includes(valueOf(r, "Status")))
+    .filter((r) => !isPast(r))
     .flatMap((r) => deadlinesOf(r).map((d) => ({ ...d, record: r })))
     .sort((a, b) => a.on.localeCompare(b.on));
 }, "home-due");
-
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
-
-/** `11月22日（日）` from YYYY-MM-DD. */
-function dateLabel(day: string): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日（${WEEKDAYS[d.getUTCDay()]}）`;
-}
-
-/** HH:MM of an RFC 3339 time already in the owner's time zone. */
-function hm(at: string): string {
-  return at.slice(11, 16);
-}
 
 type Op = "up" | "down" | "size" | "remove";
 type TileShape = { kind: string; wide: boolean; tall: boolean };
@@ -81,8 +67,8 @@ function changed(tiles: Tile[], i: number, op: Op): TileShape[] {
 const EDITING = "famulen.editing";
 
 function TodayTile() {
-  const persona = createAsync(() => personaQuery());
-  const day = () => today(persona()?.timezone ?? "UTC");
+  const owner = useOwner();
+  const day = owner.today;
   const events = createAsync(() => eventsQuery(workgroup(), day()));
   const shown = () => (events()?.events ?? []).filter((e) => e.mode !== CalendarMode.HIDE && e.response !== "declined");
   const [now, setNow] = createSignal(0);
@@ -138,8 +124,7 @@ function TodayTile() {
 }
 
 function ApprovalsTile() {
-  const inbox = createAsync(() => inboxQuery());
-  const pending = () => (inbox()?.approvals ?? []).filter((a) => a.status === "pending");
+  const pending = useWaiting().approvals;
   return (
     <Show when={pending().length > 0} fallback={<p class="empty">いまはない</p>}>
       <div class="row">
@@ -191,10 +176,10 @@ function AideTile(props: { aide: string }) {
 
 function TaskTile() {
   const navigate = useNavigate();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const tasks = createAsync(() => recordsQuery("tasks", workgroup()));
   const soon = () => {
-    const day = today(persona()?.timezone ?? "UTC");
+    const day = owner.today();
     return (tasks() ?? [])
       .filter((t) => ["today", "week"].includes(bucketOf(t, day)))
       .sort((a, b) => valueOf(a, "Due").localeCompare(valueOf(b, "Due")))
@@ -235,10 +220,10 @@ function MemosTile() {
             <span class="rec-main">
               <span>{m.title}</span>
               <span class="sub" style={{ "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" }}>
-                {plainText(m.notes).replace(/[#>*`|-]+/g, " ").slice(0, 80)}
+                {excerptOf(m.notes, 80)}
               </span>
             </span>
-            <span class="sub mono">{m.updated.slice(5, 10)}</span>
+            <span class="sub mono">{dateText(m.updated.slice(0, 10))}</span>
           </A>
         )}
       </For>
@@ -247,9 +232,9 @@ function MemosTile() {
 }
 
 function DueTile() {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const due = createAsync(() => dueQuery(workgroup()));
-  const day = () => today(persona()?.timezone ?? "UTC");
+  const day = owner.today;
   return (
     <Show when={(due() ?? []).length > 0} fallback={<p class="empty">近い期限はない</p>}>
       <For each={(due() ?? []).slice(0, 6)}>
@@ -259,7 +244,7 @@ function DueTile() {
               <span>{d.record.title}</span>
               <span class="sub">{d.what}</span>
             </span>
-            <span class="rec-when" classList={{ late: d.on < day() }}>
+            <span class="rec-when" classList={{ late: nearness(d.on, day()) === "late" }}>
               {daysLeft(d.on, day())}
             </span>
           </A>
@@ -304,11 +289,11 @@ function SetupGuide() {
 
 export default function Home() {
   const home = createAsync(() => homeQuery());
-  const persona = createAsync(() => personaQuery());
-  const day = () => today(persona()?.timezone ?? "UTC");
+  const owner = useOwner();
+  const day = owner.today;
   const events = createAsync(() => eventsQuery(workgroup(), day()));
   const tasks = createAsync(() => recordsQuery("tasks", workgroup()));
-  const aide = () => persona()?.name || "秘書";
+  const aide = owner.aide;
   const open = () => (tasks() ?? []).filter((t) => !isOver(t));
   const mine = () => open().filter((t) => (valueOf(t, "Assignee") || OWNER) === OWNER && bucketOf(t, day()) === "today").length;
   const aides = () => open().filter((t) => valueOf(t, "Assignee") === SECRETARY).length;
@@ -318,8 +303,7 @@ export default function Home() {
   const label = (kind: string) =>
     kind === "aide" ? `${aide()}が進めている` : (kinds().find((k) => k.kind === kind)?.label ?? kind);
 
-  setView("ホーム");
-  createEffect(() => setView(`ホーム · ${dateLabel(day())}`));
+  createEffect(() => setView("ホーム", dateLabel(day())));
 
   const [kind, setKind] = createSignal("");
   const setTiles = (next: TileShape[]) => act(() => api.settings.setTiles({ tiles: next }), "");

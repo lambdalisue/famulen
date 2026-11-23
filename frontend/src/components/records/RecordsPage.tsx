@@ -1,4 +1,4 @@
-import { A, createAsync, useNavigate, useSearchParams } from "@solidjs/router";
+import { A, createAsync, useNavigate } from "@solidjs/router";
 import { createMemo, createEffect, createSignal, For, type JSX, on, onMount, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import Modal from "~/components/Modal";
@@ -7,14 +7,12 @@ import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { choiceOf, kindsQuery, matches, nameOf, newWorkgroups, type Rec, recordsQuery, valueOf } from "~/lib/records";
+import { useParam, withParams } from "~/lib/params";
+import { keep, kept } from "~/lib/storage";
 import { workgroup } from "~/lib/workgroup";
 import type { Typed } from "./FieldEdit";
 import FieldEdit from "./FieldEdit";
 import "./records.css";
-
-export function oneParam(v: string | string[] | undefined): string {
-  return (Array.isArray(v) ? v[0] : v) ?? "";
-}
 
 export type Group = { name: string; records: Rec[]; folded?: boolean };
 
@@ -44,7 +42,7 @@ function AddRecord(props: { kind: string; label: string; titleLabel: string; fie
     if (!made) return;
     setGiven({});
     props.onOpenChange(false);
-    navigate(`${props.base}${props.base.includes("?") ? "&" : "?"}id=${made.id}`);
+    navigate(withParams(props.base, { id: made.id }));
   };
   return (
     <Modal open={props.open} onOpenChange={props.onOpenChange} title={props.label}>
@@ -101,9 +99,8 @@ export default function RecordsPage(props: {
   /** What stands below the list. */
   foot?: JSX.Element;
 }) {
-  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const id = () => oneParam(params.id);
+  const id = useParam("id");
   const all = createAsync(() => recordsQuery(props.kind, workgroup()));
   const kinds = createAsync(() => kindsQuery());
   const [words, setWords] = createSignal("");
@@ -115,16 +112,16 @@ export default function RecordsPage(props: {
   const [adding, setAdding] = createSignal(false);
   const key = () => `famulen.look.${props.kind}`;
   onMount(() => {
-    const kept = localStorage.getItem(key());
-    if (kept === "card" || kept === "list") setLook(kept);
+    const was = kept(key());
+    if (was === "card" || was === "list") setLook(was);
   });
   const chooseLook = (v: string) => {
     setLook(v);
-    localStorage.setItem(key(), v);
+    keep(key(), v);
   };
   const open = (r: Rec) => {
     left = document.getElementById("pane")?.scrollTop ?? 0;
-    navigate(`${props.base}${props.base.includes("?") ? "&" : "?"}id=${r.id}`, { scroll: false });
+    navigate(withParams(props.base, { id: r.id }), { scroll: false });
   };
 
   const allLabels = createMemo(() => [...new Set((all() ?? []).flatMap((r) => r.labels))].sort());
@@ -150,7 +147,7 @@ export default function RecordsPage(props: {
 
   const order = createMemo(() => groups().flatMap((g) => g.records));
   const place = () => order().findIndex((r) => r.id === id());
-  const hrefTo = (r: Rec) => `${props.base}${props.base.includes("?") ? "&" : "?"}id=${r.id}`;
+  const hrefTo = (r: Rec) => withParams(props.base, { id: r.id });
   const Step = (p: { to: Rec | undefined; label: string; icon: string }) => (
     <Show
       when={p.to}

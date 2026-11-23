@@ -6,7 +6,7 @@ import Segs from "~/components/Segs";
 import type { RecordLink, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act, say } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery, workgroupsQuery } from "~/lib/data";
+import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import {
   type Field,
@@ -20,6 +20,7 @@ import {
   type RecordItem,
   recordQuery,
   RELATED,
+  same,
 } from "~/lib/records";
 import { setSelection } from "~/lib/view";
 import FieldEdit, { FieldView, type Typed } from "./FieldEdit";
@@ -27,6 +28,8 @@ import Backlinks from "./links/Backlinks";
 import { KnownLinks } from "./links/known";
 import LinkedText from "./links/LinkedText";
 import LinkTextarea from "./links/LinkTextarea";
+import { dateText } from "~/lib/dates";
+import { useOwner } from "~/lib/owner";
 import RelatedLinks from "./links/RelatedLinks";
 
 type PlainField = { name: string; value: string; values: string[] };
@@ -34,7 +37,6 @@ type PlainItem = { text: string; fields: PlainField[] };
 
 const plain = (f: Field): PlainField => ({ name: f.name, value: f.value, values: f.values });
 const plainItem = (i: RecordItem): PlainItem => ({ text: i.text, fields: i.fields.map(plain) });
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** A field shown as read, edited in place once pressed. */
 function FieldRow(props: { type: FieldType; field: Field | undefined; aide: string; open?: boolean; onSave: (v: Typed) => void }) {
@@ -469,8 +471,8 @@ export default function RecordDetail(props: {
   const record = createAsync(() => recordQuery(props.kind, props.id));
   const kinds = createAsync(() => kindsQuery());
   const workgroups = createAsync(() => workgroupsQuery());
-  const persona = createAsync(() => personaQuery());
-  const aide = () => persona()?.name || "秘書";
+  const owner = useOwner();
+  const aide = owner.aide;
   const kind = () => kinds()?.find((k) => k.name === props.kind);
   const [shown, setShown] = createSignal("view");
   const [addedSections, setAddedSections] = createSignal<string[]>([]);
@@ -684,8 +686,8 @@ export default function RecordDetail(props: {
             </div>
             <p class="sub rec-foot">
               <Show when={r().source}>{r().source} · </Show>
-              <Show when={r().created}>作った {r().created.slice(0, 16).replace("T", " ")} · </Show>
-              <Show when={r().updated}>直した {r().updated.slice(0, 16).replace("T", " ")}</Show>
+              <Show when={r().created}>作った {dateText(r().created.slice(0, 16))} · </Show>
+              <Show when={r().updated}>直した {dateText(r().updated.slice(0, 16))}</Show>
             </p>
           </Show>
         </article>

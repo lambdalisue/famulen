@@ -1,11 +1,13 @@
+import { dateTimeText } from "~/lib/dates";
 import { A, createAsync, useSearchParams } from "@solidjs/router";
 import { createEffect, For, Match, Show, Switch, untrack } from "solid-js";
 import Markdown from "~/components/Markdown";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import { createDraft } from "~/lib/draft";
-import { memoryFileQuery, stamp } from "~/lib/memory";
+import { memoryFileQuery } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
+import { oneParam } from "~/lib/params";
 import { setView } from "~/lib/view";
 
 const MODES: [string, string][] = [
@@ -40,13 +42,13 @@ function Writing(props: { path: string; text: string; onSave: (text: string) => 
 
 export default function MemoryFile() {
   const [params] = useSearchParams();
-  const path = () => (typeof params.path === "string" ? params.path : "");
-  const mode = () => (typeof params.mode === "string" ? params.mode : "read");
+  const path = () => oneParam(params.path);
+  const mode = () => oneParam(params.mode) || "read";
   const file = createAsync(async () => (path() ? memoryFileQuery(path()) : undefined));
-  const persona = createAsync(() => personaQuery());
-  const aide = () => persona()?.name || "秘書";
-  const tz = () => persona()?.timezone ?? "UTC";
-  createEffect(() => setView(`記憶 · ${path()}`));
+  const owner = useOwner();
+  const aide = owner.aide;
+  const tz = owner.tz;
+  createEffect(() => setView("記憶", path()));
 
   const save = async (text: string) => {
     const content = text.replace(/\r\n/g, "\n");
@@ -85,7 +87,7 @@ export default function MemoryFile() {
                     return (
                       <div class="item">
                         <span class="mono sub" style={{ width: "120px" }}>
-                          {stamp(c.at, tz())}
+                          {dateTimeText(c.at, tz())}
                         </span>
                         <span class={`tag ${mine ? "aide" : "said"}`}>{mine ? aide() : "あなた"}</span>
                         <span class="grow" style={{ "font-size": "13px", "white-space": "pre-wrap" }}>

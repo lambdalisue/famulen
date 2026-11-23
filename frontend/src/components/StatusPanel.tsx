@@ -1,3 +1,4 @@
+import { shortTime } from "~/lib/dates";
 import { toJsonString } from "@bufbuild/protobuf";
 import { createAsync, query } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
@@ -5,11 +6,12 @@ import Icon from "~/components/Icon";
 import { createPages, PAGE, PageNav } from "~/components/logs/Pages";
 import { InputItemSchema, type InputItem } from "~/gen/famulen/v1/console_pb";
 import { api } from "~/lib/api";
-import { inboxQuery, personaQuery, statusQuery } from "~/lib/data";
+import { statusQuery } from "~/lib/data";
+import { useWaiting } from "~/lib/inbox";
 import * as icons from "~/lib/icons";
 import { routinesQuery } from "~/lib/records";
 import { cancelWake, wakesQuery } from "~/lib/routines";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 
 const inputsQuery = query(async (before: number) => {
   const page = await api.console.listInputs({ before: BigInt(before), limit: PAGE });
@@ -94,21 +96,18 @@ function InputCard(props: { input: InputItem; tz: string }) {
 /** What the secretary is doing, what waits for the owner and what comes next. */
 export default function StatusPanel() {
   const status = createAsync(() => statusQuery());
-  const inbox = createAsync(() => inboxQuery());
   const routines = createAsync(() => routinesQuery());
   const wakes = createAsync(() => wakesQuery());
   const inputs = createPages(inputsQuery);
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "";
+  const owner = useOwner();
+  const tz = owner.tz;
   const upcoming = () =>
     (routines() ?? [])
       .filter((r) => r.enabled)
       .flatMap((r) => r.runs.filter((run) => !run.skipped).slice(0, 1).map((run) => ({ id: r.id, title: r.title, when: r.when, at: run.at })))
       .sort((a, b) => Number(a.at - b.at))
       .slice(0, 8);
-  const approvals = () => (inbox()?.approvals ?? []).filter((a) => a.status === "pending");
-  const held = () => inbox()?.held ?? [];
-  const waiting = () => approvals().length + held().length;
+  const { approvals, held, count: waiting } = useWaiting();
   const [busy, setBusy] = createSignal(false);
 
   return (

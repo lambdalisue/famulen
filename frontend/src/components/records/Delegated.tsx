@@ -1,12 +1,12 @@
+import { shortTime } from "~/lib/dates";
 import { A, createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import { isOver, type Rec, valueOf, WORKER } from "~/lib/records";
-import { shortTime } from "~/lib/time";
+import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
 import { type DelegatedTask, delegatedQuery, isBad, outcomeText, runnerText, standingText, type WorkerRun } from "~/lib/workers";
 
@@ -67,7 +67,7 @@ export function DelegatedQueue() {
 
 /** One run: how it ended and what the worker left. */
 export function RunResult(props: { run: WorkerRun }) {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const r = () => props.run;
   return (
     <div class="item worker-run">
@@ -80,7 +80,7 @@ export function RunResult(props: { run: WorkerRun }) {
           {runnerText(r().runner)}
           <Show when={r().attempt > 1}> · {r().attempt} 回目</Show>
           <Show when={r().session}> · セッション {r().session}</Show>
-          <Show when={r().endedAt}> · {shortTime(r().endedAt, persona()?.timezone ?? "UTC")}</Show>
+          <Show when={r().endedAt}> · {shortTime(r().endedAt, owner.tz())}</Show>
         </div>
         <Show when={r().result}>
           <details>

@@ -1,29 +1,24 @@
-import { createAsync, useSearchParams } from "@solidjs/router";
+import { dateText, daysLeft , nearness } from "~/lib/dates";
+import { createAsync } from "@solidjs/router";
 import { createEffect, For, Show } from "solid-js";
-import { personaQuery, workgroupsQuery } from "~/lib/data";
-import { choiceOf, dateText, daysLeft, deadlinesOf, linkOf, moneyText, plainText, type Rec, recordQuery, sectionOf, valueOf, workgroupNames } from "~/lib/records";
-import { today } from "~/lib/time";
-import { setView } from "~/lib/view";
+import { workgroupsQuery } from "~/lib/data";
+import { choiceOf, deadlinesOf, excerptOf, isPast, linkOf, moneyText, type Rec, sectionOf, valueOf, workgroupNames } from "~/lib/records";
+import { usePicked } from "~/lib/picked";
 import RecordDetail from "./RecordDetail";
-import RecordsPage, { type Group, oneParam } from "./RecordsPage";
+import { useOwner } from "~/lib/owner";
+import RecordsPage, { type Group } from "./RecordsPage";
 
 /** Things, or contracts: the same page over a different kind. */
 export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) {
   const things = () => props.kind === "holdings";
   const title = () => (things() ? "物" : "契約");
   const base = () => (things() ? "/things" : "/contracts");
-  const [params] = useSearchParams();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const workgroups = createAsync(() => workgroupsQuery());
-  const day = () => today(persona()?.timezone ?? "UTC");
-  const picked = createAsync(() => {
-    const id = oneParam(params.id);
-    return id ? recordQuery(props.kind, id) : Promise.resolve(undefined);
-  });
-  createEffect(() => setView(picked() ? `${title()} · ${picked()?.title}` : title()));
+  const day = owner.today;
+  usePicked({ kind: () => props.kind, section: title });
 
-  const over = (r: Rec) => ["released", "ended"].includes(valueOf(r, "Status"));
-  const next = (r: Rec) => (over(r) ? undefined : deadlinesOf(r)[0]);
+  const next = (r: Rec) => (isPast(r) ? undefined : deadlinesOf(r)[0]);
   const order = (a: Rec, b: Rec) => (next(a)?.on ?? "9999").localeCompare(next(b)?.on ?? "9999") || a.title.localeCompare(b.title, "ja");
   const groups = (records: Rec[]): Group[] => {
     const by = new Map<string, Rec[]>();
@@ -71,13 +66,13 @@ export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) 
           <span>{workgroupNames(workgroups(), r.workgroups)}</span>
         </span>
         <Show when={card && r.notes}>
-          <span class="rec-excerpt">{plainText(r.notes).replace(/[#>*`|-]+/g, " ").slice(0, 120)}</span>
+          <span class="rec-excerpt">{excerptOf(r.notes)}</span>
         </Show>
       </span>
       <Show when={next(r)}>
         {(d) => (
           <span class="rec-side">
-            <span class="rec-when" classList={{ late: d().on < day(), soon: daysLeft(d().on, day()) === "今日" }}>
+            <span class="rec-when" classList={{ late: nearness(d().on, day()) === "late", soon: nearness(d().on, day()) === "soon" }}>
               {d().what} {daysLeft(d().on, day())}
             </span>
             <span class="sub mono">{d().on}</span>
@@ -92,7 +87,7 @@ export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) 
       base={base()}
       title={title()}
       narrow={["Category", "Status"]}
-      over={over}
+      over={isPast}
       overLabel={things() ? "手放した物も" : "終わった契約も"}
       groups={groups}
       row={(r) => body(r, false)}

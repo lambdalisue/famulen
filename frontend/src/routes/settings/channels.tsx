@@ -4,8 +4,8 @@ import Icon from "~/components/Icon";
 import { ChannelSwitch, MainWorkspace } from "~/components/ServiceSections";
 import { ConnectionState } from "~/gen/famulen/v1/services_pb";
 import { channelsQuery } from "~/lib/connections";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
+import { useOwner } from "~/lib/owner";
 import { setSelection, setView } from "~/lib/view";
 
 /**
@@ -13,9 +13,9 @@ import { setSelection, setView } from "~/lib/view";
  * the connected services give, each turned on or off.
  */
 export default function Channels() {
-  setView("設定 · チャネル");
+  setView("設定", "チャネル");
   const channels = createAsync(() => channelsQuery());
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   // The origin is only known in the browser; rendering it on the server too
   // would not match what hydration sees.
   const [origin, setOrigin] = createSignal("");
@@ -25,7 +25,7 @@ export default function Channels() {
     <>
       <h1>チャネル</h1>
       <p class="sub">
-        {persona()?.name ?? "秘書"} と話せるところ。このブラウザはいつでも使える。Slack などは
+        {owner.aide()} と話せるところ。このブラウザはいつでも使える。Slack などは
         <A href="/settings/services">サービス</A>
         で足すとここに並び、切るとそこからの話しかけを受けなくなる。切っても、サービスのつながりは残る。
       </p>

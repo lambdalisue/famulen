@@ -5,9 +5,10 @@ import Markdown from "~/components/Markdown";
 import { EntryRow, SrcTag } from "~/components/MemoryEntry";
 import type { Layer } from "~/gen/famulen/v1/memory_pb";
 import { workgroup } from "~/lib/workgroup";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import { layerQuery, visible } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
+import { oneParam } from "~/lib/params";
 import { setSelection, setView } from "~/lib/view";
 
 const LONG_GROUPS: [string, string][] = [
@@ -270,14 +271,14 @@ function Forgotten(props: { data: Layer; at: string }) {
 export default function MemoryLayer() {
   const params = useParams();
   const [search] = useSearchParams();
-  const at = () => (typeof search.at === "string" ? search.at : "");
+  const at = () => oneParam(search.at);
   const known = () => LAYERS.includes(params.layer ?? "");
   const data = createAsync(async () => (known() ? layerQuery(params.layer ?? "", at()) : undefined));
-  const persona = createAsync(() => personaQuery());
-  const aide = () => persona()?.name || "秘書";
+  const owner = useOwner();
+  const aide = owner.aide;
   createEffect(() => {
     const label = data()?.layer?.label;
-    if (label) setView(`記憶 · ${label}`);
+    if (label) setView("記憶", label);
   });
   return (
     <Show when={params.layer !== "dream"} fallback={<Navigate href="/memory" />}>

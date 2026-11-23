@@ -1,12 +1,13 @@
+import { dateTimeText } from "~/lib/dates";
 import { A, createAsync, useSearchParams } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
 import DreamNow from "~/components/DreamNow";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { dreamSettingsQuery, dreamsQuery, nightLabel } from "~/lib/memory";
+import { dreamSettingsQuery, dreamsQuery } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 const OPS: [string, string][] = [
@@ -36,12 +37,12 @@ function opCounts(d: Dream): number[] {
 }
 
 export default function Dreams() {
-  setView("記憶 · 夢");
+  setView("記憶", "夢");
   const [params] = useSearchParams();
   const dreams = createAsync(() => dreamsQuery());
   const plan = createAsync(() => dreamSettingsQuery());
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   const nights = () => dreams()?.dreams ?? [];
   const index = () => {
     const wanted = params.night;
@@ -112,7 +113,7 @@ export default function Dreams() {
                     <A
                       class={`bar${i() === index() ? " on" : ""}`}
                       href={href(n)}
-                      title={`${nightLabel(n.at, tz())} · 足した ${counts[0]} · 直した ${counts[1]} · 置き換えた ${counts[2]} · 忘れた ${counts[3]}`}
+                      title={`${dateTimeText(n.at, tz())} · 足した ${counts[0]} · 直した ${counts[1]} · 置き換えた ${counts[2]} · 忘れた ${counts[3]}`}
                     >
                       <For each={counts}>
                         {(c, k) => (
@@ -146,7 +147,7 @@ export default function Dreams() {
               </Show>
               <h2>
                 {index() + 1 === nights().length ? "最後の夢 · " : ""}
-                {nightLabel(n().at, tz())}
+                {dateTimeText(n().at, tz())}
               </h2>
               <Show when={index() + 1 < nights().length}>
                 <A class="btn small" href={href(nights()[index() + 1])} aria-label="次の夢">

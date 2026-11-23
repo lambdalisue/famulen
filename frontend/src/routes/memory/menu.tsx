@@ -1,16 +1,16 @@
 import { A, createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import { layerHref, layersQuery } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
 
 /** The memory layers as a list of pages, for the narrow layout. */
 export default function MemoryMenu() {
   setView("記憶");
   const layers = createAsync(() => layersQuery());
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <>
       <div class="list">
@@ -34,7 +34,7 @@ export default function MemoryMenu() {
         </For>
       </div>
       <p class="sub">
-        記憶は {persona()?.name || "秘書"}{" "}
+        記憶は {owner.aide()}{" "}
         がやりとりから覚えたこと。予定・タスク・相手・物・契約は記録なので、ここには入らない。変更はすべて Git に残る。
       </p>
     </>

@@ -1,11 +1,12 @@
+import { dateText } from "~/lib/dates";
 import { Switch } from "@ark-ui/solid/switch";
 import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
 import Icon from "~/components/Icon";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { choiceOf, dateText, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
+import { choiceOf, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
 import RecordChip from "./links/RecordChip";
+import { useOwner } from "~/lib/owner";
 import RecordPicker from "./RecordPicker";
 
 export type Typed = { value: string; values: string[] };
@@ -144,7 +145,7 @@ function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => 
 
 /** The control that changes a field, by what the field holds. */
 export default function FieldEdit(props: { type: FieldType; label: string; field: Field | undefined; onSave: (v: Typed) => void }) {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const value = () => props.field?.value ?? "";
   const values = () => props.field?.values ?? [];
   const t = () => props.type.type;
@@ -171,7 +172,7 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
       <Match when={t() === "choice"}>
         <select class="input" aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
           <option value="">—</option>
-          <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, persona()?.name)}</option>}</For>
+          <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, owner.aide())}</option>}</For>
         </select>
       </Match>
       <Match when={t() === "flag"}>
@@ -194,7 +195,7 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
             }}
           >
             <option value={OWNER}>あなた</option>
-            <option value={SECRETARY}>{persona()?.name || "秘書"}</option>
+            <option value={SECRETARY}>{owner.aide()}</option>
             <option value={WORKER}>{choiceOf(WORKER)}</option>
             <Show when={linkOf(value())}>{(l) => <option value="other">{l().title}</option>}</Show>
           </select>

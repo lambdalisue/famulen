@@ -1,22 +1,23 @@
+import { dateText, daysLeft } from "~/lib/dates";
 import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery, workgroupsQuery } from "~/lib/data";
+import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { assigneeOf, choiceOf, dateText, daysLeft, isOver, OWNER, plainText, type Rec, SECRETARY, valueOf, WORKER, workgroupNames } from "~/lib/records";
-import { today } from "~/lib/time";
+import { assigneeOf, choiceOf, isOver, OWNER, plainText, type Rec, SECRETARY, valueOf, WORKER, workgroupNames } from "~/lib/records";
+import { useOwner } from "~/lib/owner";
 
 /** One task in a list: finish it, hand it over, or press it to open it. */
 export default function TaskRow(props: { task: Rec }) {
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const workgroups = createAsync(() => workgroupsQuery());
-  const aide = () => persona()?.name || "秘書";
+  const aide = owner.aide;
   const t = () => props.task;
   const over = () => isOver(t());
   const due = () => valueOf(t(), "Due");
-  const day = () => today(persona()?.timezone ?? "UTC");
+  const day = owner.today;
   const status = () => valueOf(t(), "Status");
   const aides = () => valueOf(t(), "Assignee") === SECRETARY;
   const put = (name: string, value: string, done: string) =>
