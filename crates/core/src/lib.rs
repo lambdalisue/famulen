@@ -18,6 +18,7 @@ pub mod models;
 pub mod notebook;
 pub mod permissions;
 pub mod records;
+pub mod schedule;
 pub mod sealed;
 pub mod settings;
 pub mod slack;
