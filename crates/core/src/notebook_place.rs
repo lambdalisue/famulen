@@ -397,7 +397,10 @@ fn real(path: &Path) -> anyhow::Result<PathBuf> {
     let mut above = path.as_path();
     loop {
         match above.canonicalize() {
-            Ok(found) => return Ok(found.join(path.strip_prefix(above)?).components().collect()),
+            Ok(found) => {
+                let rest = path.strip_prefix(above)?;
+                return Ok(crate::paths::plain(found).join(rest).components().collect());
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 above = above
                     .parent()
@@ -438,7 +441,7 @@ mod tests {
         }
 
         fn root(&self) -> PathBuf {
-            self.tmp.path().canonicalize().unwrap()
+            real(self.tmp.path()).unwrap()
         }
 
         fn config(&self) -> Config {

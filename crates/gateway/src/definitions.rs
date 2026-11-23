@@ -561,7 +561,12 @@ impl Definition {
             return Some(setup.clone());
         }
         let dir = Path::new(&self.source).parent()?;
-        Some(dir.join(setup).display().to_string())
+        let place = dir.join(setup).display().to_string();
+        Some(if cfg!(windows) {
+            place.replace('\\', "/")
+        } else {
+            place
+        })
     }
 }
 

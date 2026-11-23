@@ -14,32 +14,37 @@ async fn there_is_nowhere_to_write_at_first() {
 
 #[tokio::test]
 async fn places_the_owner_adds_are_listed_until_removed() {
+    let (notes, out) = if cfg!(windows) {
+        (r"C:\srv\notes", r"C:\srv\out")
+    } else {
+        ("/srv/notes", "/srv/out")
+    };
     let dir = temp();
     let api = open(&dir);
 
     try_call(
         &api,
         "SettingsService/AddWritablePlace",
-        json!({ "path": "/srv/notes" }),
+        json!({ "path": notes }),
     )
     .await;
     let (_, added) = try_call(
         &api,
         "SettingsService/AddWritablePlace",
-        json!({ "path": "/srv/out" }),
+        json!({ "path": out }),
     )
     .await;
-    assert_eq!(added["paths"], json!(["/srv/notes", "/srv/out"]));
+    assert_eq!(added["paths"], json!([notes, out]));
 
     let (_, removed) = try_call(
         &api,
         "SettingsService/RemoveWritablePlace",
-        json!({ "path": "/srv/notes" }),
+        json!({ "path": notes }),
     )
     .await;
-    assert_eq!(removed["paths"], json!(["/srv/out"]));
+    assert_eq!(removed["paths"], json!([out]));
     let (_, listed) = try_call(&api, "SettingsService/GetWritablePlaces", json!({})).await;
-    assert_eq!(listed["paths"], json!(["/srv/out"]));
+    assert_eq!(listed["paths"], json!([out]));
 }
 
 #[tokio::test]

@@ -21,7 +21,7 @@ lint:
 
 # Run the tests.
 test:
-    cargo test --workspace
+    cargo test --workspace --no-fail-fast
 
 # Stamp a copy of the manifests the way a release does, so a placeholder the
 # release workflow would no longer find fails here, on every OS.

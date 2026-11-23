@@ -237,7 +237,10 @@ impl Config {
         let data_dir = std::fs::create_dir_all(&self.data_dir)
             .and_then(|()| self.data_dir.canonicalize())
             .with_context(|| format!("preparing {}", self.data_dir.display()))?;
-        Ok(Self { data_dir, ..self })
+        Ok(Self {
+            data_dir: crate::paths::plain(data_dir),
+            ..self
+        })
     }
 
     /// The starting values for the settings the console can change.

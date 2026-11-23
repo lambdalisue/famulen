@@ -87,7 +87,7 @@ impl Options {
             let writable: Vec<String> = self
                 .writable
                 .iter()
-                .filter(|w| !self.sealed.iter().any(|s| w.starts_with(s)))
+                .filter(|w| !self.sealed.iter().any(|s| crate::paths::may_be_under(w, s)))
                 .map(shown)
                 .collect();
             // Every shell command still asks famulen; the sandbox only bounds
