@@ -921,6 +921,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "famulen-gateway-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "famulen-gateway",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "famulen-notebook"
 version = "0.0.0"
 dependencies = [
