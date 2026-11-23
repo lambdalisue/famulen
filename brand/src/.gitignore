@@ -1,0 +1,5 @@
+# What the scripts write next to themselves, and the font they read.
+/final/
+/fonts/
+/*.svg
+__pycache__/
