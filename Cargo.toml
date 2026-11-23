@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+# A placeholder: the tag is the only record of the version, and the release
+# workflow stamps it here before building and publishing.
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/lambdalisue/famulen"
+
+[workspace.dependencies]
+famulen-core = { path = "crates/core", version = "0.0.0" }
+famulen-api = { path = "crates/api", version = "0.0.0" }
+famulen-gateway = { path = "crates/gateway", version = "0.0.0" }
+famulen-notebook = { path = "crates/notebook", version = "0.0.0" }
+anyhow = "1.0.104"
+buffa = { version = "0.9.2", features = ["json"] }
+buffa-descriptor = "0.9.2"
+connectrpc = { version = "0.9.1", features = ["axum"] }
+connectrpc-build = "0.9.0"
+futures = "0.3.34"
+http = "1.5.0"
+axum = "0.8.9"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.9", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+iana-time-zone = "0.1.65"
+chrono-tz = { version = "0.10.4", features = ["serde"] }
+cron = "0.17.0"
+feed-rs = "3.0.0"
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", features = ["json", "form", "query", "stream"] }
+sha2 = "0.11.1"
+hmac = "0.13.0"
+jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust_crypto"] }
+base64 = "0.23.1"
+rand = "0.10.4"
+age = "0.12.1"
+ulid = "3.0.0"
+url = "2.5.9"
+ox_content_allocator = "3.9.0"
+ox_content_ast = "3.9.0"
+ox_content_parser = "3.9.0"
+rrule = "0.14.0"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_norway = "0.9.42"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+toml = "1.2.1"
+tracing = "0.1.44"
+tower = { version = "0.5.3", features = ["util"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
