@@ -1,0 +1,14 @@
+# A service the secretary proposes changes to in the e2e run: it needs no
+# app or login, and its tools are never called.
+format = 1
+id = "e2e-notes"
+name = "E2E Notes"
+
+[transport]
+http = { base = "http://127.0.0.1:9" }
+
+[[tools]]
+name = "list_notes"
+description = "List the notes."
+method = "GET"
+path = "/notes"

@@ -1,0 +1,22 @@
+# A service the e2e run logs in to: the tests answer its token endpoint.
+format = 1
+id = "e2e-login"
+name = "E2E Login"
+setup = "README.md"
+
+[app]
+id = "e2e-login"
+client_id = { env = "FAMULEN_E2E_CLIENT_ID" }
+
+[login.oauth2]
+authorize = "http://127.0.0.1:17793/authorize"
+token = "http://127.0.0.1:17793/token"
+
+[transport]
+http = { base = "http://127.0.0.1:17793" }
+
+[[tools]]
+name = "list_notes"
+description = "List the notes."
+method = "GET"
+path = "/notes"

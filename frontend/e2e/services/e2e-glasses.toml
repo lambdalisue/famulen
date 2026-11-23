@@ -1,0 +1,17 @@
+# A device the owner talks through, as a pair of glasses would: its one
+# receiver suggests the channel, so adding it lists it among the channels.
+format = 1
+id = "e2e-glasses"
+name = "E2E Glasses"
+
+[account]
+token = { label = "合言葉", secret = true }
+
+[transport]
+http = { base = "http://127.0.0.1:9" }
+
+[receive.said]
+destination = "channel"
+
+[receive.said.http]
+verify = { token = { value = "{header.X-Token}", equals = "{account.token}" } }

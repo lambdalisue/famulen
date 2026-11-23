@@ -1,0 +1,14 @@
+# A service the e2e backend can connect to without any app: it only
+# receives what is posted to its HTTP receiver with the right token.
+format = 1
+id = "e2e-hook"
+name = "E2E Hook"
+
+[account]
+token = { label = "合言葉", secret = true }
+
+[transport]
+http = { base = "http://127.0.0.1:9" }
+
+[receive.events.http]
+verify = { token = { value = "{header.X-Token}", equals = "{account.token}" } }
