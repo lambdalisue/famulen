@@ -5,10 +5,12 @@ pub mod check;
 mod doc;
 mod entry;
 mod git;
+pub mod index;
 mod link;
 pub mod memory;
 mod page;
 pub mod records;
+pub mod search;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod workgroups;
