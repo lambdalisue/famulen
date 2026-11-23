@@ -1,9 +1,9 @@
 import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { setView } from "~/lib/view";
 import { NAV } from "../settings";
+import { Icon, List } from "~/components/ui";
 
 /** The narrow layout's index of the settings pages. */
 export default function SettingsMenu() {
@@ -17,7 +17,7 @@ export default function SettingsMenu() {
             <Show when={group}>
               <h3>{group}</h3>
             </Show>
-            <div class="list">
+            <List>
               <For each={items}>
                 {([href, label, icon]) => (
                   <A class="item index-row" href={href}>
@@ -29,7 +29,7 @@ export default function SettingsMenu() {
                   </A>
                 )}
               </For>
-            </div>
+            </List>
           </>
         )}
       </For>

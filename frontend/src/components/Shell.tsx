@@ -1,7 +1,6 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Title } from "@solidjs/meta";
 import { A, createAsync, revalidate, useLocation } from "@solidjs/router";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
@@ -11,11 +10,10 @@ import { followEvents } from "~/lib/events";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
-import Toast from "./Toast";
 import Mark from "./Mark";
-import SideSheet from "./SideSheet";
 import { useOwner } from "~/lib/owner";
 import StatusPanel from "./StatusPanel";
+import { ConfirmHost, Icon, LinkButton, List, Loading, SideSheet, Toast } from "~/components/ui";
 
 /** How the secretary is, in a word; pressing it opens the whole state. */
 function Alive() {
@@ -166,7 +164,7 @@ export default function Shell(props: { children?: JSX.Element }) {
             </For>
           </nav>
           <div id="pane" class="pane" data-tab={tab().key}>
-            <Suspense fallback={<p class="empty">読み込んでいる</p>}>{props.children}</Suspense>
+            <Suspense fallback={<Loading />}>{props.children}</Suspense>
           </div>
         </div>
       </div>
@@ -195,10 +193,10 @@ export default function Shell(props: { children?: JSX.Element }) {
         <div class="sheet-grip" />
         <h2>ワークグループ</h2>
         <p class="sub">会話と画面の両方が絞られる</p>
-        <div class="list">
+        <List>
           <For each={workgroups()}>
             {(c) => (
-              <div class="item">
+              <div role="listitem" class="item">
                 <button type="button" class="sheet-row" aria-pressed={c.id === current()?.id} onClick={() => choose(c.id)}>
                   <span class="dot" style={{ background: c.color, width: "12px", height: "12px" }} />
                   <b class="grow">{c.name}</b>
@@ -209,12 +207,12 @@ export default function Shell(props: { children?: JSX.Element }) {
               </div>
             )}
           </For>
-        </div>
-        <A class="btn" href="/settings/workgroups" onClick={() => workgroupSheet?.close()}>
-          <Icon svg={icons.plus} size={16} />
-          ワークグループを足す
-        </A>
+        </List>
+        <LinkButton icon={icons.plus} href="/settings/workgroups" onClick={() => workgroupSheet?.close()}>
+ワークグループを足す
+        </LinkButton>
       </dialog>
+      <ConfirmHost />
       <Toast />
     </div>
   );

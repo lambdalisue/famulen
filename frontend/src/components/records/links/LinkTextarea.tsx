@@ -1,8 +1,8 @@
 import { createSignal } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { linkTo, type Rec } from "~/lib/records";
 import { PickDialog } from "../RecordPicker";
+import { Button } from "~/components/ui";
 
 /** Markdown being written, where `[[` or the button picks a record to link. */
 export default function LinkTextarea(props: { label: string; value: string; onInput: (text: string) => void; onSave: () => void }) {
@@ -22,10 +22,9 @@ export default function LinkTextarea(props: { label: string; value: string; onIn
   return (
     <>
       <div class="row">
-        <button type="button" class="btn small" onClick={() => start(box.selectionStart, box.selectionEnd)}>
-          <Icon svg={icons.plus} size={12} />
-          記録へのリンク
-        </button>
+        <Button small icon={icons.plus} onClick={() => start(box.selectionStart, box.selectionEnd)}>
+記録へのリンク
+        </Button>
         <span class="sub">[[ でも選べる</span>
       </div>
       <textarea

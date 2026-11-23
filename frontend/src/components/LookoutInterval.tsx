@@ -1,10 +1,8 @@
-import { NumberInput } from "@ark-ui/solid/number-input";
 import { Show } from "solid-js";
-import Segs from "~/components/Segs";
 import type { LookoutDefault, LookoutSource } from "~/gen/famulen/v1/lookout_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { createDraft } from "~/lib/draft";
+import { NumberField, Segmented } from "~/components/ui";
 
 /** The tool of a source that reads what arrived instead of calling a tool. */
 export const ARRIVED = "arrived";
@@ -28,7 +26,6 @@ export default function LookoutInterval(props: {
   const s = () => props.source;
   const label = () => props.label ?? `${s().name}を見る間隔（分）`;
   const inputId = () => `lookout-interval-${props.place}-${s().id}`;
-  const [shown, setShown] = createDraft(() => String(s().intervalMinutes));
   const arrived = () => s().tool === ARRIVED;
   const fallback = () => {
     const minutes = props.defaults.find((d) => d.feed === s().feed)?.intervalMinutes;
@@ -54,7 +51,7 @@ export default function LookoutInterval(props: {
   };
   return (
     <div class="lookout-interval-wrap">
-      <Segs
+      <Segmented
         label={`${s().name}の間隔の決め方`}
         items={[
           ["default", fallback()],
@@ -64,27 +61,15 @@ export default function LookoutInterval(props: {
         onChoose={(way) => void choose(way)}
       />
       <Show when={s().ownInterval}>
-        <NumberInput.Root
-          class="lookout-interval"
-          ids={{ input: inputId() }}
+        <NumberField
+          id={inputId()}
+          label={label()}
+          hidden
           min={1}
-          value={shown()}
-          onValueChange={(d) => setShown(d.value)}
-          onValueCommit={(d) => {
-            const next = Math.trunc(d.valueAsNumber);
-            if (!Number.isFinite(next) || next < 1) {
-              setShown(String(s().intervalMinutes));
-              return;
-            }
-            if (next !== s().intervalMinutes) void set(next, "間隔を変えた");
-          }}
-        >
-          <NumberInput.Label class="visually-hidden">{label()}</NumberInput.Label>
-          <NumberInput.Control>
-            <NumberInput.Input class="input" inputmode="numeric" />
-          </NumberInput.Control>
-          <span class="sub">{arrived() ? "分ごとにまとめて見る" : "分ごとに読みに行く"}</span>
-        </NumberInput.Root>
+          value={s().intervalMinutes}
+          unit={arrived() ? "分ごとにまとめて見る" : "分ごとに読みに行く"}
+          onSave={(minutes) => void set(minutes, "間隔を変えた")}
+        />
       </Show>
     </div>
   );

@@ -1,8 +1,5 @@
-import { Collapsible } from "@ark-ui/solid/collapsible";
-import { Dialog } from "@ark-ui/solid/dialog";
 import { createAsync } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { ARRIVED } from "~/components/LookoutInterval";
 import { IntervalField, PlacesField, RouteField, WHOLE, WorkgroupField } from "~/components/LookoutFields";
 import { argsOf, fieldsOf, ToolField, typedOf } from "~/components/ToolArgs";
@@ -11,6 +8,7 @@ import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { connectionsQuery, lookoutChoicesQuery, workspacesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
+import { DialogActions, Disclosure, Field, Select, TextField } from "~/components/ui";
 
 /** A source of one's own: its connection, tool, arguments and interval. */
 export default function LookoutForm(props: { defaults: LookoutDefault[]; presets: LookoutPreset[]; sources: LookoutSource[]; onDone: () => void }) {
@@ -81,24 +79,11 @@ export default function LookoutForm(props: { defaults: LookoutDefault[]; presets
         if (done) props.onDone();
       }}
     >
-      <label class="dialog-field">
-        <span>名前</span>
-        <input
-          class="input"
-          name="name"
-          autocomplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
-          required
-          placeholder="仕事のメール"
-          value={name()}
-          onInput={(e) => setName(e.currentTarget.value)}
-        />
-      </label>
-      <label class="dialog-field">
-        <span>つなぎ先</span>
-        <select class="input" required value={connection()} onChange={(e) => {
+      <Field label="名前">
+        <TextField name="name" required placeholder="仕事のメール" value={name()} onInput={(e) => setName(e.currentTarget.value)} />
+      </Field>
+      <Field label="つなぎ先">
+        <Select required value={connection()} onChange={(e) => {
             setConnection(e.currentTarget.value);
             chooseTool("");
             setPlaces([]);
@@ -116,8 +101,8 @@ export default function LookoutForm(props: { defaults: LookoutDefault[]; presets
               </option>
             )}
           </For>
-        </select>
-      </label>
+        </Select>
+      </Field>
       <Show when={reads()}>
         <p class="sub lookout-reads">{reads()}</p>
       </Show>
@@ -138,12 +123,7 @@ export default function LookoutForm(props: { defaults: LookoutDefault[]; presets
       <IntervalField defaults={props.defaults} own={own()} setOwn={setOwn} minutes={minutes()} setMinutes={setMinutes} />
       <RouteField route={route()} setRoute={setRoute} />
       <WorkgroupField workgroup={workgroup()} setWorkgroup={setWorkgroup} />
-      <Collapsible.Root open={advanced() || needsTool()} onOpenChange={(d) => setAdvanced(d.open)}>
-        <Collapsible.Trigger class="vault-auto-trigger">
-          <Icon svg={icons.chevronRight} size={14} />
-          詳しい設定
-        </Collapsible.Trigger>
-        <Collapsible.Content class="vault-auto-content">
+      <Disclosure open={advanced() || needsTool()} onOpenChange={setAdvanced} title="詳しい設定">
           <ToolField
             tools={current()?.tools ?? []}
             none={needsTool() ? undefined : "使わない（届いたものを読む）"}
@@ -154,14 +134,8 @@ export default function LookoutForm(props: { defaults: LookoutDefault[]; presets
             typed={typed()}
             setTyped={setTyped}
           />
-        </Collapsible.Content>
-      </Collapsible.Root>
-      <div class="dialog-actions">
-        <Dialog.CloseTrigger class="btn" type="button">
-          やめる
-        </Dialog.CloseTrigger>
-        <button class="btn primary">足す</button>
-      </div>
+        </Disclosure>
+      <DialogActions submit="足す" />
     </form>
   );
 }

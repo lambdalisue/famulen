@@ -3,6 +3,7 @@ import { Show } from "solid-js";
 import { hrefOf, linkOf } from "~/lib/records";
 import { useKnownLink } from "./known";
 import LinkedText from "./LinkedText";
+import { Tag } from "~/components/ui";
 
 /** Words the notebook gives a meaning of their own. */
 const WORDS: { [text: string]: string } = { me: "あなた", "previous unfinished": "前の回がまだ済んでいない" };
@@ -18,7 +19,7 @@ export default function RecordChip(props: { text: string }) {
         const title = () => now()?.title || l().title || l().id;
         return (
           <Show when={!now()?.missing} fallback={<span class="tag missing">{title()}（もうない）</span>}>
-            <Show when={hrefOf(l().kind, l().id)} fallback={<span class="tag">{title()}</span>}>
+            <Show when={hrefOf(l().kind, l().id)} fallback={<Tag>{title()}</Tag>}>
               {(href) => (
                 <A class="tag link" href={href()}>
                   {title()}

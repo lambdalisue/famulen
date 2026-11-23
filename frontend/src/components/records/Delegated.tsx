@@ -1,7 +1,6 @@
 import { shortTime } from "~/lib/dates";
 import { A, createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
@@ -9,6 +8,7 @@ import { isOver, type Rec, valueOf, WORKER } from "~/lib/records";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
 import { type DelegatedTask, delegatedQuery, isBad, outcomeText, runnerText, standingText, type WorkerRun } from "~/lib/workers";
+import { Button, Icon, IconButton, Tag } from "~/components/ui";
 
 const retry = (id: string) => act(() => api.workers.retryDelegated({ id }), "並びに戻した");
 const cancel = (id: string) => act(() => api.workers.cancelDelegated({ id }), "やめた");
@@ -49,13 +49,11 @@ export function DelegatedQueue() {
                   </span>
                 </span>
                 <Show when={t.state === "still"}>
-                  <button type="button" class="btn small" onClick={() => void retry(t.task)}>
+                  <Button small onClick={() => void retry(t.task)}>
                     並びに戻す
-                  </button>
+                  </Button>
                 </Show>
-                <button type="button" class="rec-edit" aria-label={`「${t.title}」の委託をやめる`} onClick={() => void cancel(t.task)}>
-                  <Icon svg={icons.x} size={13} />
-                </button>
+                <IconButton plain icon={icons.x} label={`「${t.title}」の委託をやめる`} onClick={() => void cancel(t.task)} />
               </div>
             )}
           </For>
@@ -70,11 +68,11 @@ export function RunResult(props: { run: WorkerRun }) {
   const owner = useOwner();
   const r = () => props.run;
   return (
-    <div class="item worker-run">
+    <div role="listitem" class="item worker-run">
       <div class="grow">
         <div>
           <span class="sub mono">#{String(r().id)}</span> {r().title}{" "}
-          <span class={`tag${["failed", "refused"].includes(r().outcome) ? " bad" : ""}`}>{outcomeText(r().outcome)}</span>
+          <Tag tone={["failed", "refused"].includes(r().outcome) ? "danger" : undefined}>{outcomeText(r().outcome)}</Tag>
         </div>
         <div class="sub">
           {runnerText(r().runner)}
@@ -116,14 +114,14 @@ export function Delegation(props: { task: Rec }) {
             )}
           </Show>
           <Show when={now()?.state === "still" || (isOver(props.task) && last())}>
-            <button type="button" class="btn small" onClick={() => void retry(props.task.id)}>
+            <Button small onClick={() => void retry(props.task.id)}>
               並びに戻す
-            </button>
+            </Button>
           </Show>
           <Show when={now()}>
-            <button type="button" class="btn small" onClick={() => void cancel(props.task.id)}>
+            <Button small onClick={() => void cancel(props.task.id)}>
               委託をやめる
-            </button>
+            </Button>
           </Show>
         </div>
         <Show when={last()}>{(r) => <RunResult run={r()} />}</Show>

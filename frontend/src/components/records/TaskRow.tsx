@@ -1,13 +1,13 @@
 import { dateText, daysLeft } from "~/lib/dates";
 import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
 import { assigneeOf, choiceOf, isOver, OWNER, plainText, type Rec, SECRETARY, valueOf, WORKER, workgroupNames } from "~/lib/records";
 import { useOwner } from "~/lib/owner";
+import { Icon, Tag } from "~/components/ui";
 
 /** One task in a list: finish it, hand it over, or press it to open it. */
 export default function TaskRow(props: { task: Rec }) {
@@ -36,18 +36,18 @@ export default function TaskRow(props: { task: Rec }) {
         <b style={over() ? { "text-decoration": "line-through" } : {}}>{t().title}</b>
         <span class="rec-sub">
           <Show when={valueOf(t(), "Priority") === "high"}>
-            <span class="tag warn">優先</span>
+            <Tag tone="warn">優先</Tag>
           </Show>
           <Show when={t().blockers.length > 0}>
-            <span class="tag bad" title={t().blockers.map((b) => b.title).join("、")}>
+            <Tag tone="danger" title={t().blockers.map((b) => b.title).join("、")}>
               <Icon svg={icons.lock} size={11} /> {t().blockers[0].title} 待ち
-            </span>
+            </Tag>
           </Show>
           <Show when={["in_progress", "waiting", "cancelled"].includes(status())}>
-            <span class="tag">{choiceOf(status())}</span>
+            <Tag>{choiceOf(status())}</Tag>
           </Show>
           <Show when={valueOf(t(), "Waiting for")}>{(w) => <span>{plainText(w())}</span>}</Show>
-          <For each={t().labels}>{(l) => <span class="tag label">{l}</span>}</For>
+          <For each={t().labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
           <span>{workgroupNames(workgroups(), t().workgroups)}</span>
         </span>
       </span>
@@ -58,7 +58,7 @@ export default function TaskRow(props: { task: Rec }) {
             {due().slice(11) ? ` ${due().slice(11)}` : ""}
           </span>
         </Show>
-        <Show when={valueOf(t(), "Assignee") !== WORKER} fallback={<span class="tag">{assigneeOf(t(), aide())}</span>}>
+        <Show when={valueOf(t(), "Assignee") !== WORKER} fallback={<Tag>{assigneeOf(t(), aide())}</Tag>}>
           <button
             type="button"
             class={`tag${aides() ? " aide" : ""}`}

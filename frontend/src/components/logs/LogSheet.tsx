@@ -1,9 +1,7 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import type { JSX } from "solid-js";
-import Icon from "~/components/Icon";
-import SideSheet from "~/components/SideSheet";
 import * as icons from "~/lib/icons";
-import "./log.css";
+import { DialogTrigger, SideSheet } from "~/components/ui";
 
 /**
  * The 「ログを見る」 button at the foot of an agent's page, and the sheet from
@@ -13,10 +11,9 @@ export default function LogSheet(props: { title: string; label?: string; childre
   return (
     <Dialog.Root lazyMount unmountOnExit>
       <div class="log-open">
-        <Dialog.Trigger class="btn">
-          <Icon svg={icons.listDetails} size={16} />
+        <DialogTrigger icon={icons.listDetails}>
           {props.label ?? "ログを見る"}
-        </Dialog.Trigger>
+        </DialogTrigger>
       </div>
       <SideSheet name="log" title={props.title}>
         {props.children}

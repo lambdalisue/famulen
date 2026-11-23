@@ -1,8 +1,5 @@
-import "./Usage.css";
-import { SegmentGroup } from "@ark-ui/solid/segment-group";
 import { createAsync, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import UsageChart, { type Column } from "~/components/UsageChart";
 import type { UsageRow } from "~/gen/famulen/v1/settings_pb";
 import * as icons from "~/lib/icons";
@@ -23,6 +20,7 @@ import {
   tickName,
 } from "~/lib/usage";
 import { setSelection } from "~/lib/view";
+import { EmptyState, IconButton, PageHeader, SegmentedOf } from "~/components/ui";
 
 const BY: [By, string][] = [
   ["agent", "エージェントごと"],
@@ -31,33 +29,6 @@ const BY: [By, string][] = [
 
 function plainNumber(v: number): string {
   return v.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-}
-
-function Segments<K extends string>(props: {
-  label: string;
-  value: K;
-  items: readonly (readonly [K, string, ...unknown[]])[];
-  onChange: (value: K) => void;
-}) {
-  return (
-    <SegmentGroup.Root
-      class="segs"
-      aria-label={props.label}
-      value={props.value}
-      onValueChange={(v) => props.onChange(v.value as K)}
-    >
-      <SegmentGroup.Indicator class="segs-indicator" />
-      <For each={props.items}>
-        {([key, label]) => (
-          <SegmentGroup.Item value={key} class="segs-item">
-            <SegmentGroup.ItemText>{label}</SegmentGroup.ItemText>
-            <SegmentGroup.ItemControl />
-            <SegmentGroup.ItemHiddenInput />
-          </SegmentGroup.Item>
-        )}
-      </For>
-    </SegmentGroup.Root>
-  );
 }
 
 /** A period's calls, tokens and cost over time, by agent or by model. */
@@ -153,47 +124,32 @@ export default function Usage() {
 
   return (
     <section class="usage">
-      <h1 class="d-only">使った量</h1>
+      <PageHeader title="使った量" />
       <div class="usage-filters">
-        <Segments
+        <SegmentedOf
           label="区切り"
           value={span()}
-          items={SPANS}
-          onChange={(v) => show({ span: v === "month" ? undefined : v })}
+          items={SPANS.map(([k, text]) => [k, text] as const)}
+          onChoose={(v) => show({ span: v === "month" ? undefined : v })}
         />
         <div class="usage-period">
-          <button
-            type="button"
-            class="btn small"
-            aria-label="前へ"
-            onClick={() => {
+          <IconButton icon={icons.chevronLeft} label="前へ" onClick={() => {
               const u = usage();
               if (u) show({ day: shiftDay(u.from, -1) });
-            }}
-          >
-            <Icon svg={icons.chevronLeft} size={14} />
-          </button>
+            }} />
           <Show when={usage()}>{(u) => <b>{periodName(span(), u())}</b>}</Show>
-          <button
-            type="button"
-            class="btn small"
-            aria-label="次へ"
-            disabled={(usage()?.to ?? "") >= (usage()?.today ?? "")}
-            onClick={() => {
+          <IconButton icon={icons.chevronRight} label="次へ" disabled={(usage()?.to ?? "") >= (usage()?.today ?? "")} onClick={() => {
               const u = usage();
               if (!u) return;
               const day = shiftDay(u.to, 1);
               show({ day: day > u.today ? undefined : day });
-            }}
-          >
-            <Icon svg={icons.chevronRight} size={14} />
-          </button>
+            }} />
         </div>
-        <Segments
+        <SegmentedOf
           label="見方"
           value={by()}
           items={BY}
-          onChange={(v) => setParams({ by: v === "agent" ? undefined : v })}
+          onChoose={(v) => setParams({ by: v === "agent" ? undefined : v })}
         />
       </div>
       <div class="usage-totals">
@@ -214,7 +170,7 @@ export default function Usage() {
       </div>
       <Show
         when={(usage()?.rows.length ?? 0) > 0}
-        fallback={<p class="empty">この期間はまだ使っていない</p>}
+        fallback={<EmptyState>この期間はまだ使っていない</EmptyState>}
       >
         <Show when={calls()}>
           {(c) => (
@@ -248,7 +204,7 @@ export default function Usage() {
           {(b) => (
             <section class="usage-detail">
               <h2>{bucketName(span(), b().from)}</h2>
-              <Show when={b().rows.length > 0} fallback={<p class="empty">使っていない</p>}>
+              <Show when={b().rows.length > 0} fallback={<EmptyState>使っていない</EmptyState>}>
                 <div class="scroll">
                   <table class="table" aria-label={`${bucketName(span(), b().from)} の使った量`}>
                     <Head />

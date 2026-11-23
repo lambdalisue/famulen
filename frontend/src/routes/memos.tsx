@@ -6,6 +6,7 @@ import { workgroupsQuery } from "~/lib/data";
 import { excerptOf, type Rec, workgroupNames } from "~/lib/records";
 import { dateText } from "~/lib/dates";
 import { usePicked } from "~/lib/picked";
+import { Tag } from "~/components/ui";
 
 export default function Memos() {
   const workgroups = createAsync(() => workgroupsQuery());
@@ -16,7 +17,7 @@ export default function Memos() {
       <span class="rec-excerpt">{excerptOf(r.notes)}</span>
       <span class="rec-sub">
         <span>{dateText(r.updated.slice(0, 10))}</span>
-        <For each={r.labels}>{(l) => <span class="tag label">{l}</span>}</For>
+        <For each={r.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
         <span>{workgroupNames(workgroups(), r.workgroups)}</span>
       </span>
     </span>

@@ -1,13 +1,9 @@
-import { Dialog } from "@ark-ui/solid/dialog";
-import { RadioGroup } from "@ark-ui/solid/radio-group";
-import { SegmentGroup } from "@ark-ui/solid/segment-group";
 import { createSignal, For, Match, Show, Switch } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
 import { AgentCli, type Model, ModelKind } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
+import { Button, Dialog, DialogActions, DialogTrigger, Field, RadioCards, Segmented, TextField } from "~/components/ui";
 
 type Preset = { label: string; url: string };
 
@@ -82,18 +78,12 @@ const WAYS: Way[] = [
   },
 ];
 
-/** Keeps a password manager from taking a field for a login. */
-const PLAIN = {
-  autocomplete: "off",
-  "data-1p-ignore": true,
-  "data-lpignore": "true",
-  "data-bwignore": true,
-} as const;
-
 function amount(s: string): number {
   const n = Number(s.trim());
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
+
+const RESTORE = { id: BACK, label: "外したモデルを戻す", note: "このマシンにあり、一覧から外したもの", icon: icons.arrowBackUp };
 
 /** Adds a model that Famulen does not find by itself, or one the owner removed. */
 export default function AddModel(props: { candidates: Model[] }) {
@@ -101,7 +91,7 @@ export default function AddModel(props: { candidates: Model[] }) {
   const [way, setWay] = createSignal(WAYS[0]!.id);
   const chosen = () => WAYS.find((w) => w.id === way());
   return (
-    <Modal
+    <Dialog
       open={open()}
       onOpenChange={(next) => {
         setOpen(next);
@@ -111,20 +101,18 @@ export default function AddModel(props: { candidates: Model[] }) {
       description="このマシンの Claude Code・Codex・Ollama のモデルは自動で一覧に入る。それ以外をここで足す。"
       size="wide"
       trigger={
-        <Dialog.Trigger class="btn primary">
-          <Icon svg={icons.plus} size={14} />
-          モデルの追加
-        </Dialog.Trigger>
+        <DialogTrigger variant="primary" icon={icons.plus}>
+モデルの追加
+        </DialogTrigger>
       }
     >
       <div class="model-add">
-        <RadioGroup.Root class="model-ways" value={way()} onValueChange={(d) => setWay(d.value ?? WAYS[0]!.id)}>
-          <RadioGroup.Label class="visually-hidden">足し方</RadioGroup.Label>
-          <Show when={props.candidates.length > 0}>
-            <WayCard id={BACK} label="外したモデルを戻す" note="このマシンにあり、一覧から外したもの" icon={icons.arrowBackUp} />
-          </Show>
-          <For each={WAYS}>{(w) => <WayCard {...w} />}</For>
-        </RadioGroup.Root>
+        <RadioCards
+          label="足し方"
+          items={[...(props.candidates.length > 0 ? [RESTORE] : []), ...WAYS]}
+          value={way()}
+          onChoose={(id) => setWay(id || WAYS[0]!.id)}
+        />
         <Switch>
           <Match when={way() === BACK}>
             <div>
@@ -132,67 +120,29 @@ export default function AddModel(props: { candidates: Model[] }) {
                 {(m) => (
                   <div class="model-back">
                     <span>{m.name}</span>
-                    <button
-                      type="button"
-                      class="btn small"
-                      aria-label={`${m.name}を戻す`}
-                      onClick={() => void act(() => api.models.restoreModel({ id: m.id }), "戻した")}
-                    >
+                    <Button small aria-label={`${m.name}を戻す`} onClick={() => void act(() => api.models.restoreModel({ id: m.id }), "戻した")}>
                       戻す
-                    </button>
+                    </Button>
                   </div>
                 )}
               </For>
             </div>
-            <div class="dialog-actions">
-              <Dialog.CloseTrigger class="btn">閉じる</Dialog.CloseTrigger>
-            </div>
+            <DialogActions cancel="閉じる" />
           </Match>
           <Match when={chosen()} keyed>
             {(w) => <Fields way={w} onAdded={() => setOpen(false)} />}
           </Match>
         </Switch>
       </div>
-    </Modal>
-  );
-}
-
-function WayCard(props: { id: string; label: string; note: string; icon: string }) {
-  return (
-    <RadioGroup.Item value={props.id} class="model-way">
-      <RadioGroup.ItemControl class="visually-hidden" />
-      <Icon svg={props.icon} size={18} />
-      <RadioGroup.ItemText class="model-way-text">
-        <b>{props.label}</b>
-        <span class="sub">{props.note}</span>
-      </RadioGroup.ItemText>
-      <RadioGroup.ItemHiddenInput />
-    </RadioGroup.Item>
+    </Dialog>
   );
 }
 
 function Segments(props: { label: string; items: string[]; value: string; onChange: (value: string) => void }) {
   return (
-    <div class="dialog-field">
-      <span>{props.label}</span>
-      <SegmentGroup.Root
-        class="segs"
-        aria-label={props.label}
-        value={props.value}
-        onValueChange={(d) => props.onChange(d.value ?? props.value)}
-      >
-        <SegmentGroup.Indicator class="segs-indicator" />
-        <For each={props.items}>
-          {(item) => (
-            <SegmentGroup.Item value={item} class="segs-item">
-              <SegmentGroup.ItemText>{item}</SegmentGroup.ItemText>
-              <SegmentGroup.ItemControl />
-              <SegmentGroup.ItemHiddenInput />
-            </SegmentGroup.Item>
-          )}
-        </For>
-      </SegmentGroup.Root>
-    </div>
+    <Field label={props.label} group>
+      <Segmented label={props.label} items={props.items.map((i) => [i, i])} value={props.value} onChoose={props.onChange} />
+    </Field>
   );
 }
 
@@ -262,10 +212,7 @@ function Fields(props: { way: Way; onAdded: () => void }) {
   };
 
   const Price = (p: { id: string; label: string }) => (
-    <div class="dialog-field">
-      <label for={`m-${p.id}`}>{p.label}</label>
-      <input id={`m-${p.id}`} class="input" name={p.id} inputmode="decimal" placeholder="円" {...PLAIN} />
-    </div>
+    <Field label={p.label}><TextField id={`m-${p.id}`} name={p.id} inputmode="decimal" placeholder="円" /></Field>
   );
 
   return (
@@ -279,53 +226,32 @@ function Fields(props: { way: Way; onAdded: () => void }) {
         )}
       </Show>
       <Show when={!isCli}>
-        <div class="dialog-field">
-          <label for="m-url">URL</label>
+        <Field label="URL">
           <div class="model-url">
-            <input
-              id="m-url"
-              class="input mono"
-              type="url"
-              required
-              placeholder="https://…/v1"
-              value={url()}
-              onInput={(e) => {
+            <TextField class="mono" id="m-url" type="url" required placeholder="https://…/v1" value={url()} onInput={(e) => {
                 setUrl(e.currentTarget.value);
                 setOffered(undefined);
-              }}
-              {...PLAIN}
-            />
+              }} />
             <Show when={isLocal}>
-              <button type="button" class="btn" disabled={asking() || url().trim() === ""} onClick={() => void ask()}>
+              <Button disabled={asking() || url().trim() === ""} onClick={() => void ask()}>
                 {asking() ? "探している" : "モデルを探す"}
-              </button>
+              </Button>
             </Show>
           </div>
-        </div>
+        </Field>
       </Show>
       <Show when={keyed}>
-        <div class="dialog-field">
-          <label for="m-key">API キー</label>
-          <input id="m-key" class="input" name="api_key" type="password" {...PLAIN} autocomplete="new-password" />
-          <span class="sub optional">金庫にしまい、ゲートウェイが呼ぶときだけ付ける。</span>
-        </div>
+        <Field label="API キー" hint="金庫にしまい、ゲートウェイが呼ぶときだけ付ける。">
+          <TextField id="m-key" name="api_key" type="password" autocomplete="new-password" />
+          </Field>
       </Show>
-      <div class="dialog-field">
-        <label for="m-model">モデル名</label>
-        <input
-          id="m-model"
-          class="input mono"
-          required={w.kind !== ModelKind.JUDGE}
-          placeholder={isCli ? CLIS[cli()]!.hint : w.modelHint}
-          value={model()}
-          onInput={(e) => setModel(e.currentTarget.value)}
-          {...PLAIN}
-        />
-        <Show when={isCli && CLIS[cli()]!.note}>{(note) => <span class="sub optional">{note()}</span>}</Show>
+      <div class="field"><label class="field-label" for="m-model">モデル名</label>
+        <TextField class="mono" id="m-model" required={w.kind !== ModelKind.JUDGE} placeholder={isCli ? CLIS[cli()]!.hint : w.modelHint} value={model()} onInput={(e) => setModel(e.currentTarget.value)} />
+        <Show when={isCli && CLIS[cli()]!.note}>{(note) => <span class="sub">{note()}</span>}</Show>
         <Show when={offered()}>
           {(found) => (
             <div class="model-picks" role="group" aria-label="サーバーにあるモデル">
-              <For each={found()} fallback={<span class="sub optional">このサーバーにはモデルがない</span>}>
+              <For each={found()} fallback={<span class="sub">このサーバーにはモデルがない</span>}>
                 {(name) => (
                   <button
                     type="button"
@@ -353,25 +279,14 @@ function Fields(props: { way: Way; onAdded: () => void }) {
         </div>
       </Show>
       <Show when={isCli}>
-        <div class="dialog-field">
-          <label for="m-bin">
-            実行ファイル <span class="optional">（なくてもよい）</span>
-          </label>
-          <input id="m-bin" class="input mono" name="bin" placeholder={CLIS[cli()]!.bin} {...PLAIN} />
-        </div>
+        <Field label="実行ファイル（なくてもよい）">
+          <TextField class="mono" id="m-bin" name="bin" placeholder={CLIS[cli()]!.bin} />
+        </Field>
       </Show>
-      <div class="dialog-field">
-        <label for="m-name">
-          名前 <span class="optional">（なくてもよい）</span>
-        </label>
-        <input id="m-name" class="input" name="name" placeholder={model() || "モデル名になる"} {...PLAIN} />
-      </div>
-      <div class="dialog-actions">
-        <Dialog.CloseTrigger class="btn">やめる</Dialog.CloseTrigger>
-        <button class="btn primary" disabled={saving()}>
-          追加
-        </button>
-      </div>
+      <Field label="名前（なくてもよい）">
+        <TextField id="m-name" name="name" placeholder={model() || "モデル名になる"} />
+      </Field>
+      <DialogActions submit="追加" disabled={saving()} />
     </form>
   );
 }

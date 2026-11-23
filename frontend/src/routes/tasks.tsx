@@ -1,13 +1,11 @@
 import { shortTime } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
-import Icon from "~/components/Icon";
 import { DelegatedQueue, Delegation } from "~/components/records/Delegated";
 import RecordDetail from "~/components/records/RecordDetail";
 import RecordsPage, { type Group } from "~/components/records/RecordsPage";
 import { AddRoutine, RoutineRow, Runs } from "~/components/records/RoutineParts";
 import TaskRow from "~/components/records/TaskRow";
-import Segs from "~/components/Segs";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
@@ -16,6 +14,7 @@ import { cancelWake, wakesQuery } from "~/lib/routines";
 import { useOwner } from "~/lib/owner";
 import { useParam } from "~/lib/params";
 import { usePicked } from "~/lib/picked";
+import { Button, Icon, IconButton, Segmented } from "~/components/ui";
 
 const RANK: { [p: string]: number } = { high: 0, normal: 1, low: 2 };
 
@@ -28,7 +27,7 @@ function order(a: Rec, b: Rec): number {
 function Tabs(props: { tab: string }) {
   const navigate = useNavigate();
   return (
-    <Segs
+    <Segmented
       label="タスクの種類"
       items={[
         ["once", "一度きり"],
@@ -94,9 +93,7 @@ function Wakes() {
                   </Show>
                 </span>
                 <span class="rec-when">{shortTime(w.atUnix, owner.tz())}</span>
-                <button type="button" class="rec-edit" aria-label={`起床予約「${w.note}」を取り消す`} onClick={() => void cancelWake(w.id)}>
-                  <Icon svg={icons.trash} size={13} />
-                </button>
+                <IconButton plain icon={icons.trash} label={`起床予約「${w.note}」を取り消す`} onClick={() => void cancelWake(w.id)} />
               </div>
             )}
           </For>
@@ -162,10 +159,9 @@ export default function Tasks() {
           tools={
             <>
               <Tabs tab="routines" />
-              <button type="button" class="btn primary" onClick={() => setAdding(true)}>
-                <Icon svg={icons.plus} size={14} />
-                定期タスクを足す
-              </button>
+              <Button variant="primary" icon={icons.plus} onClick={() => setAdding(true)}>
+定期タスクを足す
+              </Button>
             </>
           }
           narrow={["Assignee"]}

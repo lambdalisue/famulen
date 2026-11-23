@@ -1,0 +1,43 @@
+.chat { width: var(--chat); flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.messages { flex: 1; overflow-y: auto; padding: var(--s4) 18px; display: flex; flex-direction: column; gap: 14px; }
+.msg { display: flex; flex-direction: column; gap: var(--s1); max-width: 88%; align-items: flex-start; }
+.msg .meta { font-size: var(--t-xs); color: var(--muted); }
+.msg .text { font-size: var(--t-md); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 14px; }
+.msg.owner { align-self: flex-end; align-items: flex-end; }
+.msg.owner .meta { text-align: right; }
+.msg.owner .text { background: var(--ink); color: var(--on-ink); border-radius: 14px 14px 4px 14px; }
+.msg.aide .text { background: var(--card); border: 1px solid var(--line); border-radius: 14px 14px 14px 4px; }
+#approvals { flex: none; max-height: 55%; overflow-y: auto; padding: 0 14px 8px; display: flex; flex-direction: column; gap: var(--s2); }
+#approvals:empty { display: none; }
+.approval { border: 1px solid var(--warn-line); background: var(--warn-soft); border-radius: var(--r-lg); padding: 12px 14px; display: flex; flex-direction: column; gap: var(--s2); font-size: var(--t-base); }
+.approval-title { color: var(--warn); }
+.approval pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--t-sm); max-height: 160px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: var(--s2); }
+.approval .said { white-space: pre-wrap; overflow-wrap: anywhere; }
+.questions, .question { display: flex; flex-direction: column; gap: var(--s2); align-items: flex-start; }
+.question { width: 100%; gap: 6px; }
+.question .input { width: 100%; }
+.question-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer { flex: none; margin: 0 14px 16px; background: var(--card); border: 1px solid var(--workgroup); border-radius: 14px; padding: 8px 8px 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.composer:focus-within { box-shadow: 0 0 0 1px var(--workgroup); }
+.composer .view { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--muted); min-width: 0; }
+.composer .view .dot { width: 6px; height: 6px; background: var(--accent-line); }
+.composer .view > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer .chip { align-self: flex-start; }
+.composer .chip > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.composer .line { display: flex; gap: var(--s2); align-items: flex-end; }
+.composer textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; font-size: var(--t-md); padding: var(--s2) 0; background: transparent; min-height: 40px; max-height: 160px; field-sizing: content; }
+.composer .send { background: var(--workgroup); border-color: var(--workgroup); }
+.composer:has(textarea:placeholder-shown) .send { background: var(--soft); border-color: var(--line); color: var(--muted); }
+
+/* How a definition changed. */
+.diff { display: flex; flex-direction: column; gap: 6px; }
+.diff-head { display: flex; gap: 10px; align-items: center; }
+.diff-count.add { color: var(--accent); }
+.diff-count.del { color: var(--danger); }
+.diff-body { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); font-size: var(--t-sm); line-height: 1.6; max-height: 360px; overflow: auto; padding: 4px 0; }
+.diff-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 4px; }
+.diff-line.add { background: var(--accent-soft); }
+.diff-line.del { background: var(--danger-soft); color: var(--danger); }
+.diff-mark { display: inline-block; width: 1.4em; color: var(--muted); user-select: none; }
+.diff-fold-trigger { width: 100%; border: 0; background: var(--soft); color: var(--muted); font-size: var(--t-xs); text-align: left; padding: 4px 8px; cursor: pointer; }
+.diff-fold-trigger[data-state=open] { display: none; }

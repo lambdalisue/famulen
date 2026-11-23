@@ -1,10 +1,10 @@
 import { A, createAsync, query } from "@solidjs/router";
 import { Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { api } from "~/lib/api";
 import { workgroup } from "~/lib/workgroup";
 import * as icons from "~/lib/icons";
 import { setView } from "~/lib/view";
+import { Icon, List } from "~/components/ui";
 
 const countsQuery = query(async (workgroup: string) => {
   const [parties, things, contracts, layers] = await Promise.all([
@@ -46,7 +46,7 @@ export default function More() {
   setView("ほか");
   const counts = createAsync(() => countsQuery(workgroup()));
   return (
-    <div class="list">
+    <List>
       <IndexRow href="/parties" icon={icons.users} name="相手" detail="人と会社・チーム・グループ" count={counts()?.parties} />
       <IndexRow href="/things" icon={icons.deviceLaptop} name="物" detail="機器 · 期限の近い順" count={counts()?.things} />
       <IndexRow
@@ -58,6 +58,6 @@ export default function More() {
       />
       <IndexRow href="/memory/menu" icon={icons.brain} name="記憶" detail={`夢 · 保留中の判断 ${counts()?.pending ?? ""}`} />
       <IndexRow href="/settings/menu" icon={icons.settings} name="設定" detail="ワークグループ · 秘書 · つながり" />
-    </div>
+    </List>
   );
 }

@@ -1,6 +1,6 @@
 import { dateTimeText } from "~/lib/dates";
 import { A, createAsync, useSearchParams } from "@solidjs/router";
-import { createEffect, For, Match, Show, Switch, untrack } from "solid-js";
+import { createEffect, For, Match, Show, Switch } from "solid-js";
 import Markdown from "~/components/Markdown";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -9,6 +9,7 @@ import { memoryFileQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { oneParam } from "~/lib/params";
 import { setView } from "~/lib/view";
+import { EmptyState, List, TextArea } from "~/components/ui";
 
 const MODES: [string, string][] = [
   ["read", "読む"],
@@ -24,17 +25,14 @@ function Writing(props: { path: string; text: string; onSave: (text: string) => 
       <label for="mem-edit" class="sr">
         {props.path} を書く
       </label>
-      <textarea
+      <TextArea
         id="mem-edit"
-        class="input mono"
+        class="mono"
         style={{ "min-height": "420px", "font-size": "13px", "line-height": 1.8 }}
         value={draft()}
         onInput={(e) => setDraft(e.currentTarget.value)}
         onChange={(e) => props.onSave(e.currentTarget.value)}
-      >
-        {/* Also the content: the server writes `value` as an attribute, which a textarea ignores, and hydration does not set it. */}
-        {untrack(draft)}
-      </textarea>
+      />
       <span class="sub">書き終えて離れると保存し、あなたが直したこととして経緯に残る</span>
     </div>
   );
@@ -57,7 +55,7 @@ export default function MemoryFile() {
   };
 
   return (
-    <Show when={path()} fallback={<p class="empty">ファイルを選んでいない</p>}>
+    <Show when={path()} fallback={<EmptyState>ファイルを選んでいない</EmptyState>}>
       <div class="row">
         <span class="mono sub">{path()}</span>
         <div class="seg" style={{ "margin-left": "auto" }}>
@@ -80,12 +78,12 @@ export default function MemoryFile() {
               <Writing path={path()} text={f().text} onSave={(text) => void save(text)} />
             </Match>
             <Match when={mode() === "history"}>
-              <div class="list">
-                <For each={f().history} fallback={<p class="empty">まだ経緯はない</p>}>
+              <List>
+                <For each={f().history} fallback={<EmptyState>まだ経緯はない</EmptyState>}>
                   {(c) => {
                     const mine = c.author === "Famulen";
                     return (
-                      <div class="item">
+                      <div role="listitem" class="item">
                         <span class="mono sub" style={{ width: "120px" }}>
                           {dateTimeText(c.at, tz())}
                         </span>
@@ -97,7 +95,7 @@ export default function MemoryFile() {
                     );
                   }}
                 </For>
-              </div>
+              </List>
             </Match>
           </Switch>
         )}

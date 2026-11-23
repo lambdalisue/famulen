@@ -1,7 +1,7 @@
 import { A, useLocation } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
+import { Icon } from "~/components/ui";
 
 /** Every settings page, by group: path, label and icon. */
 export const NAV: [string, [string, string, string][]][] = [

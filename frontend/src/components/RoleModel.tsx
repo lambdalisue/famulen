@@ -1,22 +1,11 @@
-import { NumberInput } from "@ark-ui/solid/number-input";
-import { Select, createListCollection } from "@ark-ui/solid/select";
 import { Slider } from "@ark-ui/solid/slider";
 import { createAsync } from "@solidjs/router";
-import { For, type JSX, Show, createEffect, createMemo, createSignal } from "solid-js";
-import { Portal } from "solid-js/web";
-import Icon from "~/components/Icon";
-import { type Model, ModelKind, type Role, type RoleSetting } from "~/gen/famulen/v1/settings_pb";
+import { For, type JSX, Show, createEffect, createSignal } from "solid-js";
+import { type Model as RegisteredModel, ModelKind, type Role, type RoleSetting } from "~/gen/famulen/v1/settings_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { createDraft } from "~/lib/draft";
-import { chevronDown, check } from "~/lib/icons";
 import { modelsQuery, yen } from "~/lib/models";
-
-const NONE = "none";
-
-type Choice = { label: string; value: string };
-
-const capText = (cap: number) => (cap > 0 ? String(cap) : "");
+import { Button, Field, NumberField, Section, Select } from "~/components/ui";
 
 /** The stops of 考える深さ, as `claude --effort` names them, shallow to deep. */
 const EFFORTS = [
@@ -37,7 +26,7 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
   createEffect(() => setShown(stop()));
   const current = () => EFFORTS[shown()];
   return (
-    <div class="role-field effort">
+    <div class="field effort">
       <Slider.Root
         class="effort-slider"
         data-default={shown() < 0 ? "" : undefined}
@@ -56,14 +45,9 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
           <Slider.Label>考える深さ</Slider.Label>
           <span class="effort-value">{current()?.label ?? "モデルの既定"}</span>
           <Show when={props.effort !== props.fallback}>
-            <button
-              type="button"
-              class="btn ghost small effort-reset"
-              title={`このエージェントの既定は「${EFFORTS.find((e) => e.value === props.fallback)?.label ?? "モデルの既定"}」`}
-              onClick={() => props.onChange(props.fallback)}
-            >
+            <Button variant="ghost" small class="effort-reset" title={`このエージェントの既定は「${EFFORTS.find((e) => e.value === props.fallback)?.label ?? "モデルの既定"}」`} onClick={() => props.onChange(props.fallback)}>
               既定に戻す
-            </button>
+            </Button>
           </Show>
         </div>
         <Slider.Control class="effort-control">
@@ -95,94 +79,56 @@ function Effort(props: { effort: string; fallback: string; onChange: (effort: st
   );
 }
 
-function Section(props: { setting: RoleSetting; models: Model[]; cap: string; children?: JSX.Element }) {
+function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: string; children?: JSX.Element }) {
   const r = () => props.setting;
-  const collection = createMemo(() =>
-    createListCollection<Choice>({
-      items: [
-        { label: "使わない", value: NONE },
-        ...props.models.filter((m) => r().choices.includes(m.id)).map((m) => ({ label: m.name, value: m.id })),
-      ],
-    }),
-  );
+  const choices = () => props.models.filter((m) => r().choices.includes(m.id));
   const assign = (model: string, cap: number, effort = r().effort) =>
     act(() => api.models.assignRole({ role: r().role, model, cap, effort }));
   const kind = () => props.models.find((m) => m.id === r().model)?.kind;
 
-  const [cap, setCap] = createDraft(() => capText(r().cap));
-
   return (
-    <section class="pref">
-      <div class="pref-head">
-        <h2>モデル</h2>
-        <p class="sub">考えるのに使うモデルと、その使い方。</p>
-      </div>
+    <Section title="モデル" note="考えるのに使うモデルと、その使い方。">
       <div class="role-model">
-        <Select.Root
-          class="role-field"
-          collection={collection()}
-          value={[r().model || NONE]}
-          onValueChange={(d) => {
-            const v = d.value[0] ?? NONE;
-            const model = v === NONE ? "" : v;
-            if (model !== r().model) void assign(model, r().cap);
-          }}
-          positioning={{ sameWidth: true }}
-        >
-          <Select.Label>使うモデル</Select.Label>
-          <Select.Control>
-            <Select.Trigger class="role-select-trigger">
-              <Select.ValueText placeholder="使わない" />
-              <Icon svg={chevronDown} size={14} />
-            </Select.Trigger>
-          </Select.Control>
-          <Portal>
-            <Select.Positioner>
-              <Select.Content class="menu-list">
-                <For each={collection().items}>
-                  {(item) => (
-                    <Select.Item item={item} class="menu-item">
-                      <Select.ItemText>{item.label}</Select.ItemText>
-                      <Select.ItemIndicator>
-                        <Icon svg={check} size={14} />
-                      </Select.ItemIndicator>
-                    </Select.Item>
-                  )}
-                </For>
-              </Select.Content>
-            </Select.Positioner>
-          </Portal>
-          <Select.HiddenSelect />
-        </Select.Root>
+        <Field label="使うモデル">
+          <Select
+            class="fit"
+            onChange={(e) => {
+              const model = e.currentTarget.value;
+              if (model !== r().model) void assign(model, r().cap);
+            }}
+          >
+            <option value="" selected={!r().model}>
+              使わない
+            </option>
+            <For each={choices()}>
+              {(m) => (
+                <option value={m.id} selected={m.id === r().model}>
+                  {m.name}
+                </option>
+              )}
+            </For>
+          </Select>
+        </Field>
         <Show when={kind() === ModelKind.AGENT_CLI}>
           <Effort effort={r().effort} fallback={r().defaultEffort} onChange={(effort) => void assign(r().model, r().cap, effort)} />
         </Show>
-        <NumberInput.Root
-          class="role-field"
+        <NumberField
+          label="一日の上限"
           min={0}
-          value={cap()}
-          onValueChange={(d) => setCap(d.value)}
-          onValueCommit={(d) => {
-            const next = Number.isFinite(d.valueAsNumber) && d.valueAsNumber > 0 ? d.valueAsNumber : 0;
-            if (next !== r().cap) void assign(r().model, next);
-          }}
-        >
-          <NumberInput.Label>一日の上限</NumberInput.Label>
-          <div class="role-cap">
-            <NumberInput.Control>
-              <NumberInput.Input class="input" placeholder="なし" />
-            </NumberInput.Control>
-            <span class="sub">{r().capUnit}</span>
-            <span class="sub role-today">
-              今日 {r().yenToday > 0 ? `${yen(r().yenToday)} · ` : ""}
-              {String(r().callsToday)} 回
-            </span>
-          </div>
-          <span class="sub">{props.cap}</span>
-        </NumberInput.Root>
+          none="なし"
+          value={r().cap}
+          unit={
+            <>
+              {r().capUnit}（今日 {r().yenToday > 0 ? `${yen(r().yenToday)} · ` : ""}
+              {String(r().callsToday)} 回）
+            </>
+          }
+          hint={props.cap}
+          onSave={(cap) => void assign(r().model, cap)}
+        />
       </div>
       {props.children}
-    </section>
+    </Section>
   );
 }
 
@@ -196,9 +142,9 @@ export default function RoleModel(props: { role: Role; cap: string; children?: J
   return (
     <Show when={setting()}>
       {(s) => (
-        <Section setting={s()} models={models()?.models ?? []} cap={props.cap}>
+        <Model setting={s()} models={models()?.models ?? []} cap={props.cap}>
           {props.children}
-        </Section>
+        </Model>
       )}
     </Show>
   );

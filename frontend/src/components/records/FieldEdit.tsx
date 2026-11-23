@@ -1,13 +1,12 @@
 import { dateText } from "~/lib/dates";
-import { Switch } from "@ark-ui/solid/switch";
 import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { choiceOf, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
 import RecordChip from "./links/RecordChip";
 import { useOwner } from "~/lib/owner";
 import RecordPicker from "./RecordPicker";
+import { Icon, Select, Switch, Tag, TextField } from "~/components/ui";
 
 export type Typed = { value: string; values: string[] };
 
@@ -37,7 +36,7 @@ export function FieldView(props: { type: FieldType; field: Field | undefined; ai
         <span class="chips-line">
           <For each={props.field?.values ?? []}>
             {(v) => (
-              <Show when={linkOf(v)} fallback={<span class="tag">{v}</span>}>
+              <Show when={linkOf(v)} fallback={<Tag>{v}</Tag>}>
                 <RecordChip text={v} />
               </Show>
             )}
@@ -72,20 +71,12 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) =
           </span>
         )}
       </For>
-      <input
-        class="input"
-        aria-label={`${props.label}に足す`}
-        placeholder="足す"
-        value={text()}
-        onInput={(e) => setText(e.currentTarget.value)}
-        onKeyDown={(e) => {
+      <TextField aria-label={`${props.label}に足す`} placeholder="足す" value={text()} onInput={(e) => setText(e.currentTarget.value)} onKeyDown={(e) => {
           if (e.key === "Enter" && !e.isComposing) {
             e.preventDefault();
             add();
           }
-        }}
-        onBlur={add}
-      />
+        }} onBlur={add} />
     </span>
   );
 }
@@ -123,8 +114,8 @@ function TimeEdit(props: { label: string; value: string; onSave: (v: Typed) => v
   const save = (d: string, t: string) => props.onSave(one(d ? (t ? `${d} ${t}` : d) : ""));
   return (
     <span class="row">
-      <input class="input" type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
-      <input class="input" type="time" aria-label={`${props.label}の時刻`} value={time()} disabled={!day()} onChange={(e) => save(day(), e.currentTarget.value)} />
+      <TextField type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
+      <TextField type="time" aria-label={`${props.label}の時刻`} value={time()} disabled={!day()} onChange={(e) => save(day(), e.currentTarget.value)} />
     </span>
   );
 }
@@ -135,10 +126,10 @@ function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => 
   const save = (a: string, c: string) => props.onSave(one(a.trim() ? `${a.trim()} ${c}` : ""));
   return (
     <span class="row">
-      <input class="input" inputmode="decimal" aria-label={`${props.label}の額`} value={amount()} onChange={(e) => save(e.currentTarget.value, currency())} />
-      <select class="input" aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
+      <TextField inputmode="decimal" aria-label={`${props.label}の額`} value={amount()} onChange={(e) => save(e.currentTarget.value, currency())} />
+      <Select aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
         <For each={[...new Set(["JPY", "USD", "EUR", "GBP", currency()])]}>{(c) => <option value={c}>{c}</option>}</For>
-      </select>
+      </Select>
     </span>
   );
 }
@@ -156,49 +147,33 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
   return (
     <Cases
       fallback={
-        <input
-          ref={box}
-          class="input grow"
-          aria-label={props.label}
-          type={t() === "number" ? "number" : t() === "date" ? "date" : "text"}
-          value={t() === "url" ? value().replace(/^<|>$/g, "") : value()}
-          onChange={(e) => {
+        <TextField class="grow" ref={box} aria-label={props.label} type={t() === "number" ? "number" : t() === "date" ? "date" : "text"} value={t() === "url" ? value().replace(/^<|>$/g, "") : value()} onChange={(e) => {
             const v = e.currentTarget.value.trim();
             if (v !== value()) props.onSave(one(v));
-          }}
-        />
+          }} />
       }
     >
       <Match when={t() === "choice"}>
-        <select class="input" aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
+        <Select aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
           <option value="">—</option>
           <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, owner.aide())}</option>}</For>
-        </select>
+        </Select>
       </Match>
       <Match when={t() === "flag"}>
-        <Switch.Root checked={value() === "yes"} onCheckedChange={(d) => props.onSave(one(d.checked ? "yes" : "no"))}>
-          <Switch.Control class="switch">
-            <Switch.Thumb class="switch-thumb" />
-          </Switch.Control>
-          <Switch.Label class="sr">{props.label}</Switch.Label>
-          <Switch.HiddenInput />
-        </Switch.Root>
+        <Switch hidden checked={value() === "yes"} onChange={(on) => props.onSave(one(on ? "yes" : "no"))}>
+          {props.label}
+        </Switch>
       </Match>
       <Match when={props.type.name === "Assignee"}>
         <span class="row">
-          <select
-            class="input"
-            aria-label={props.label}
-            value={linkOf(value()) ? "other" : value() || OWNER}
-            onChange={(e) => {
+          <Select aria-label={props.label} value={linkOf(value()) ? "other" : value() || OWNER} onChange={(e) => {
               if (e.currentTarget.value !== "other") props.onSave(one(e.currentTarget.value));
-            }}
-          >
+            }}>
             <option value={OWNER}>あなた</option>
             <option value={SECRETARY}>{owner.aide()}</option>
             <option value={WORKER}>{choiceOf(WORKER)}</option>
             <Show when={linkOf(value())}>{(l) => <option value="other">{l().title}</option>}</Show>
-          </select>
+          </Select>
           <RecordPicker label="相手に任せる" kinds={["parties"]} onPick={(r) => props.onSave(one(linkTo(r)))} />
         </span>
       </Match>

@@ -1,7 +1,6 @@
 import { shortTime } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { type LookoutDecision, LookoutOutcome } from "~/gen/famulen/v1/lookout_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -9,6 +8,7 @@ import * as icons from "~/lib/icons";
 import { setSelection } from "~/lib/view";
 import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
+import { EmptyState, IconButton, List, PickName, Tag } from "~/components/ui";
 
 const lookoutLogQuery = query(async (before: number) => {
   const page = await api.log.listLookoutLog({ before: BigInt(before), limit: PAGE });
@@ -29,16 +29,16 @@ export default function LookoutLog() {
       <p class="sub">
         見張りが読んだものと、それぞれを関わりがないとしたか・朝のまとめに入れたか・秘書へ渡したか、そのわけ。判断が違えば、親指で教える。教えたことは記憶に入り、夢のあとの判断から効く。
       </p>
-        <div class="list">
+        <List>
           <For each={pages.rows()}>
             {(d) => (
-              <div class="item" onClick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)}>
-                <span class="mono sub" style={{ width: "90px" }}>
+              <div class="item" role="listitem">
+                <span class="mono sub when">
                   {shortTime(d.at, owner.tz())}
                 </span>
-                <span class={`tag${d.passedOn ? " aide" : ""}`}>{d.outcome}</span>
+                <Tag tone={d.passedOn ? "aide" : undefined}>{d.outcome}</Tag>
                 <div class="grow">
-                  <div style={{ "font-size": "13px" }}>{d.title}</div>
+                  <PickName text={d.title} onPick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)} />
                   <Show when={d.reason}>
                     <div class="sub">{d.reason}</div>
                   </Show>
@@ -50,33 +50,19 @@ export default function LookoutLog() {
                   <Show
                     when={passedOn(d)}
                     fallback={
-                      <button
-                        type="button"
-                        class="btn small"
-                        aria-label="拾ってほしかった"
-                        onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: true }), "覚えた")}
-                      >
-                        <Icon svg={icons.thumbUp} size={12} />
-                      </button>
+                      <IconButton icon={icons.thumbUp} label="拾ってほしかった" onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: true }), "覚えた")} />
                     }
                   >
-                    <button
-                      type="button"
-                      class="btn small"
-                      aria-label="要らなかった"
-                      onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: false }), "覚えた")}
-                    >
-                      <Icon svg={icons.thumbDown} size={12} />
-                    </button>
+                    <IconButton icon={icons.thumbDown} label="要らなかった" onClick={() => act(() => api.lookout.giveFeedback({ id: d.id, wanted: false }), "覚えた")} />
                   </Show>
                 </Show>
               </div>
             )}
           </For>
           <Show when={pages.loaded() && pages.rows().length === 0}>
-            <p class="empty">まだない</p>
+            <EmptyState>まだない</EmptyState>
           </Show>
-        </div>
+        </List>
         <PageNav pages={pages} />
     </>
   );

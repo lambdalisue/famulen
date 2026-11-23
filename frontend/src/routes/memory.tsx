@@ -2,7 +2,6 @@ import { A, createAsync, useLocation, useSearchParams } from "@solidjs/router";
 import { For, type JSX } from "solid-js";
 import { layerHref, layerOfFile, layersQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
-import "./memory.css";
 
 /** The memory pages share one frame: the layers beside the chosen page. */
 export default function Memory(props: { children?: JSX.Element }) {

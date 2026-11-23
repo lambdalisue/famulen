@@ -4,6 +4,7 @@ import { For, Show } from "solid-js";
 import { api } from "~/lib/api";
 import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
+import { EmptyState, List, Tag } from "~/components/ui";
 
 const triageLogQuery = query(async (before: number) => {
   const page = await api.log.listTriageLog({ before: BigInt(before), limit: PAGE });
@@ -17,16 +18,16 @@ export default function TriageLog() {
   return (
     <>
       <p class="sub">注視しているチャンネルの発言ごとに、秘書宛てと見て秘書に渡したか、見送ったか。発言は最初の行だけが残る。</p>
-      <div class="list">
+      <List>
         <For each={pages.rows()}>
           {(d) => (
-            <div class="item triage-log-entry">
-              <span class="mono sub" style={{ width: "90px" }}>
+            <div role="listitem" class="item triage-log-entry">
+              <span class="mono sub when">
                 {shortTime(d.at, owner.tz())}
               </span>
-              <span class={`tag${d.addressed ? " aide" : ""}`}>{d.addressed ? "秘書へ" : "見送った"}</span>
+              <Tag tone={d.addressed ? "aide" : undefined}>{d.addressed ? "秘書へ" : "見送った"}</Tag>
               <div class="grow">
-                <div style={{ "font-size": "13px", "overflow-wrap": "anywhere" }}>{d.title}</div>
+                <div>{d.title}</div>
                 <div class="sub">
                   {d.source} · {d.reason}
                 </div>
@@ -35,9 +36,9 @@ export default function TriageLog() {
           )}
         </For>
         <Show when={pages.loaded() && pages.rows().length === 0}>
-          <p class="empty">まだない</p>
+          <EmptyState>まだない</EmptyState>
         </Show>
-      </div>
+      </List>
       <PageNav pages={pages} />
     </>
   );

@@ -2,7 +2,6 @@ import { shortTime } from "~/lib/dates";
 import { A, createAsync, revalidate } from "@solidjs/router";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Questions from "~/components/Questions";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, For, on, onMount, Show } from "solid-js";
 import { ApprovalAnswer, type ConsoleMessage, Speaker } from "~/gen/famulen/v1/console_pb";
@@ -15,6 +14,7 @@ import { pushed } from "~/lib/events";
 import { tabNamed } from "~/lib/tabs";
 import { useOwner } from "~/lib/owner";
 import { selection, setSelection, view } from "~/lib/view";
+import { Button, EmptyState, Icon, IconButton, LinkButton, Tag } from "~/components/ui";
 
 /** How the gateway names a held change to a service definition. */
 const CHANGE_DEFINITION = "definitions.change_definition";
@@ -57,10 +57,9 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
       <div class="text">{props.m.text}</div>
       <Show when={open()}>
         {(tab) => (
-          <A class="btn small" href={tab().path}>
-            <Icon svg={tab().icon} size={14} />
-            {tab().label}で見る
-          </A>
+          <LinkButton small icon={tab().icon} href={tab().path}>
+{tab().label}で見る
+          </LinkButton>
         )}
       </Show>
     </div>
@@ -91,12 +90,12 @@ function Inbox(props: { aide: string }) {
               が止まったとき、外への呼び出しがまだ終わっていなかった。もう一度やると、送信などが二重になるかもしれない。済んでいたかを確かめてから選ぶ。
             </p>
             <div class="row">
-              <button type="button" class="btn go small" onClick={() => held(h.id, true)}>
+              <Button variant="go" small onClick={() => held(h.id, true)}>
                 続ける
-              </button>
-              <button type="button" class="btn small" onClick={() => held(h.id, false)}>
+              </Button>
+              <Button small onClick={() => held(h.id, false)}>
                 やめる
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -123,17 +122,17 @@ function Inbox(props: { aide: string }) {
                 </Show>
                 <div class="row">
                   <Show when={r.questions.length === 0}>
-                    <button type="button" class="btn go small" onClick={() => approve(r.id, ApprovalAnswer.ALLOW)}>
+                    <Button variant="go" small onClick={() => approve(r.id, ApprovalAnswer.ALLOW)}>
                       承認
-                    </button>
+                    </Button>
                   </Show>
-                  <button type="button" class="btn small" onClick={() => approve(r.id, ApprovalAnswer.DENY)}>
+                  <Button small onClick={() => approve(r.id, ApprovalAnswer.DENY)}>
                     {r.questions.length === 0 ? "却下" : "ここでは答えない"}
-                  </button>
+                  </Button>
                   <Show when={!r.once}>
-                    <button type="button" class="btn small" onClick={() => approve(r.id, ApprovalAnswer.ALWAYS)}>
+                    <Button small onClick={() => approve(r.id, ApprovalAnswer.ALWAYS)}>
                       今後は常に許可
-                    </button>
+                    </Button>
                   </Show>
                 </div>
               </div>
@@ -155,12 +154,12 @@ function Inbox(props: { aide: string }) {
                   許すと定義に書き込み、つないでいるサービスの道具がこのとおりになる。足された書き込みの道具は、確かめてから使う。
                 </p>
                 <div class="row">
-                  <button type="button" class="btn go small" onClick={() => approve(r.id, ApprovalAnswer.ALLOW)}>
+                  <Button variant="go" small onClick={() => approve(r.id, ApprovalAnswer.ALLOW)}>
                     許す
-                  </button>
-                  <button type="button" class="btn small" onClick={() => approve(r.id, ApprovalAnswer.DENY)}>
+                  </Button>
+                  <Button small onClick={() => approve(r.id, ApprovalAnswer.DENY)}>
                     断る
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -235,18 +234,14 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
         <div class="sheet-grip" />
         <div class="row">
           <b class="grow">{aide()}との会話</b>
-          <button type="button" class="btn small ghost" aria-label="広げる" onClick={() => props.sheet("full")}>
-            <Icon svg={icons.arrowUp} size={16} />
-          </button>
-          <button type="button" class="btn small ghost" aria-label="閉じる" onClick={() => props.sheet("")}>
-            <Icon svg={icons.chevronDown} size={18} />
-          </button>
+          <IconButton icon={icons.arrowUp} label="広げる" variant="ghost" onClick={() => props.sheet("full")} />
+          <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.sheet("")} />
         </div>
         <span class="sub">Slack とコンソールを一つの並びで</span>
       </div>
       <div id="messages" class="messages" ref={list}>
         <Show when={messages().length === 0}>
-          <p class="empty">{aide()} に頼みごとを書いてください。右の画面で見ているものも一緒に渡ります。</p>
+          <EmptyState>{aide()} に頼みごとを書いてください。右の画面で見ているものも一緒に渡ります。</EmptyState>
         </Show>
         <For each={messages()}>{(m) => <Message m={m} aide={aide()} tz={tz()} />}</For>
       </div>
@@ -260,7 +255,7 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
           </span>
           <span class="grow peek-text">{last()?.text.split("\n")[0] ?? "まだ話していない"}</span>
           <Show when={waiting.count() > 0}>
-            <span class="tag warn">確認 {waiting.count()}</span>
+            <Tag tone="warn">確認 {waiting.count()}</Tag>
           </Show>
         </span>
       </button>
@@ -297,16 +292,11 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
             }}
           />
-          <button
-            type="submit"
-            class="btn primary send"
-            // Taking focus from the box would end the narrow layout's typing
-            // state and move the button out from under the tap before it lands.
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <Icon svg={icons.send} size={16} />
-            送る
-          </button>
+          <Button variant="primary" icon={icons.send} class="send" type="submit" // Taking focus from the box would end the narrow layout's typing
+ // state and move the button out from under the tap before it lands.
+ onMouseDown={(e) => e.preventDefault()}>
+送る
+          </Button>
         </div>
         <Show when={error()}>
           <span class="error">{error()}</span>

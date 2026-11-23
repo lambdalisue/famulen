@@ -3,7 +3,6 @@ import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { RecordLink } from "~/gen/famulen/v1/records_pb";
 import { draw, notebookHref } from "~/lib/markdown";
-import "./Markdown.css";
 
 /**
  * Markdown drawn as Arto draws it; until that is ready, the text itself.

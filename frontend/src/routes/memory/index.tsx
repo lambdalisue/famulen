@@ -1,7 +1,6 @@
 import { dateTimeText } from "~/lib/dates";
 import { A, createAsync, useSearchParams } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
 import DreamNow from "~/components/DreamNow";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
@@ -9,6 +8,7 @@ import * as icons from "~/lib/icons";
 import { dreamSettingsQuery, dreamsQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
+import { EmptyState, LinkButton, Tag } from "~/components/ui";
 
 const OPS: [string, string][] = [
   ["足した", "#2a78d6"],
@@ -80,7 +80,7 @@ export default function Dreams() {
             </For>
           </div>
         </div>
-        <Show when={nights().length > 0} fallback={<p class="empty">まだ夢を見ていない</p>}>
+        <Show when={nights().length > 0} fallback={<EmptyState>まだ夢を見ていない</EmptyState>}>
           <div class="row" style={{ "flex-wrap": "nowrap", "align-items": "stretch" }}>
             <div
               style={{
@@ -141,18 +141,14 @@ export default function Dreams() {
           <section class="card" style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
             <div class="row">
               <Show when={index() > 0}>
-                <A class="btn small" href={href(nights()[index() - 1])} aria-label="前の夢">
-                  <Icon svg={icons.chevronLeft} size={14} />
-                </A>
+                <LinkButton small icon={icons.chevronLeft} label="前の夢" href={href(nights()[index() - 1])} />
               </Show>
               <h2>
                 {index() + 1 === nights().length ? "最後の夢 · " : ""}
                 {dateTimeText(n().at, tz())}
               </h2>
               <Show when={index() + 1 < nights().length}>
-                <A class="btn small" href={href(nights()[index() + 1])} aria-label="次の夢">
-                  <Icon svg={icons.chevronRight} size={14} />
-                </A>
+                <LinkButton small icon={icons.chevronRight} label="次の夢" href={href(nights()[index() + 1])} />
               </Show>
               <span class="sub">{n().status}</span>
               <Show when={n().commit}>
@@ -187,10 +183,10 @@ export default function Dreams() {
               </For>
             </div>
             <div class="list" style={{ border: 0, padding: 0 }}>
-              <For each={n().changes} fallback={<p class="empty">変更はなかった</p>}>
+              <For each={n().changes} fallback={<EmptyState>変更はなかった</EmptyState>}>
                 {(c) => (
-                  <div class="item" style={{ "align-items": "flex-start" }}>
-                    <span class="tag">{OP_LABELS[c.op] ?? c.op}</span>
+                  <div role="listitem" class="item" style={{ "align-items": "flex-start" }}>
+                    <Tag>{OP_LABELS[c.op] ?? c.op}</Tag>
                     <div class="grow">
                       <div style={{ "font-size": "13px" }}><Markdown inline text={c.text} /></div>
                       <div class="sub">

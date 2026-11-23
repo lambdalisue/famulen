@@ -1,12 +1,12 @@
 import { A, createAsync } from "@solidjs/router";
 import { createSignal, For, onMount, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import { ChannelSwitch, MainWorkspace } from "~/components/ServiceSections";
 import { ConnectionState } from "~/gen/famulen/v1/services_pb";
 import { channelsQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
-import { setSelection, setView } from "~/lib/view";
+import { List, ListRow, PageHeader, Tag } from "~/components/ui";
+import { setView } from "~/lib/view";
 
 /**
  * Every place the owner can talk with the secretary: this console, and what
@@ -23,44 +23,35 @@ export default function Channels() {
 
   return (
     <>
-      <h1>チャネル</h1>
-      <p class="sub">
+      <PageHeader title="チャネル" note={<>
         {owner.aide()} と話せるところ。このブラウザはいつでも使える。Slack などは
         <A href="/settings/services">サービス</A>
         で足すとここに並び、切るとそこからの話しかけを受けなくなる。切っても、サービスのつながりは残る。
-      </p>
-      <div class="list">
-        <div class="item">
-          <Icon svg={icons.deviceLaptop} size={18} />
-          <span class="grow">
-            <b>このブラウザ</b>
-            <br />
-            <span class="sub">コンソール{origin() ? ` · ${origin()}` : ""}</span>
-          </span>
-          <span class="tag confirmed">使える</span>
-        </div>
+      </>} />
+      <List>
+        <ListRow icon={icons.deviceLaptop} title="このブラウザ" sub={`コンソール${origin() ? ` · ${origin()}` : ""}`} end={<Tag tone="ok">使える</Tag>} />
         <For each={channels() ?? []}>
           {(c) => (
-            <div class="item" onClick={() => setSelection(`${c.service} のチャネル ${c.name}`)}>
-              <Icon svg={c.definition === "slack" ? icons.brandSlack : icons.devices} size={18} />
-              <A
-                class="grow"
-                href={`/settings/services?id=${encodeURIComponent(c.connection)}`}
-                style={{ color: "inherit", "text-decoration": "none" }}
-              >
-                <b>{c.name}</b>
-                <br />
-                <span class="sub">{c.service}</span>
-              </A>
-              <span class={`tag${c.state === ConnectionState.CONNECTED ? " confirmed" : " warn"}`}>{c.status}</span>
-              <MainWorkspace connection={c.connection} />
-              <ChannelSwitch channel={c}>
-                <span class="sub">{c.enabled ? "受ける" : "受けない"}</span>
-              </ChannelSwitch>
-            </div>
+            <ListRow
+              icon={c.definition === "slack" ? icons.brandSlack : icons.devices}
+              href={`/settings/services?id=${encodeURIComponent(c.connection)}`}
+              title={c.name}
+              sub={c.service}
+              end={
+                <>
+                  <Tag tone={c.state === ConnectionState.CONNECTED ? "ok" : "warn"} title={c.status}>
+                    {c.status}
+                  </Tag>
+                  <MainWorkspace connection={c.connection} />
+                  <ChannelSwitch channel={c}>
+                    <span class="sub">{c.enabled ? "受ける" : "受けない"}</span>
+                  </ChannelSwitch>
+                </>
+              }
+            />
           )}
         </For>
-      </div>
+      </List>
       <Show when={channels() && channels()?.length === 0}>
         <p class="sub">
           Slack のワークスペースや眼鏡などは、<A href="/settings/services">サービス</A>で足すとここに並ぶ。

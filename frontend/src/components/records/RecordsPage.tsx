@@ -1,8 +1,5 @@
 import { A, createAsync, useNavigate } from "@solidjs/router";
 import { createMemo, createEffect, createSignal, For, type JSX, on, onMount, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
-import Segs from "~/components/Segs";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
@@ -12,7 +9,7 @@ import { keep, kept } from "~/lib/storage";
 import { workgroup } from "~/lib/workgroup";
 import type { Typed } from "./FieldEdit";
 import FieldEdit from "./FieldEdit";
-import "./records.css";
+import { Button, Dialog, DialogActions, EmptyState, Field, Icon, IconButton, LinkButton, Loading, SearchBox, Segmented, Select, Tag, TextField } from "~/components/ui";
 
 export type Group = { name: string; records: Rec[]; folded?: boolean };
 
@@ -45,35 +42,26 @@ function AddRecord(props: { kind: string; label: string; titleLabel: string; fie
     navigate(withParams(props.base, { id: made.id }));
   };
   return (
-    <Modal open={props.open} onOpenChange={props.onOpenChange} title={props.label}>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.label}>
       <form class="dialog-form" onSubmit={add}>
-        <label class="dialog-field">
-          <span>{props.titleLabel}</span>
-          <input class="input" name="title" required autofocus />
-        </label>
+        <Field label={props.titleLabel}>
+          <TextField name="title" required autofocus />
+        </Field>
         <For each={types()}>
           {(t) => (
-            <div class="dialog-field">
-              <span>{nameOf(t.name)}</span>
+            <Field label={nameOf(t.name)} group>
               <FieldEdit
                 type={t}
                 label={nameOf(t.name)}
                 field={given()[t.name] ? ({ name: t.name, ...given()[t.name] } as never) : undefined}
                 onSave={(v) => setGiven({ ...given(), [t.name]: v })}
               />
-            </div>
+            </Field>
           )}
         </For>
-        <div class="dialog-actions">
-          <button type="button" class="btn" onClick={() => props.onOpenChange(false)}>
-            やめる
-          </button>
-          <button type="submit" class="btn primary">
-            足す
-          </button>
-        </div>
+        <DialogActions submit="足す" />
       </form>
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -152,15 +140,11 @@ export default function RecordsPage(props: {
     <Show
       when={p.to}
       fallback={
-        <button type="button" class="btn small" disabled aria-label={p.label}>
-          <Icon svg={p.icon} size={14} />
-        </button>
+        <IconButton icon={p.icon} label={p.label} disabled />
       }
     >
       {(r) => (
-        <A class="btn small" href={hrefTo(r())} aria-label={p.label} title={r().title}>
-          <Icon svg={p.icon} size={14} />
-        </A>
+        <LinkButton small icon={p.icon} label={p.label} href={hrefTo(r())} title={r().title} />
       )}
     </Show>
   );
@@ -187,9 +171,9 @@ export default function RecordsPage(props: {
     >
       {look() === "card" ? (props.card ?? props.row)(r) : props.row(r)}
       <Show when={r.obsolete}>
-        <span class="tag warn" title={r.obsoleteReason}>
+        <Tag tone="warn" title={r.obsoleteReason}>
           古いかも
-        </span>
+        </Tag>
       </Show>
     </div>
   );
@@ -204,7 +188,7 @@ export default function RecordsPage(props: {
           {props.tools}
           <Show when={props.card}>
             <span class="records-look">
-              <Segs
+              <Segmented
                 label="並べ方"
                 items={[
                   ["list", "リスト"],
@@ -217,29 +201,20 @@ export default function RecordsPage(props: {
           </Show>
           <Show when={props.add}>
             {(a) => (
-              <button type="button" class="btn primary d-only" onClick={() => setAdding(true)}>
-                <Icon svg={icons.plus} size={14} />
-                {a().label}
-              </button>
+              <Button variant="primary" icon={icons.plus} class="d-only" onClick={() => setAdding(true)}>
+{a().label}
+              </Button>
             )}
           </Show>
         </header>
         <div class="records-filter">
-          <label class="service-search grow">
-            <Icon svg={icons.search} size={15} />
-            <input class="input" type="search" aria-label={`${props.title}を探す`} placeholder="探す" value={words()} onInput={(e) => setWords(e.currentTarget.value)} />
-          </label>
+          <SearchBox label={`${props.title}を探す`} class="grow" placeholder="探す" value={words()} onInput={(e) => setWords(e.currentTarget.value)} />
           <For each={props.narrow}>
             {(field) => (
-              <select
-                class="input"
-                aria-label={`${nameOf(field)}で絞る`}
-                value={chosen()[field] ?? ""}
-                onChange={(e) => setChosen({ ...chosen(), [field]: e.currentTarget.value })}
-              >
+              <Select aria-label={`${nameOf(field)}で絞る`} value={chosen()[field] ?? ""} onChange={(e) => setChosen({ ...chosen(), [field]: e.currentTarget.value })}>
                 <option value="">{nameOf(field)}：すべて</option>
                 <For each={choices(field)}>{(c) => <option value={c}>{choiceOf(c)}</option>}</For>
-              </select>
+              </Select>
             )}
           </For>
           <Show when={props.over}>
@@ -271,8 +246,8 @@ export default function RecordsPage(props: {
             </For>
           </div>
         </Show>
-        <Show when={all()} fallback={<p class="empty">読み込んでいる</p>}>
-          <Show when={found().length > 0} fallback={<p class="empty">{(all() ?? []).length === 0 ? props.empty : "当てはまるものがない"}</p>}>
+        <Show when={all()} fallback={<Loading />}>
+          <Show when={found().length > 0} fallback={<EmptyState>{(all() ?? []).length === 0 ? props.empty : "当てはまるものがない"}</EmptyState>}>
             <For each={groups().filter((g) => g.records.length > 0)}>
               {(g) => {
                 const body = () => <div class={look() === "card" ? "rec-cards" : "rec-rows"}><For each={g.records}>{one}</For></div>;
@@ -300,10 +275,9 @@ export default function RecordsPage(props: {
         {(picked) => (
           <div class="records-detail">
             <nav class="records-nav d-only" aria-label="一覧との行き来">
-              <A class="btn small" href={props.base}>
-                <Icon svg={icons.chevronLeft} size={14} />
-                {props.title}の一覧
-              </A>
+              <LinkButton small icon={icons.chevronLeft} href={props.base}>
+{props.title}の一覧
+              </LinkButton>
               <span class="grow" />
               <Show when={place() >= 0}>
                 <span class="sub">

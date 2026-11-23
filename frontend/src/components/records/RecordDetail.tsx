@@ -1,8 +1,6 @@
 import { A, createAsync, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Index, type JSX, on, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
-import Segs from "~/components/Segs";
 import type { RecordLink, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act, say } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -31,6 +29,7 @@ import LinkTextarea from "./links/LinkTextarea";
 import { dateText } from "~/lib/dates";
 import { useOwner } from "~/lib/owner";
 import RelatedLinks from "./links/RelatedLinks";
+import { Button, EmptyState, Icon, IconButton, Segmented, TextField } from "~/components/ui";
 
 type PlainField = { name: string; value: string; values: string[] };
 type PlainItem = { text: string; fields: PlainField[] };
@@ -53,16 +52,12 @@ function FieldRow(props: { type: FieldType; field: Field | undefined; aide: stri
               <span class="rec-value">
                 <FieldView type={props.type} field={props.field} aide={props.aide} />
               </span>
-              <button type="button" class="rec-edit" aria-label={`${label()}を直す`} onClick={() => setEditing(true)}>
-                <Icon svg={icons.pencil} size={13} />
-              </button>
+              <IconButton plain icon={icons.pencil} label={`${label()}を直す`} onClick={() => setEditing(true)} />
             </>
           }
         >
           <FieldEdit type={props.type} label={label()} field={props.field} onSave={props.onSave} />
-          <button type="button" class="rec-edit" aria-label={`${label()}を直し終える`} onClick={() => setEditing(false)}>
-            <Icon svg={icons.check} size={13} />
-          </button>
+          <IconButton plain icon={icons.check} label={`${label()}を直し終える`} onClick={() => setEditing(false)} />
         </Show>
       </dd>
     </div>
@@ -134,17 +129,8 @@ function Items(props: { type: SectionType; items: RecordItem[]; aide: string; on
               <b class="grow">
                 <FieldView type={first()} field={{ name: first().name, value: item().text, values: [] } as unknown as Field} aide={props.aide} />
               </b>
-              <button
-                type="button"
-                class="rec-edit"
-                aria-label={editing() === at ? "直し終える" : "直す"}
-                onClick={() => setEditing(editing() === at ? undefined : at)}
-              >
-                <Icon svg={editing() === at ? icons.check : icons.pencil} size={13} />
-              </button>
-              <button type="button" class="rec-edit" aria-label="外す" onClick={() => props.onSave((items) => items.filter((_, n) => n !== at))}>
-                <Icon svg={icons.trash} size={13} />
-              </button>
+              <IconButton plain icon={editing() === at ? icons.check : icons.pencil} label={editing() === at ? "直し終える" : "直す"} onClick={() => setEditing(editing() === at ? undefined : at)} />
+              <IconButton plain icon={icons.trash} label="外す" onClick={() => props.onSave((items) => items.filter((_, n) => n !== at))} />
             </div>
             <Show
               when={editing() === at}
@@ -237,7 +223,7 @@ function NewItem(props: { type: SectionType; onAdd: (i: PlainItem) => void }) {
             box.value = "";
           }}
         >
-          <input class="input grow" placeholder={label()} aria-label={label()} />
+          <TextField class="grow" placeholder={label()} aria-label={label()} />
           <Show when={first().name === "To" || first().name === "Who" || first().name === "When"}>
             <FieldEdit
               type={{ ...first(), type: "link", of: first().name === "When" ? "tasks" : "parties" }}
@@ -247,18 +233,18 @@ function NewItem(props: { type: SectionType; onAdd: (i: PlainItem) => void }) {
             />
           </Show>
           <Show when={props.type.name === "Relations"}>
-            <button type="button" class="btn small" onClick={() => add("me")}>
+            <Button small onClick={() => add("me")}>
               あなたとの関係
-            </button>
+            </Button>
           </Show>
           <Show when={props.type.name === "Skip if"}>
-            <button type="button" class="btn small" onClick={() => add("previous unfinished")}>
+            <Button small onClick={() => add("previous unfinished")}>
               前の回が済むまで
-            </button>
+            </Button>
           </Show>
-          <button type="submit" class="btn small">
+          <Button small type="submit">
             足す
-          </button>
+          </Button>
         </form>
       </Show>
     </div>
@@ -273,11 +259,9 @@ function Details(props: { fields: Field[]; onSave: (change: (fields: PlainField[
       <Index each={props.fields}>
         {(f, at) => (
           <div class="row">
-            <input class="input" aria-label="項目の名前" value={f().name} onChange={(e) => put(at, { ...plain(f()), name: e.currentTarget.value.trim() || f().name })} />
-            <input class="input grow" aria-label={`${f().name}の値`} value={f().value} onChange={(e) => put(at, { name: f().name, value: e.currentTarget.value, values: [] })} />
-            <button type="button" class="rec-edit" aria-label={`${f().name}を外す`} onClick={() => put(at, undefined)}>
-              <Icon svg={icons.trash} size={13} />
-            </button>
+            <TextField aria-label="項目の名前" value={f().name} onChange={(e) => put(at, { ...plain(f()), name: e.currentTarget.value.trim() || f().name })} />
+            <TextField class="grow" aria-label={`${f().name}の値`} value={f().value} onChange={(e) => put(at, { name: f().name, value: e.currentTarget.value, values: [] })} />
+            <IconButton plain icon={icons.trash} label={`${f().name}を外す`} onClick={() => put(at, undefined)} />
           </div>
         )}
       </Index>
@@ -294,11 +278,11 @@ function Details(props: { fields: Field[]; onSave: (change: (fields: PlainField[
           form.reset();
         }}
       >
-        <input class="input" name="name" placeholder="項目の名前" aria-label="足す項目の名前" />
-        <input class="input grow" name="value" placeholder="値" aria-label="足す項目の値" />
-        <button type="submit" class="btn small">
+        <TextField name="name" placeholder="項目の名前" aria-label="足す項目の名前" />
+        <TextField class="grow" name="value" placeholder="値" aria-label="足す項目の値" />
+        <Button small type="submit">
           足す
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -318,33 +302,28 @@ function Notes(props: { text: string; label: string; empty: string; links: Recor
         <Show
           when={draft() !== undefined}
           fallback={
-            <button type="button" class="btn small" aria-label={`${props.label}を書く`} onClick={() => setDraft(props.text)}>
-              <Icon svg={icons.pencil} size={13} />
-              書く
-            </button>
+            <Button small icon={icons.pencil} aria-label={`${props.label}を書く`} onClick={() => setDraft(props.text)}>
+書く
+            </Button>
           }
         >
-          <button type="button" class="btn small" onClick={() => setPreview(!preview())}>
+          <Button small onClick={() => setPreview(!preview())}>
             {preview() ? "書く" : "プレビュー"}
-          </button>
-          <button
-            type="button"
-            class="btn small"
-            onClick={() => {
+          </Button>
+          <Button small onClick={() => {
               if (draft() === props.text || confirm("書きかけを捨てますか")) setDraft(undefined);
-            }}
-          >
+            }}>
             やめる
-          </button>
-          <button type="button" class="btn small primary" onClick={save}>
+          </Button>
+          <Button variant="primary" small onClick={save}>
             保存
-          </button>
+          </Button>
         </Show>
       </header>
       <Show when={draft() === undefined || preview()} fallback={
         <LinkTextarea label={props.label} value={draft() ?? ""} onInput={setDraft} onSave={() => void save()} />
       }>
-        <Show when={(preview() && draft() !== undefined ? draft() : props.text)} fallback={<p class="empty">{props.empty}</p>}>
+        <Show when={(preview() && draft() !== undefined ? draft() : props.text)} fallback={<EmptyState>{props.empty}</EmptyState>}>
           {(text) => <Markdown text={text()} links={props.links} />}
         </Show>
       </Show>
@@ -369,10 +348,10 @@ function Log(props: { record: Rec; aide: string; onAdd: (line: string) => Promis
           });
         }}
       >
-        <input class="input grow" placeholder="あったことを書く" aria-label="経過を足す" />
-        <button type="submit" class="btn small">
+        <TextField class="grow" placeholder="あったことを書く" aria-label="経過を足す" />
+        <Button small type="submit">
           足す
-        </button>
+        </Button>
       </form>
       <ol class="rec-log">
         <For each={lines()}>
@@ -406,18 +385,13 @@ function Labels(props: { record: Rec; onSave: (change: (labels: string[]) => str
           </span>
         )}
       </For>
-      <input
-        class="input label-add"
-        placeholder="ラベルを足す"
-        aria-label="ラベルを足す"
-        onKeyDown={(e) => {
+      <TextField class="label-add" placeholder="ラベルを足す" aria-label="ラベルを足す" onKeyDown={(e) => {
           if (e.key !== "Enter" || e.isComposing) return;
           e.preventDefault();
           const l = e.currentTarget.value.trim();
           if (l) props.onSave((labels) => (labels.includes(l) ? labels : [...labels, l]));
           e.currentTarget.value = "";
-        }}
-      />
+        }} />
     </span>
   );
 }
@@ -433,13 +407,9 @@ function Standing(props: { record: Rec }) {
           <span class="grow">
             古くなったかもしれない（{r().obsolete}）{r().obsoleteReason ? `：${r().obsoleteReason}` : ""}
           </span>
-          <button
-            type="button"
-            class="btn small"
-            onClick={() => void act(() => api.records.clearObsolete({ kind: r().kind, id: r().id }), "印を外した")}
-          >
+          <Button small onClick={() => void act(() => api.records.clearObsolete({ kind: r().kind, id: r().id }), "印を外した")}>
             確かめたので印を外す
-          </button>
+          </Button>
         </div>
       </Show>
       <Show when={r().movedTo}>
@@ -518,7 +488,7 @@ export default function RecordDetail(props: {
   const copy = (text: string, what: string) => void navigator.clipboard?.writeText(text).then(() => say(`${what}を写した`));
 
   return (
-    <Show when={record()} fallback={<p class="empty">{record() === null ? "この記録はもうない。" : "読み込んでいる"}</p>}>
+    <Show when={record()} fallback={<EmptyState>{record() === null ? "この記録はもうない。" : "読み込んでいる"}</EmptyState>}>
       {(r) => (
         <KnownLinks.Provider value={() => r().links}>
         <article class="rec">
@@ -529,7 +499,7 @@ export default function RecordDetail(props: {
                 <Icon svg={icons.copy} size={11} />
               </button>
               <span class="grow" />
-              <Segs
+              <Segmented
                 label="見方"
                 items={[
                   ["view", "内容"],
@@ -538,9 +508,7 @@ export default function RecordDetail(props: {
                 value={shown()}
                 onChoose={setShown}
               />
-              <button type="button" class="btn small danger" aria-label={`${r().title}を消す`} onClick={() => remove(r())}>
-                <Icon svg={icons.trash} size={13} />
-              </button>
+              <IconButton icon={icons.trash} label={`${r().title}を消す`} variant="danger" onClick={() => remove(r())} />
             </div>
             <input
               class="rec-name"
@@ -587,10 +555,9 @@ export default function RecordDetail(props: {
                   <span class="sub mono grow">
                     records/{r().kind}/{r().id}.md
                   </span>
-                  <button type="button" class="btn small" onClick={() => copy(r().markdown, "原文")}>
-                    <Icon svg={icons.copy} size={13} />
-                    写す
-                  </button>
+                  <Button small icon={icons.copy} onClick={() => copy(r().markdown, "原文")}>
+写す
+                  </Button>
                 </header>
                 <pre class="rec-raw">{r().markdown}</pre>
               </section>

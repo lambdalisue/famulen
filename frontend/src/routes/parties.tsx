@@ -13,6 +13,7 @@ import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf, workgroupNa
 import { usePicked } from "~/lib/picked";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
+import { Button, EmptyState, List, Tag } from "~/components/ui";
 
 const PALETTE = ["#0F6E68", "#B4610E", "#5B5FA8", "#8A5A7A", "#3B3A36"];
 
@@ -78,29 +79,29 @@ function Around(props: { party: Rec }) {
       </Show>
       <section class="rec-section">
         <h3>{aide()} が覚えていること</h3>
-        <div class="list">
+        <List>
           <For each={memories() ?? []}>{(e) => <EntryRow item={e} />}</For>
           <Show when={memories()?.length === 0}>
-            <p class="empty">まだ覚えていることはない</p>
+            <EmptyState>まだ覚えていることはない</EmptyState>
           </Show>
-        </div>
+        </List>
       </section>
       <Show when={(around()?.talk ?? []).length > 0}>
         <section class="rec-section">
           <h3>最近のやりとり</h3>
-          <div class="list">
+          <List>
             <For each={around()?.talk}>
               {(m) => (
-                <div class="item">
+                <div role="listitem" class="item">
                   <span class="mono sub">{shortTime(m.at, around()?.tz ?? "UTC")}</span>
-                  <span class="tag">{m.who === Speaker.OWNER ? "あなた" : aide()}</span>
+                  <Tag>{m.who === Speaker.OWNER ? "あなた" : aide()}</Tag>
                   <span class="grow" style={{ "font-size": "13px" }}>
                     {Array.from(m.text).slice(0, 120).join("")}
                   </span>
                 </div>
               )}
             </For>
-          </div>
+          </List>
         </section>
       </Show>
     </>
@@ -118,12 +119,12 @@ function Guessed(props: { party: Rec }) {
             <span class="grow">
               {a.text} の <b class="mono">{valueOf(a, "Handle")}</b> は同じ相手か（{valueOf(a, "How")}）
             </span>
-            <button type="button" class="btn small go" onClick={() => act(() => api.records.answerAccount({ account: id(), same: true }), "同じ人にした")}>
+            <Button variant="go" small onClick={() => act(() => api.records.answerAccount({ account: id(), same: true }), "同じ人にした")}>
               同じ人
-            </button>
-            <button type="button" class="btn small" onClick={() => act(() => api.records.answerAccount({ account: id(), same: false }), "外した")}>
+            </Button>
+            <Button small onClick={() => act(() => api.records.answerAccount({ account: id(), same: false }), "外した")}>
               別の人
-            </button>
+            </Button>
           </div>
         );
       }}
@@ -153,14 +154,14 @@ export default function Parties() {
         <span class="rec-main">
           <b>{r.title}</b>
           <span class="rec-sub">
-            <For each={toMe(r)}>{(t) => <span class="tag confirmed">{t}</span>}</For>
+            <For each={toMe(r)}>{(t) => <Tag tone="ok">{t}</Tag>}</For>
             <Show when={places().length > 0}>
               <span>{places().join("、")}</span>
             </Show>
             <Show when={valuesOf(r, "Aliases").length > 0}>
               <span>{valuesOf(r, "Aliases").join("、")}</span>
             </Show>
-            <For each={r.labels}>{(l) => <span class="tag label">{l}</span>}</For>
+            <For each={r.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
             <span>{workgroupNames(workgroups(), r.workgroups)}</span>
           </span>
         </span>

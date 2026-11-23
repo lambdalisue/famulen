@@ -2,6 +2,7 @@ import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { memoryHref } from "~/lib/memory";
 import { hrefOf, KIND_NAMES, nameOf, plainText, type Rec, RELATED } from "~/lib/records";
+import { Tag } from "~/components/ui";
 
 /** What a link to the record from a field says the other is to it. */
 const FROM: { [from: string]: string } = {
@@ -48,7 +49,7 @@ export default function Backlinks(props: { record: Rec }) {
               <span class="chips-line">
                 <For each={links}>
                   {(l) => (
-                    <Show when={hrefOf(l.kind, l.id)} fallback={<span class="tag">{l.title}</span>}>
+                    <Show when={hrefOf(l.kind, l.id)} fallback={<Tag>{l.title}</Tag>}>
                       {(href) => (
                         <A class="tag link" href={href()}>
                           {l.title}

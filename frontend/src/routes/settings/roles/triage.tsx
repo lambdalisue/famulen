@@ -1,4 +1,5 @@
 import { createAsync } from "@solidjs/router";
+import { Show } from "solid-js";
 import LogSheet from "~/components/logs/LogSheet";
 import TriageLog from "~/components/logs/TriageLog";
 import RoleModel from "~/components/RoleModel";
@@ -8,6 +9,7 @@ import { api } from "~/lib/api";
 import { workspacesQuery } from "~/lib/connections";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
+import { NumberField, PageHeader, Section } from "~/components/ui";
 
 /** How long a channel stays attended after the secretary is mentioned in it. */
 function AttentionSection() {
@@ -15,32 +17,23 @@ function AttentionSection() {
   const owner = useOwner();
   const name = owner.aide;
   return (
-    <section class="pref">
-      <div class="pref-head">
-        <h2>注視の長さ</h2>
-        <p class="sub">
-          チャンネルで {name()} をメンションしてから、そのチャンネルを注視する長さ。そのあいだは、発言が届くたびにトリアージが{" "}
+    <Section title="注視の長さ" note={<>チャンネルで {name()} をメンションしてから、そのチャンネルを注視する長さ。そのあいだは、発言が届くたびにトリアージが{" "}
           {name()} に向けたものかをその場で確かめ、向けたものならメンションしなくてもすぐ応じる。話しかけるたびに延びる。0
-          分にすると注視しない。注視していないチャンネルの発言も、見張りがまとめて読み、関わるものは {name()} に届く。
-        </p>
-      </div>
-      <label class="row" style={{ gap: "6px" }}>
-        <input
-          type="number"
-          class="input"
-          min="0"
-          max="120"
-          style={{ width: "80px" }}
-          aria-label="注視する分"
-          value={workspaces()?.attentionMinutes ?? 10}
-          onChange={(e) => {
-            const minutes = Math.max(0, Math.min(120, Math.round(Number(e.currentTarget.value) || 0)));
-            void act(() => api.channels.setAttention({ minutes }));
-          }}
-        />
-        分
-      </label>
-    </section>
+          分にすると注視しない。注視していないチャンネルの発言も、見張りがまとめて読み、関わるものは {name()} に届く。</>}>
+      <Show when={workspaces()}>
+        {(w) => (
+          <NumberField
+            label="注視する分"
+            hidden
+            min={0}
+            max={120}
+            value={w().attentionMinutes}
+            unit="分"
+            onSave={(minutes) => void act(() => api.channels.setAttention({ minutes }))}
+          />
+        )}
+      </Show>
+    </Section>
   );
 }
 
@@ -49,10 +42,7 @@ export default function Triage() {
   setView("設定", "トリアージ");
   return (
     <>
-      <h1>トリアージ</h1>
-      <p class="sub">
-        秘書をメンションしたあと、しばらく注視している Slack のチャンネルで、書かれた発言が秘書に向けたものか、秘書との会話の続きかだけを、届いたその場で問うエージェント。秘書宛てなら秘書に渡し、そうでなければ何もしない。見張りとは別に動く。
-      </p>
+      <PageHeader title="トリアージ" note="秘書をメンションしたあと、しばらく注視している Slack のチャンネルで、書かれた発言が秘書に向けたものか、秘書との会話の続きかだけを、届いたその場で問うエージェント。秘書宛てなら秘書に渡し、そうでなければ何もしない。見張りとは別に動く。" />
       <div class="prefs">
         <RoleModel
           role={Role.TRIAGE}

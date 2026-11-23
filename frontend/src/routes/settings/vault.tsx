@@ -1,10 +1,9 @@
 import { shortTime } from "~/lib/dates";
-import { Collapsible } from "@ark-ui/solid/collapsible";
 import { createAsync, query } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import GatewayLog from "~/components/logs/GatewayLog";
 import LogSheet from "~/components/logs/LogSheet";
+import { PERMISSIONS } from "~/components/PermissionSeg";
 import { Permission } from "~/gen/famulen/v1/services_pb";
 import type { Secret } from "~/gen/famulen/v1/vault_pb";
 import { act } from "~/lib/act";
@@ -12,6 +11,7 @@ import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
+import { Button, Disclosure, EmptyState, Icon, IconButton, List, ListRow, PageHeader, Section, SegmentedOf, Tag, TextField, whenConfirmed } from "~/components/ui";
 
 const vaultQuery = query(() => api.vault.listSecrets({}), "vault");
 
@@ -75,31 +75,23 @@ function Description(props: { s: Secret }) {
         class="row vault-desc-form"
         onSubmit={save}
       >
-        <input
-          class="input grow"
-          name="description"
-          onKeyDown={(e) => {
+        <TextField class="grow" name="description" onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.preventDefault();
               setEditing(false);
             }
-          }}
-          value={props.s.description}
-          placeholder="何に使うか"
-          aria-label={`${props.s.name}の説明`}
-          ref={(el) => queueMicrotask(() => el.focus())}
-        />
-        <button type="button" class="btn small" onClick={() => setEditing(false)}>
+          }} value={props.s.description} placeholder="何に使うか" aria-label={`${props.s.name}の説明`} ref={(el) => queueMicrotask(() => el.focus())} />
+        <Button small onClick={() => setEditing(false)}>
           やめる
-        </button>
-        <button class="btn small primary">直す</button>
+        </Button>
+        <Button variant="primary" small type="submit">直す</Button>
       </form>
     </Show>
   );
 }
 
 function Row(props: { s: Secret; tz: string }) {
-  const [mode, setMode] = createSignal<"view" | "replace" | "delete">("view");
+  const [mode, setMode] = createSignal<"view" | "replace">("view");
   const replace = async (e: SubmitEvent) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -110,7 +102,7 @@ function Row(props: { s: Secret; tz: string }) {
     if (done) setMode("view");
   };
   return (
-    <div class="item vault-row">
+    <div role="listitem" class="item vault-row">
       <div class="vault-main">
         <b class="mono vault-name">{props.s.name}</b>
         <Description s={props.s} />
@@ -121,55 +113,19 @@ function Row(props: { s: Secret; tz: string }) {
       </div>
       <Show when={mode() === "view"}>
         <div class="vault-actions">
-          <button
-            type="button"
-            class="btn small"
-            aria-label={`${props.s.name}を置き換える`}
-            onClick={() => setMode("replace")}
-          >
-            <Icon svg={icons.refresh} size={12} />
-          </button>
+          <IconButton icon={icons.refresh} label={`${props.s.name}を置き換える`} onClick={() => setMode("replace")} />
           <Show when={!props.s.automatic}>
-            <button
-              type="button"
-              class="btn small danger"
-              aria-label={`${props.s.name}を消す`}
-              onClick={() => setMode("delete")}
-            >
-              <Icon svg={icons.trash} size={12} />
-            </button>
+            <IconButton icon={icons.trash} label={`${props.s.name}を消す`} variant="danger" onClick={() => void whenConfirmed(`「${props.s.name}」を消す`, "消す", () => act(() => api.vault.deleteSecret({ id: props.s.name }), "消した"), "消すと、ゲートウェイもあなたも、もう取り出せない。")} />
           </Show>
-        </div>
-      </Show>
-      <Show when={mode() === "delete"}>
-        <div class="row vault-wide" role="group" aria-label={`${props.s.name}を消すか確かめる`}>
-          <span class="sub grow">消すと、ゲートウェイも主人も、もう取り出せない。</span>
-          <button type="button" class="btn small" onClick={() => setMode("view")}>
-            やめる
-          </button>
-          <button
-            type="button"
-            class="btn small danger"
-            onClick={() => act(() => api.vault.deleteSecret({ id: props.s.name }), "消した")}
-          >
-            消す
-          </button>
         </div>
       </Show>
       <Show when={mode() === "replace"}>
         <form class="row vault-wide" onSubmit={replace}>
-          <input
-            class="input grow"
-            name="value"
-            type="password"
-            autocomplete="new-password"
-            required
-            aria-label={`${props.s.name}の新しい中身`}
-          />
-          <button type="button" class="btn small" onClick={() => setMode("view")}>
+          <TextField class="grow" name="value" type="password" autocomplete="new-password" required aria-label={`${props.s.name}の新しい中身`} />
+          <Button small onClick={() => setMode("view")}>
             やめる
-          </button>
-          <button class="btn small primary">置き換える</button>
+          </Button>
+          <Button variant="primary" small type="submit">置き換える</Button>
         </form>
       </Show>
     </div>
@@ -177,14 +133,6 @@ function Row(props: { s: Secret; tz: string }) {
 }
 
 const permissionsQuery = query(() => api.vault.getVaultPermissions({}), "vault-permissions");
-
-/** What each permission means when the secretary changes the vault. */
-const CHOICES: [Permission, string][] = [
-  [Permission.AUTO, "まかせる"],
-  [Permission.ALLOW, "尋ねない"],
-  [Permission.CONFIRM, "尋ねる"],
-  [Permission.FORBID, "拒否する"],
-];
 
 type Change = "put" | "describe" | "delete";
 
@@ -194,31 +142,21 @@ function SecretaryPermissions() {
   const choose = (change: Change, permission: Permission) =>
     act(() => api.vault.setVaultPermission({ change, permission }), "変えた");
   const line = (change: Change, label: string) => (
-    <div class="row" role="group" aria-label={label} style={{ gap: "6px", "flex-wrap": "wrap" }}>
-      <span class="grow">{label}</span>
-      <For each={CHOICES}>
-        {([permission, name]) => (
-          <button
-            type="button"
-            class={`btn small${permissions()?.[change] === permission ? " primary" : ""}`}
-            aria-pressed={permissions()?.[change] === permission}
-            onClick={() => choose(change, permission)}
-          >
-            {name}
-          </button>
-        )}
-      </For>
-    </div>
+    <ListRow
+      title={label}
+      end={
+        <SegmentedOf label={label} items={PERMISSIONS} value={permissions()?.[change] ?? Permission.AUTO} onChoose={(permission) => void choose(change, permission)} />
+      }
+    />
   );
   return (
-    <section class="card" style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-      <h3>秘書が金庫を変えるとき</h3>
+    <Section title="秘書が金庫を変えるとき" note="金庫を変えるのは取り返しがつかないので、「まかせる」でも尋ねる。尋ねているあいだ、秘書が入れようとした秘密は金庫に封じられ、確認には名前だけが出る。">
+      <List>
       {line("put", "秘密を入れる・置き換える")}
       {line("describe", "秘密の説明を直す")}
       {line("delete", "秘密を消す")}
-      <p class="sub">金庫を変えるのは取り返しがつかないので、「まかせる」でも尋ねる。</p>
-      <p class="sub">尋ねているあいだ、秘書が入れようとした秘密は金庫に封じられ、確認には名前だけが出る。</p>
-    </section>
+      </List>
+    </Section>
   );
 }
 
@@ -244,58 +182,40 @@ export default function Vault() {
 
   return (
     <>
-      <h1>金庫</h1>
-      <p class="sub">
-        パスワードやトークンのような秘密は、ここに入れる。中身を読めるのはゲートウェイだけで、外のサービスを呼ぶときにだけ使う。入れたあとは、主人にも秘書にも、中身はどこにも一文字も出ない。
-      </p>
+      <PageHeader title="金庫" note="パスワードやトークンのような秘密は、ここに入れる。中身を読めるのはゲートウェイだけで、外のサービスを呼ぶときにだけ使う。入れたあとは、主人にも秘書にも、中身はどこにも一文字も出ない。" />
       <Show when={vault()?.unavailable}>
         <p class="card">
-          <span class="tag warn">使えない</span> {vault()?.unavailable}
+          <Tag tone="warn">使えない</Tag> {vault()?.unavailable}
         </p>
       </Show>
       <Show when={vault() && !vault()?.unavailable}>
         <section class="vault-group" aria-label="足した秘密">
           <h2 class="vault-group-title">足した秘密</h2>
-          <div class="list">
+          <List>
             <For each={added()}>{(s) => <Row s={s} tz={tz()} />}</For>
             <Show when={added().length === 0}>
-              <p class="empty">まだない</p>
+              <EmptyState>まだない</EmptyState>
             </Show>
-          </div>
+          </List>
           <form class="card row vault-add" onSubmit={add}>
-            <input class="input mono" name="name" required placeholder="名前（bank-password）" aria-label="名前" />
-            <input class="input grow" name="purpose" placeholder="何に使うか" aria-label="何に使うか" />
-            <input
-              class="input grow"
-              name="value"
-              type="password"
-              autocomplete="new-password"
-              required
-              placeholder="中身"
-              aria-label="中身"
-            />
-            <button class="btn primary">
-              <Icon svg={icons.plus} size={14} />
-              入れる
-            </button>
+            <TextField class="mono" name="name" required placeholder="名前（bank-password）" aria-label="名前" />
+            <TextField class="grow" name="purpose" placeholder="何に使うか" aria-label="何に使うか" />
+            <TextField class="grow" name="value" type="password" autocomplete="new-password" required placeholder="中身" aria-label="中身" />
+            <Button variant="primary" icon={icons.plus} type="submit">
+入れる
+            </Button>
           </form>
         </section>
         <Show when={automatic().length > 0}>
-          <Collapsible.Root class="vault-group vault-auto">
-            <Collapsible.Trigger class="vault-auto-trigger">
-              <Icon svg={icons.chevronRight} size={14} />
-              <span>自動で入った秘密</span>
-              <span class="tag">{automatic().length}</span>
-            </Collapsible.Trigger>
-            <Collapsible.Content class="vault-auto-content">
+          <Disclosure class="vault-group vault-auto" title={<><span>自動で入った秘密</span>
+              <Tag>{automatic().length}</Tag></>}>
               <p class="sub">
                 ログインやつなぎ先の鍵、モデルの登録のときに、ゲートウェイが入れたもの。中身は置き換えられるが、消すときはつなぎ先かモデルを外す。
               </p>
-              <div class="list">
+              <List>
                 <For each={automatic()}>{(s) => <Row s={s} tz={tz()} />}</For>
-              </div>
-            </Collapsible.Content>
-          </Collapsible.Root>
+              </List>
+            </Disclosure>
         </Show>
         <SecretaryPermissions />
       </Show>

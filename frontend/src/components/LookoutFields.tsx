@@ -1,9 +1,8 @@
-import { NumberInput } from "@ark-ui/solid/number-input";
 import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Segs from "~/components/Segs";
 import { type LookoutDefault, type LookoutPlace, LookoutRoute } from "~/gen/famulen/v1/lookout_pb";
 import { workgroupsQuery } from "~/lib/data";
+import { Checkbox, Field, Segmented, Select, TextField } from "~/components/ui";
 
 /** Whether the default interval is used or overridden, in a dialog that saves it later. */
 export function IntervalField(props: {
@@ -15,10 +14,9 @@ export function IntervalField(props: {
 }) {
   const defaults = () => props.defaults.map((d) => `${d.label} ${d.intervalMinutes} 分`).join("・");
   return (
-    <div class="dialog-field">
-      <span>間隔</span>
+    <Field label="間隔" hint={<>既定は、{defaults()}。</>} group>
       <div class="lookout-interval-wrap">
-        <Segs
+        <Segmented
           label="間隔の決め方"
           items={[
             ["default", "既定"],
@@ -28,23 +26,23 @@ export function IntervalField(props: {
           onChoose={(way) => props.setOwn(way === "own")}
         />
         <Show when={props.own}>
-          <NumberInput.Root
-            class="lookout-interval"
-            min={1}
-            required
-            value={props.minutes}
-            onValueChange={(d) => props.setMinutes(d.value)}
-          >
-            <NumberInput.Label class="visually-hidden">間隔（分）</NumberInput.Label>
-            <NumberInput.Control>
-              <NumberInput.Input ref={(el) => queueMicrotask(() => el.focus())} class="input" inputmode="numeric" />
-            </NumberInput.Control>
+          <span class="row">
+            <TextField
+              class="number"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              required
+              aria-label="間隔（分）"
+              value={props.minutes}
+              onInput={(e) => props.setMinutes(e.currentTarget.value)}
+              ref={(el) => queueMicrotask(() => el.focus())}
+            />
             <span class="sub">分ごと</span>
-          </NumberInput.Root>
+          </span>
         </Show>
       </div>
-      <small class="sub">既定は、{defaults()}。</small>
-    </div>
+    </Field>
   );
 }
 
@@ -59,10 +57,10 @@ export const ROUTES: [LookoutRoute, string, string][] = [
 export function RouteField(props: { route: LookoutRoute; setRoute: (route: LookoutRoute) => void }) {
   const own = () => props.route !== LookoutRoute.UNSPECIFIED;
   return (
-    <div class="dialog-field">
-      <span>どこへ</span>
+    <Field label="どこへ" hint={<>{ROUTES.find(([r]) => r === props.route)?.[2] ?? "急ぎと中身を見て、秘書か朝のまとめかをそのつど決める。"}
+        {own() ? "関わるかどうかは、これまでどおり見張りが決める。" : ""}</>} group>
       <div class="lookout-interval-wrap">
-        <Segs
+        <Segmented
           label="どこへの決め方"
           items={[
             ["default", "見張りが決める"],
@@ -72,7 +70,7 @@ export function RouteField(props: { route: LookoutRoute; setRoute: (route: Looko
           onChoose={(way) => props.setRoute(way === "own" ? LookoutRoute.SECRETARY : LookoutRoute.UNSPECIFIED)}
         />
         <Show when={own()}>
-          <Segs
+          <Segmented
             label="どこへ"
             items={ROUTES.map(([r, label]) => [String(r), label])}
             value={String(props.route)}
@@ -83,11 +81,7 @@ export function RouteField(props: { route: LookoutRoute; setRoute: (route: Looko
           />
         </Show>
       </div>
-      <small class="sub">
-        {ROUTES.find(([r]) => r === props.route)?.[2] ?? "急ぎと中身を見て、秘書か朝のまとめかをそのつど決める。"}
-        {own() ? "関わるかどうかは、これまでどおり見張りが決める。" : ""}
-      </small>
-    </div>
+    </Field>
   );
 }
 
@@ -105,8 +99,7 @@ export function PlacesField(props: {
   const listed = () => [...props.choices, ...props.places.filter((p) => !props.choices.some((c) => c.id === p.id))];
   const on = (id: string) => props.places.some((p) => p.id === id);
   return (
-    <div class="dialog-field">
-      <span>{props.label}</span>
+    <Field label={props.label} group>
       <Show
         when={!props.restReader}
         fallback={
@@ -115,7 +108,7 @@ export function PlacesField(props: {
           </small>
         }
       >
-        <Segs
+        <Segmented
           label={`${props.label}の決め方`}
           items={[
             ["all", "すべて"],
@@ -130,21 +123,17 @@ export function PlacesField(props: {
         <div class="lookout-places" role="group" aria-label={props.label}>
           <For each={listed()}>
             {(p) => (
-              <label>
-                <input
-                  type="checkbox"
+              <Checkbox
                   checked={on(p.id)}
                   onChange={(e) =>
                     props.setPlaces(e.currentTarget.checked ? [...props.places, p] : props.places.filter((q) => q.id !== p.id))
                   }
-                />
-                {p.name}
-              </label>
+                >{p.name}</Checkbox>
             )}
           </For>
         </div>
       </Show>
-    </div>
+    </Field>
   );
 }
 
@@ -154,9 +143,8 @@ export const WHOLE = "all";
 export function WorkgroupField(props: { workgroup: string; setWorkgroup: (id: string) => void }) {
   const workgroups = createAsync(() => workgroupsQuery());
   return (
-    <label class="dialog-field">
-      <span>ワークグループ</span>
-      <select class="input" onChange={(e) => props.setWorkgroup(e.currentTarget.value)}>
+    <Field label="ワークグループ" hint="拾ったものを、このワークグループのこととして扱う。">
+      <Select onChange={(e) => props.setWorkgroup(e.currentTarget.value)}>
         <option value={WHOLE} selected={props.workgroup === WHOLE}>
           全体
         </option>
@@ -167,8 +155,7 @@ export function WorkgroupField(props: { workgroup: string; setWorkgroup: (id: st
             </option>
           )}
         </For>
-      </select>
-      <small class="sub">拾ったものを、このワークグループのこととして扱う。</small>
-    </label>
+      </Select>
+    </Field>
   );
 }

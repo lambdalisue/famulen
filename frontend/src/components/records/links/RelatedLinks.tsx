@@ -1,10 +1,10 @@
 import { For } from "solid-js";
-import Icon from "~/components/Icon";
 import { say } from "~/lib/act";
 import * as icons from "~/lib/icons";
 import { linkOf, linkTo, type Rec, RELATED, valuesOf } from "~/lib/records";
 import RecordPicker from "../RecordPicker";
 import RecordChip from "./RecordChip";
+import { Icon } from "~/components/ui";
 
 /** The records of any kind this one has to do with, added and removed. */
 export default function RelatedLinks(props: { record: Rec; onSave: (change: (values: string[]) => string[]) => void }) {

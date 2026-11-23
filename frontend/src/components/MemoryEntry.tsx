@@ -1,16 +1,23 @@
 import { Show } from "solid-js";
 import Markdown from "~/components/Markdown";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
+import * as icons from "~/lib/icons";
 import { setSelection } from "~/lib/view";
+import { IconButton, ListRow, Tag } from "~/components/ui";
 
 export function SrcTag(props: { src: string }) {
-  const tag = () =>
-    props.src === "said"
-      ? ["tag said", "あなたが言った"]
-      : props.src === "confirmed"
-        ? ["tag confirmed", "確かめた"]
-        : ["tag inferred", "推し量り"];
-  return <span class={tag()[0]}>{tag()[1]}</span>;
+  return (
+    <Show when={props.src === "said" || props.src === "confirmed"} fallback={<Tag tone="guess">推し量り</Tag>}>
+      <Show when={props.src === "said"} fallback={<Tag tone="ok">確かめた</Tag>}>
+        <Tag tone="said">あなたが言った</Tag>
+      </Show>
+    </Show>
+  );
+}
+
+/** Puts a memory beside what the owner says next. */
+export function AskAbout(props: { what: string; label?: string }) {
+  return <IconButton plain icon={icons.messagePlus} label={props.label ?? "会話に添える"} onClick={() => setSelection(props.what)} />;
 }
 
 /** One remembered item with where it came from, its span, evidence and use. */
@@ -25,14 +32,12 @@ export function EntryRow(props: { item: MemoryItem }) {
     ].filter((m): m is string => !!m);
   };
   return (
-    <div class="item">
-      <SrcTag src={props.item.src} />
-      <div class="grow" style={{ cursor: "pointer" }} onClick={() => setSelection(`記憶：${props.item.text}`)}>
-        <div style={{ "font-size": "14px", "line-height": 1.6 }}><Markdown inline text={props.item.text} /></div>
-        <Show when={meta().length > 0}>
-          <div class="sub">{meta().join(" · ")}</div>
-        </Show>
-      </div>
-    </div>
+    <ListRow
+      class="memory-row"
+      lead={<SrcTag src={props.item.src} />}
+      title={<Markdown inline text={props.item.text} />}
+      sub={meta().length > 0 ? meta().join(" · ") : undefined}
+      end={<AskAbout what={`記憶：${props.item.text}`} />}
+    />
   );
 }

@@ -1,10 +1,6 @@
 import { shortTime, weekday, WEEKDAYS } from "~/lib/dates";
-import { Switch } from "@ark-ui/solid/switch";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
-import Segs from "~/components/Segs";
 import type { RoutineRun } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -12,6 +8,7 @@ import * as icons from "~/lib/icons";
 import { assigneeOf, newWorkgroups, OWNER, SECRETARY, type Rec, routinesQuery, valueOf } from "~/lib/records";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
+import { Button, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
 
 const useRuns = () => {
   const routines = createAsync(() => routinesQuery());
@@ -30,27 +27,24 @@ export function RoutineRow(props: { routine: Rec }) {
   const on = () => valueOf(props.routine, "Enabled") !== "no";
   return (
     <>
-      <Switch.Root
+      <Switch
+        hidden
         checked={on()}
-        onCheckedChange={(d) =>
+        onChange={(d) =>
           void act(
-            () => api.records.saveRecord({ kind: "routines", id: props.routine.id, fields: [{ name: "Enabled", value: d.checked ? "yes" : "no" }] }),
-            d.checked ? "動かす" : "止めた",
+            () => api.records.saveRecord({ kind: "routines", id: props.routine.id, fields: [{ name: "Enabled", value: d ? "yes" : "no" }] }),
+            d ? "動かす" : "止めた",
           )
         }
       >
-        <Switch.Control class="switch">
-          <Switch.Thumb class="switch-thumb" />
-        </Switch.Control>
-        <Switch.Label class="sr">{props.routine.title}を動かす</Switch.Label>
-        <Switch.HiddenInput />
-      </Switch.Root>
+        {props.routine.title}を動かす
+      </Switch>
       <span class="rec-main">
         <b style={on() ? {} : { color: "#8C8A82" }}>{props.routine.title}</b>
         <span class="rec-sub">
           <span>{info()?.when}</span>
-          <Show when={info()?.problem}>{(p) => <span class="tag bad">{p()}</span>}</Show>
-          <For each={props.routine.labels}>{(l) => <span class="tag label">{l}</span>}</For>
+          <Show when={info()?.problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
+          <For each={props.routine.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
         </span>
       </span>
       <span class="rec-side">
@@ -76,7 +70,7 @@ export function RoutineRow(props: { routine: Rec }) {
               </button>
             )}
           </Show>
-          <span class={`tag${(valueOf(props.routine, "Assignee") || OWNER) === SECRETARY ? " aide" : ""}`}>{assigneeOf(props.routine, owner.aide())}</span>
+          <Tag tone={(valueOf(props.routine, "Assignee") || OWNER) === SECRETARY ? "aide" : undefined}>{assigneeOf(props.routine, owner.aide())}</Tag>
         </span>
       </span>
     </>
@@ -98,19 +92,19 @@ export function Runs(props: { routine: Rec }) {
             <Show when={info().lastRun > 0n}>
               <span class="sub">前に動いたのは {shortTime(info().lastRun, tz())}</span>
             </Show>
-            <Show when={info().problem}>{(p) => <span class="tag bad">{p()}</span>}</Show>
+            <Show when={info().problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
           </div>
           <For each={info().runs}>
             {(r) => (
               <div class="run" classList={{ skipped: r.skipped }}>
                 <span class="mono run-at">{shortTime(r.at, tz())}</span>
                 <Show when={r.skipped}>
-                  <span class="tag">飛ばす</span>
+                  <Tag>飛ばす</Tag>
                 </Show>
                 <span class="grow" />
-                <button type="button" class="btn small" onClick={() => void skip(props.routine.id, r)}>
+                <Button small onClick={() => void skip(props.routine.id, r)}>
                   {r.skipped ? "戻す" : "この回を飛ばす"}
-                </button>
+                </Button>
               </div>
             )}
           </For>
@@ -170,32 +164,29 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
     navigate(`/tasks?tab=routines&id=${made.id}`);
   };
   return (
-    <Modal open={props.open} onOpenChange={props.onOpenChange} title="定期タスクを足す">
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title="定期タスクを足す">
       <form class="dialog-form" onSubmit={add}>
-        <label class="dialog-field">
-          <span>何をするか</span>
-          <input class="input" name="title" required autofocus />
-        </label>
-        <div class="dialog-field">
-          <span>いつ</span>
-          <Segs label="繰り返し" items={REPEATS} value={repeat()} onChoose={setRepeat} />
+        <Field label="何をするか">
+          <TextField name="title" required autofocus />
+        </Field>
+        <Field label="いつ" group>
+          <Segmented label="繰り返し" items={REPEATS} value={repeat()} onChoose={setRepeat} />
           <div class="row">
             <Show when={repeat() === "weekly"}>
-              <select class="input" name="weekday" aria-label="曜日">
+              <Select name="weekday" aria-label="曜日">
                 <For each={WEEKDAYS}>{(d, i) => <option value={i()} selected={i() === 1}>{d}曜</option>}</For>
-              </select>
+              </Select>
             </Show>
             <Show when={repeat() === "monthly"}>
-              <input class="input" name="day" type="number" min="1" max="28" value="1" aria-label="日" />
+              <TextField name="day" type="number" min="1" max="28" value="1" aria-label="日" />
             </Show>
-            <Show when={repeat() !== "cron"} fallback={<input class="input mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}>
-              <input class="input" name="time" type="time" value="09:00" required aria-label="時刻" />
+            <Show when={repeat() !== "cron"} fallback={<TextField class="mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}>
+              <TextField name="time" type="time" value="09:00" required aria-label="時刻" />
             </Show>
           </div>
-        </div>
-        <div class="dialog-field">
-          <span>だれが</span>
-          <Segs
+        </Field>
+        <Field label="だれが" hint={who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"} group>
+          <Segmented
             label="担当"
             items={[
               ["secretary", owner.aide()],
@@ -204,21 +195,12 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
             value={who()}
             onChoose={setWho}
           />
-          <span class="sub">{who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"}</span>
-        </div>
-        <label class="dialog-field">
-          <span>詳しく</span>
-          <textarea class="input" name="notes" placeholder="Markdown で書ける" />
-        </label>
-        <div class="dialog-actions">
-          <button type="button" class="btn" onClick={() => props.onOpenChange(false)}>
-            やめる
-          </button>
-          <button type="submit" class="btn primary">
-            足す
-          </button>
-        </div>
+        </Field>
+        <Field label="詳しく">
+          <TextArea name="notes" placeholder="Markdown で書ける" />
+        </Field>
+        <DialogActions submit="足す" />
       </form>
-    </Modal>
+    </Dialog>
   );
 }

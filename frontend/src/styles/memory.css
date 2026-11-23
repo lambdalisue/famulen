@@ -1,0 +1,7 @@
+.bars { display:grid; gap:4px; align-items:end; }
+.bar { display:flex; flex-direction:column-reverse; gap:2px; height:100%; border:0; background:transparent; padding:0; cursor:pointer; }
+.bar span { display:block; width:100%; }
+.bar.on { outline:2px solid var(--ink); outline-offset:2px; border-radius:4px; }
+.seg { display:inline-flex; background:var(--soft); border-radius:8px; padding:2px; }
+.seg a { min-height:30px; padding:0 10px; display:inline-flex; align-items:center; font-size:12px; text-decoration:none; color:var(--muted); border-radius:6px; }
+.seg .on { background:#fff; color:var(--ink); font-weight:600; }

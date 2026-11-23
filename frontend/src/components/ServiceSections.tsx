@@ -1,9 +1,6 @@
 import { clock } from "~/lib/dates";
-import Keyed from "~/components/Keyed";
-import { Switch } from "@ark-ui/solid/switch";
 import { A, createAsync, query } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import LookoutEdit from "~/components/LookoutEdit";
 import LookoutInterval from "~/components/LookoutInterval";
 import type { Channel } from "~/gen/famulen/v1/services_pb";
@@ -12,49 +9,26 @@ import { api } from "~/lib/api";
 import { calendarsQuery } from "~/lib/calendar";
 import { channelsQuery, workspacesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
+import { Button, IconButton, Keyed, List, ListRow, Section, Select, Switch, Tag, TextField, whenConfirmed } from "~/components/ui";
 
 const lookoutQuery = query(() => api.lookout.getLookout({}), "lookout");
-
-/** A section of a settings page: a heading, a plain note under it, then what it controls. */
-export function Pref(props: { title: string; note: JSX.Element; children?: JSX.Element; action?: JSX.Element }) {
-  return (
-    <section class="pref">
-      <div class="pref-head">
-        <div class="row">
-          <h2 class="grow">{props.title}</h2>
-          {props.action}
-        </div>
-        <p class="sub">{props.note}</p>
-      </div>
-      {props.children}
-    </section>
-  );
-}
 
 /** Whether the secretary takes what is said through one channel. */
 export function ChannelSwitch(props: { channel: Channel; children: JSX.Element }) {
   return (
-    <Switch.Root
-      class="wg-row wg-switch"
+    <Switch
+      end
+      class="wg-switch"
       checked={props.channel.enabled}
-      onCheckedChange={(d) =>
+      onChange={(enabled) =>
         void act(
-          () =>
-            api.channels.setChannelEnabled({
-              connection: props.channel.connection,
-              receiver: props.channel.receiver,
-              enabled: d.checked,
-            }),
-          d.checked ? "ここで話しかけを受ける" : "ここでは話しかけを受けない",
+          () => api.channels.setChannelEnabled({ connection: props.channel.connection, receiver: props.channel.receiver, enabled }),
+          enabled ? "ここで話しかけを受ける" : "ここでは話しかけを受けない",
         )
       }
     >
-      <Switch.Label class="grow">{props.children}</Switch.Label>
-      <Switch.Control class="switch">
-        <Switch.Thumb class="switch-thumb" />
-      </Switch.Control>
-      <Switch.HiddenInput />
-    </Switch.Root>
+      {props.children}
+    </Switch>
   );
 }
 
@@ -67,15 +41,11 @@ export function MainWorkspace(props: { connection: string }) {
       {(ws) => (
         <Show
           when={!ws().main}
-          fallback={<span class="tag aide">確認を受けるところ</span>}
+          fallback={<Tag tone="aide">確認を受けるところ</Tag>}
         >
-          <button
-            type="button"
-            class="btn small"
-            onClick={() => act(() => api.channels.setMainWorkspace({ id: ws().id }), "確認をここで受ける")}
-          >
+          <Button small onClick={() => act(() => api.channels.setMainWorkspace({ id: ws().id }), "確認をここで受ける")}>
             確認をここで受ける
-          </button>
+          </Button>
         </Show>
       )}
     </Show>
@@ -88,7 +58,7 @@ export function ChannelsSection(props: { connection: string }) {
   const mine = () => (channels() ?? []).filter((c) => c.connection === props.connection);
   return (
     <Show when={mine().length > 0}>
-      <Pref
+      <Section
         title="チャネル"
         note={
           <>
@@ -105,7 +75,7 @@ export function ChannelsSection(props: { connection: string }) {
             </div>
           )}
         </For>
-      </Pref>
+      </Section>
     </Show>
   );
 }
@@ -141,74 +111,51 @@ export function CalendarsSection(props: { connection: string; account: string; t
     if (done) form.reset();
   };
   return (
-    <Pref
+    <Section
       title="カレンダー"
       note="このアカウントのカレンダーを足すと、そのまま読める。Google 以外のカレンダーや祝日の一覧は、Google カレンダーで購読してから足す。ワークグループごとの見え方は、ワークグループの頁で決める。"
       action={
-        <button
-          type="button"
-          class="btn small"
-          aria-label="カレンダーを読み直す"
-          onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")}
-        >
-          <Icon svg={icons.refresh} size={14} />
-        </button>
+        <IconButton icon={icons.refresh} label="カレンダーを読み直す" onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")} />
       }
     >
       <Show when={mine().length > 0} fallback={<p class="sub">まだない。メインのカレンダーは、ID を空のまま足す。</p>}>
-        <div class="list">
+        <List>
           <For each={mine()}>
             {(c) => (
-              <div class="item">
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: "12px",
-                    height: "12px",
-                    "border-radius": "3px",
-                    background: c.color,
-                  }}
-                />
-                <div class="grow">
-                  <b>{c.name}</b>
-                  <br />
-                  <span class="mono sub">{c.googleCalendar === "primary" ? "メインのカレンダー" : c.googleCalendar}</span>
-                </div>
-                <span class="sub">
-                  <Show
-                    when={c.error}
-                    fallback={c.fetchedAt > 0n ? `${clock(c.fetchedAt, props.timezone)} に読んだ` : "まだ読んでいない"}
-                  >
-                    <span class="tag warn">読めない</span> {c.error}
-                  </Show>
-                </span>
-                <button
-                  type="button"
-                  class="btn small danger"
-                  aria-label={`${c.name}を外す`}
-                  onClick={() => act(() => api.calendar.removeCalendar({ id: c.id }), "外した")}
-                >
-                  <Icon svg={icons.trash} size={12} />
-                </button>
-              </div>
+              <ListRow
+                lead={<span class="swatch-square" style={{ background: c.color }} />}
+                title={c.name}
+                sub={
+                  <>
+                    <span class="mono">{c.googleCalendar === "primary" ? "メインのカレンダー" : c.googleCalendar}</span>
+                    <Show when={c.error} fallback={<span>{c.fetchedAt > 0n ? `${clock(c.fetchedAt, props.timezone)} に読んだ` : "まだ読んでいない"}</span>}>
+                      <Tag tone="warn">読めない</Tag>
+                      <span>{c.error}</span>
+                    </Show>
+                  </>
+                }
+                end={
+                  <IconButton
+                    variant="danger"
+                    icon={icons.trash}
+                    label={`${c.name}を外す`}
+                    onClick={() => void whenConfirmed(`カレンダー「${c.name}」を外す`, "外す", () => act(() => api.calendar.removeCalendar({ id: c.id }), "外した"), "Google のカレンダーはそのまま残る。")}
+                  />
+                }
+              />
             )}
           </For>
-        </div>
+        </List>
       </Show>
       <form class="row" onSubmit={add}>
-        <input class="input" name="name" required value={props.account} aria-label="カレンダーの名前" />
-        <input
-          class="input grow mono"
-          name="calendar_id"
-          placeholder="カレンダー ID（空ならメインのカレンダー）"
-          aria-label="カレンダー ID"
-        />
-        <select class="input" name="color" aria-label="色">
+        <TextField name="name" required value={props.account} aria-label="カレンダーの名前" />
+        <TextField class="grow mono" name="calendar_id" placeholder="カレンダー ID（空ならメインのカレンダー）" aria-label="カレンダー ID" />
+        <Select name="color" aria-label="色">
           <For each={COLORS}>{([l, c]) => <option value={c}>{l}</option>}</For>
-        </select>
-        <button class="btn primary">足す</button>
+        </Select>
+        <Button variant="primary" type="submit">足す</Button>
       </form>
-    </Pref>
+    </Section>
   );
 }
 
@@ -220,7 +167,7 @@ export function LookoutSection(props: { connection: string }) {
       (s) => s.connection === props.connection || s.connection === `slack:${props.connection}`,
     );
   return (
-    <Pref
+    <Section
       title="見張り"
       note={
         <>
@@ -233,28 +180,19 @@ export function LookoutSection(props: { connection: string }) {
         <Keyed each={mine()} by={(s) => s.id}>
           {(s) => (
             <div class="row">
-              <Switch.Root
-                class="wg-row wg-switch grow"
+              <Switch
+                class="wg-switch grow"
                 checked={s().enabled}
-                onCheckedChange={(d) =>
-                  void act(
-                    () => api.lookout.setLookoutEnabled({ id: s().id, enabled: d.checked }),
-                    d.checked ? "見張りを始めた" : "止めた",
-                  )
-                }
+                onChange={(enabled) => void act(() => api.lookout.setLookoutEnabled({ id: s().id, enabled }), enabled ? "見張りを始めた" : "止めた")}
               >
-                <Switch.Label class="grow">{s().name}</Switch.Label>
-                <Switch.Control class="switch">
-                  <Switch.Thumb class="switch-thumb" />
-                </Switch.Control>
-                <Switch.HiddenInput />
-              </Switch.Root>
+                {s().name}
+              </Switch>
               <LookoutInterval source={s()} defaults={w()?.defaults ?? []} place="connection" label={`${s().name}をまとめて見る間隔（分）`} />
               <LookoutEdit source={s()} defaults={w()?.defaults ?? []} sources={w()?.sources ?? []} />
             </div>
           )}
         </Keyed>
       </Show>
-    </Pref>
+    </Section>
   );
 }

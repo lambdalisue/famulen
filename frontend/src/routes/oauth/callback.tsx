@@ -3,6 +3,7 @@ import { createSignal, onMount, Show } from "solid-js";
 import type { LoginFinished } from "~/gen/famulen/v1/services_pb";
 import { api } from "~/lib/api";
 import { setView } from "~/lib/view";
+import { Callout, LinkButton, Loading } from "~/components/ui";
 
 /** Where Google, Slack and other services send the owner back after a login. */
 export default function Callback() {
@@ -19,16 +20,16 @@ export default function Callback() {
     }
   });
   return (
-    <div class="card" style={{ "max-width": "560px" }}>
-      <Show when={done()} fallback={<p class="sub">ログインを確かめている</p>}>
+    <div class="card narrow-card">
+      <Show when={done()} fallback={<Loading />}>
         {(d) => (
           <Show
             when={d().ok}
             fallback={
               <>
                 <h1>つなげなかった</h1>
-                <p class="error">{d().error}</p>
-                <A class="btn" href="/settings/services">サービスへ戻る</A>
+                <Callout tone="danger">{d().error}</Callout>
+                <LinkButton href="/settings/services">サービスへ戻る</LinkButton>
               </>
             }
           >
@@ -36,9 +37,9 @@ export default function Callback() {
               <>
                 <h1>{ok().name} をつないだ</h1>
                 <p class="sub">これで秘書が読めるようになった。</p>
-                <A class="btn primary" href={`/settings/services?id=${encodeURIComponent(ok().id)}`}>
+                <LinkButton variant="primary" href={`/settings/services?id=${encodeURIComponent(ok().id)}`}>
                   設定へ戻る
-                </A>
+                </LinkButton>
               </>
             )}
           </Show>

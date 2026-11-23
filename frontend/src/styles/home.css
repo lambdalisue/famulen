@@ -1,0 +1,6 @@
+.grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); grid-auto-rows: 168px; gap:14px; }
+.tile { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px 16px; display:flex; flex-direction:column; gap:6px; overflow:hidden; }
+.tile.w2 { grid-column: span 2; } .tile.h2 { grid-row: span 2; }
+.tile header { display:flex; align-items:center; gap:6px; }
+body.editing .tile-ctl { display:flex !important; }
+.tile-ctl { display:none !important; }

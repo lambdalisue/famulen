@@ -1,10 +1,10 @@
 import { A, createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
 import { layerHref, layersQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { setView } from "~/lib/view";
+import { Icon, List } from "~/components/ui";
 
 /** The memory layers as a list of pages, for the narrow layout. */
 export default function MemoryMenu() {
@@ -13,7 +13,7 @@ export default function MemoryMenu() {
   const owner = useOwner();
   return (
     <>
-      <div class="list">
+      <List>
         <For each={layers()}>
           {(l) => (
             <A class="item index-row" href={layerHref(l.id)}>
@@ -32,7 +32,7 @@ export default function MemoryMenu() {
             </A>
           )}
         </For>
-      </div>
+      </List>
       <p class="sub">
         記憶は {owner.aide()}{" "}
         がやりとりから覚えたこと。予定・タスク・相手・物・契約は記録なので、ここには入らない。変更はすべて Git に残る。

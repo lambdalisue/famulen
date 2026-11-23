@@ -1,7 +1,6 @@
 import { createAsync } from "@solidjs/router";
-import { createSignal, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import * as icons from "~/lib/icons";
+import { createSignal } from "solid-js";
+import { Pager } from "~/components/ui";
 
 /** Rows on one page of a log in the log sheet. */
 export const PAGE = 30;
@@ -34,24 +33,6 @@ export function createPages<T extends { id: bigint }>(read: (before: number) => 
 
 /** The buttons that turn to the newer and the older page. */
 export function PageNav(props: { pages: ReturnType<typeof createPages<{ id: bigint }>> }) {
-  return (
-    <Show when={props.pages.number() > 1 || props.pages.more()}>
-      <nav class="log-pages" aria-label="頁送り">
-        <button
-          type="button"
-          class="btn small"
-          disabled={props.pages.number() === 1}
-          onClick={() => props.pages.newer()}
-        >
-          <Icon svg={icons.chevronLeft} size={14} />
-          新しいほうへ
-        </button>
-        <span class="sub">{props.pages.number()} 頁目</span>
-        <button type="button" class="btn small" disabled={!props.pages.more()} onClick={() => props.pages.older()}>
-          古いほうへ
-          <Icon svg={icons.chevronRight} size={14} />
-        </button>
-      </nav>
-    </Show>
-  );
+  const p = () => props.pages;
+  return <Pager number={p().number()} more={p().more()} newer={() => p().newer()} older={() => p().older()} />;
 }

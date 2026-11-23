@@ -1,6 +1,5 @@
 import { A, createAsync, Navigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, For, Match, Show, Switch } from "solid-js";
-import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
 import { EntryRow, SrcTag } from "~/components/MemoryEntry";
 import type { Layer } from "~/gen/famulen/v1/memory_pb";
@@ -10,6 +9,7 @@ import { layerQuery, visible } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { oneParam } from "~/lib/params";
 import { setSelection, setView } from "~/lib/view";
+import { Button, EmptyState, LinkButton, List } from "~/components/ui";
 
 const LONG_GROUPS: [string, string][] = [
   ["semantic", "意味記憶"],
@@ -23,10 +23,9 @@ const STATES: Record<string, string> = { waiting: "夢を待つ", applied: "す�
 
 function FileLink(props: { path: string }) {
   return (
-    <A class="btn small" style={{ "margin-left": "auto" }} href={`/memory/file?path=${encodeURIComponent(props.path)}`}>
-      <Icon svg={icons.pencil} size={12} />
-      読む・書く・経緯
-    </A>
+    <LinkButton small icon={icons.pencil} style={{ "margin-left": "auto" }} href={`/memory/file?path=${encodeURIComponent(props.path)}`}>
+読む・書く・経緯
+    </LinkButton>
   );
 }
 
@@ -54,10 +53,10 @@ function Pending(props: { data: Layer; aide: string }) {
         <span class="sub">まったく急がない。答えなくてよい</span>
         <FileLink path="pending.md" />
       </div>
-      <div class="list">
-        <For each={items()} fallback={<p class="empty">いまはない</p>}>
+      <List>
+        <For each={items()} fallback={<EmptyState>いまはない</EmptyState>}>
           {(e) => (
-            <div class="item">
+            <div role="listitem" class="item">
               <div class="grow">
                 <div style={{ "font-size": "14px" }}><Markdown inline text={e.text} /></div>
                 <div class="sub">
@@ -65,13 +64,13 @@ function Pending(props: { data: Layer; aide: string }) {
                   {e.attrs.against ? " · あなたの言葉と食い違う" : ""}
                 </div>
               </div>
-              <button type="button" class="btn small" onClick={() => setSelection(`保留中の判断：${e.text}`)}>
+              <Button small onClick={() => setSelection(`保留中の判断：${e.text}`)}>
                 答える
-              </button>
+              </Button>
             </div>
           )}
         </For>
-      </div>
+      </List>
       <p class="sub">
         夢のたびに根拠を数え直し、そろえば {props.aide}{" "}
         が自分で決めて長期記憶に移す。話の流れで確かめられるときだけ、ついでに聞く。あなたの言ったことを覆すには、ふつうより多い根拠が要る。
@@ -98,10 +97,10 @@ function Episodic(props: { data: Layer; at: string }) {
         layer="episodic"
         label={(d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`}
       />
-      <div class="list">
-        <For each={items()} fallback={<p class="empty">まだない</p>}>
+      <List>
+        <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
           {(e) => (
-            <div class="item">
+            <div role="listitem" class="item">
               <span class="mono" style={{ "font-size": "12px", width: "44px" }}>
                 {e.time}
               </span>
@@ -117,7 +116,7 @@ function Episodic(props: { data: Layer; at: string }) {
             </div>
           )}
         </For>
-      </div>
+      </List>
     </>
   );
 }
@@ -129,7 +128,7 @@ function Working(props: { data: Layer }) {
         <h1>作業記憶</h1>
         <span class="sub">いま進めている仕事の途中経過。済めば消える</span>
       </div>
-      <For each={props.data.working} fallback={<p class="empty">いま進めている仕事はない</p>}>
+      <For each={props.data.working} fallback={<EmptyState>いま進めている仕事はない</EmptyState>}>
         {(w) => (
           <article class="card" style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
             <div class="row">
@@ -186,11 +185,11 @@ function Core(props: { data: Layer }) {
         </div>
         <p class="sub">上限を超えそうになると、夢の中で使われていないものから心得を外す。外しても長期記憶には残る</p>
       </div>
-      <div class="list">
-        <For each={items()} fallback={<p class="empty">まだない</p>}>
+      <List>
+        <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
           {(e) => <EntryRow item={e} />}
         </For>
-      </div>
+      </List>
     </>
   );
 }
@@ -207,7 +206,7 @@ function Long(props: { data: Layer }) {
         {([group, label]) => (
           <section style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
             <h3>{label}</h3>
-            <For each={files(group)} fallback={<p class="empty">まだない</p>}>
+            <For each={files(group)} fallback={<EmptyState>まだない</EmptyState>}>
               {(f) => (
                 <div class="card" style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
                   <div class="row">
@@ -236,17 +235,17 @@ function Forgotten(props: { data: Layer; at: string }) {
         <h1>忘却</h1>
         <span class="sub">古くなった・置き換わった記憶。ふだんは読まないが、消してはいないので戻せる</span>
       </div>
-      <Show when={month()} fallback={<p class="empty">まだない</p>}>
+      <Show when={month()} fallback={<EmptyState>まだない</EmptyState>}>
         <Periods periods={props.data.periods} at={month()} layer="forgotten" label={(m) => m} />
         <section style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
           <div class="row">
             <h3 class="grow">{month()}</h3>
             <FileLink path={`forgotten/${month()}.md`} />
           </div>
-          <div class="list">
-            <For each={items()} fallback={<p class="empty">まだない</p>}>
+          <List>
+            <For each={items()} fallback={<EmptyState>まだない</EmptyState>}>
               {(e) => (
-                <div class="item">
+                <div role="listitem" class="item">
                   <div class="grow">
                     <div style={{ "font-size": "14px", color: "#4D4C47", "text-decoration": "line-through" }}>
                       <Markdown inline text={e.text} />
@@ -255,13 +254,13 @@ function Forgotten(props: { data: Layer; at: string }) {
                       <Markdown inline text={e.attrs.reason ?? ""} /> · {e.attrs.forgot ?? ""}
                     </div>
                   </div>
-                  <button type="button" class="btn small" onClick={() => setSelection(`忘れた記憶：${e.text}`)}>
+                  <Button small onClick={() => setSelection(`忘れた記憶：${e.text}`)}>
                     戻すよう頼む
-                  </button>
+                  </Button>
                 </div>
               )}
             </For>
-          </div>
+          </List>
         </section>
       </Show>
     </>
@@ -282,7 +281,7 @@ export default function MemoryLayer() {
   });
   return (
     <Show when={params.layer !== "dream"} fallback={<Navigate href="/memory" />}>
-    <Show when={known()} fallback={<p class="empty">そういう層はない</p>}>
+    <Show when={known()} fallback={<EmptyState>そういう層はない</EmptyState>}>
     <Show when={data()}>
       {(d) => (
         <Switch>

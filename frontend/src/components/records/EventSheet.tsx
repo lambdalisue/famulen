@@ -2,9 +2,7 @@ import { addDays, dateLabel, hm, localDate } from "~/lib/dates";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { A, createAsync, useNavigate } from "@solidjs/router";
 import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
-import SideSheet from "~/components/SideSheet";
 import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -12,7 +10,7 @@ import { ask } from "~/lib/ask";
 import * as icons from "~/lib/icons";
 import { choiceOf, hrefOf } from "~/lib/records";
 import RecordDetail from "./RecordDetail";
-import "./records.css";
+import { Button, Icon, LinkButton, SideSheet, Tag } from "~/components/ui";
 
 /** When an event is, in words. */
 export function whenOf(e: CalendarEvent): string {
@@ -30,22 +28,19 @@ function EventButtons(props: { event: CalendarEvent }) {
   return (
     <div class="row">
       <Show when={e().meeting}>
-        <a class="btn primary" href={e().meeting} target="_blank" rel="noreferrer">
-          <Icon svg={icons.video} size={15} />
-          会議に入る
-        </a>
+        <LinkButton variant="primary" icon={icons.video} href={e().meeting}>
+会議に入る
+        </LinkButton>
       </Show>
       <Show when={e().map}>
-        <a class="btn" href={e().map} target="_blank" rel="noreferrer">
-          <Icon svg={icons.mapPin} size={15} />
-          地図
-        </a>
+        <LinkButton icon={icons.mapPin} href={e().map}>
+地図
+        </LinkButton>
       </Show>
       <Show when={e().url}>
-        <a class="btn" href={e().url} target="_blank" rel="noreferrer">
-          <Icon svg={icons.externalLink} size={15} />
-          Google で開く
-        </a>
+        <LinkButton icon={icons.externalLink} href={e().url}>
+Google で開く
+        </LinkButton>
       </Show>
     </div>
   );
@@ -77,10 +72,10 @@ function Attendees(props: { event: CalendarEvent }) {
                   </A>
                 </Show>
                 <Show when={a.organizer}>
-                  <span class="tag">主催</span>
+                  <Tag>主催</Tag>
                 </Show>
                 <Show when={a.optional}>
-                  <span class="tag">任意</span>
+                  <Tag>任意</Tag>
                 </Show>
               </li>
             )}
@@ -123,18 +118,18 @@ export default function EventSheet(props: { event: CalendarEvent | undefined; re
               </div>
               <div class="chips-line">
                 <Show when={event().calendarName}>
-                  <span class="tag">{event().calendarName}</span>
+                  <Tag>{event().calendarName}</Tag>
                 </Show>
                 <Show when={event().status !== "confirmed"}>
-                  <span class="tag warn">{choiceOf(event().status)}</span>
+                  <Tag tone="warn">{choiceOf(event().status)}</Tag>
                 </Show>
                 <Show when={event().response}>
-                  <span class="tag">あなたは{choiceOf(event().response)}</span>
+                  <Tag>あなたは{choiceOf(event().response)}</Tag>
                 </Show>
                 <Show when={!event().busy}>
-                  <span class="tag">時間はふさがない</span>
+                  <Tag>時間はふさがない</Tag>
                 </Show>
-                <For each={event().labels}>{(l) => <span class="tag label">{l}</span>}</For>
+                <For each={event().labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
               </div>
               <EventButtons event={event()} />
               <Show when={event().location}>
@@ -159,27 +154,21 @@ export default function EventSheet(props: { event: CalendarEvent | undefined; re
                     <Show
                       when={event().record}
                       fallback={
-                        <button type="button" class="btn small" onClick={() => void addNotes(event())}>
-                          <Icon svg={icons.pencil} size={13} />
-                          備考やラベルを書き足す
-                        </button>
+                        <Button small icon={icons.pencil} onClick={() => void addNotes(event())}>
+備考やラベルを書き足す
+                        </Button>
                       }
                     >
-                      <A class="btn small" href={`${props.back}${props.back.includes("?") ? "&" : "?"}record=${event().record}`}>
-                        <Icon svg={icons.pencil} size={13} />
-                        書き足したものを開く
-                      </A>
+                      <LinkButton small icon={icons.pencil} href={`${props.back}${props.back.includes("?") ? "&" : "?"}record=${event().record}`}>
+書き足したものを開く
+                      </LinkButton>
                     </Show>
-                    <button
-                      type="button"
-                      class="btn small"
-                      onClick={() => {
+                    <Button small onClick={() => {
                         props.onClose();
                         queueMicrotask(() => ask(`「${event().title}」（${whenOf(event())}）を`));
-                      }}
-                    >
+                      }}>
                       変更を頼む
-                    </button>
+                    </Button>
                   </div>
                   <p class="sub">書き足したものは手帳に置かれ、Google には送らない。</p>
                 </section>

@@ -1,14 +1,13 @@
 import { createAsync, query } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import type { LogEvent, LogItem, LogTurn } from "~/gen/famulen/v1/settings_pb";
 import { clock, dayLabel } from "~/lib/dates";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { setSelection } from "~/lib/view";
-import "./log.css";
 import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
+import { EmptyState, Icon, SegmentedOf, Tag } from "~/components/ui";
 
 const logQuery = query(async (show: string, before: number) => {
   const page = await api.log.listLog({ show, before: BigInt(before), limit: PAGE });
@@ -59,21 +58,8 @@ export default function SecretaryLog() {
 
   return (
     <>
-      <div class="row" style={{ gap: "6px" }}>
-        <For each={FILTERS}>
-          {([key, label]) => (
-            <button
-              type="button"
-              class={`btn small${show() === key ? " primary" : ""}`}
-              aria-pressed={show() === key}
-              onClick={() => choose(key)}
-            >
-              {label}
-            </button>
-          )}
-        </For>
-      </div>
-      <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+      <SegmentedOf label="出すもの" items={FILTERS} value={show()} onChoose={choose} />
+      <div class="stack">
         <For each={days()}>
           {(g) => (
             <>
@@ -90,7 +76,7 @@ export default function SecretaryLog() {
           )}
         </For>
         <Show when={pages.loaded() && items().length === 0}>
-          <p class="empty">まだない</p>
+          <EmptyState>まだない</EmptyState>
         </Show>
       </div>
       <PageNav pages={pages} />
@@ -127,24 +113,24 @@ function Turn(props: { turn: LogTurn; tz: string }) {
         }
       }}
     >
-      <div class="row" style={{ gap: "8px" }}>
+      <div class="row">
         <span class="sub mono">{clock(t().at, props.tz)}</span>
         <Show when={t().origin}>
-          <span class="tag">{t().origin}から</span>
+          <Tag>{t().origin}から</Tag>
         </Show>
         <Show when={t().steps.length > 0}>
-          <span class="tag">
+          <Tag>
             道具 {t().steps.length} 回
-          </span>
+          </Tag>
         </Show>
         <For each={stopped()}>
           {(s) => (
-            <span class="tag warn">
+            <Tag tone="warn">
               {s.tool} · {s.outcome}
-            </span>
+            </Tag>
           )}
         </For>
-        <span class="sub" style={{ "margin-left": "auto" }}>
+        <span class="sub push">
           <Icon svg={open() ? icons.chevronDown : icons.chevronRight} size={14} />
         </span>
       </div>
@@ -155,11 +141,11 @@ function Turn(props: { turn: LogTurn; tz: string }) {
         <div class="log-steps">
           <For each={t().steps}>
             {(s) => (
-              <span class="tag">
+              <Tag>
                 <Icon svg={icons.plugConnected} size={12} />
                 {s.service ? `${s.service} · ` : ""}
                 {s.tool}
-              </span>
+              </Tag>
             )}
           </For>
         </div>
@@ -174,7 +160,7 @@ function Turn(props: { turn: LogTurn; tz: string }) {
                   {s.tool}
                   <Show when={s.outcome}>
                     {" "}
-                    <span class="tag warn">{s.outcome}</span>
+                    <Tag tone="warn">{s.outcome}</Tag>
                   </Show>
                 </div>
                 <Show when={s.args}>
@@ -196,7 +182,7 @@ function Event(props: { event: LogEvent; tz: string }) {
   return (
     <div class="log-event">
       <span class="sub mono">{clock(props.event.at, props.tz)}</span>
-      <span class="tag">{EVENTS[props.event.kind] ?? props.event.kind}</span>
+      <Tag>{EVENTS[props.event.kind] ?? props.event.kind}</Tag>
       <span class="detail-text">{props.event.detail}</span>
     </div>
   );

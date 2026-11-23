@@ -1,7 +1,6 @@
 import { minutesNow, clock, dayOf, hm, localDate, minutesOfDay, weekday } from "~/lib/dates";
 import { createAsync, useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import AddEvent from "~/components/records/AddEvent";
 import EventSheet, { whenOf } from "~/components/records/EventSheet";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
@@ -13,6 +12,7 @@ import { oneParam } from "~/lib/params";
 import { setSelection, setView } from "~/lib/view";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
+import { Button, Icon, IconButton, LinkButton } from "~/components/ui";
 
 const UNITS: [Unit, string][] = [
   ["day", "日"],
@@ -107,15 +107,11 @@ export default function Calendar() {
         return (
           <>
             <div class="row">
-              <a class="btn" href={href(unit(), d().today)}>
+              <LinkButton href={href(unit(), d().today)}>
                 今日
-              </a>
-              <a class="btn small" href={href(unit(), d().range.prev)} aria-label="前へ">
-                <Icon svg={icons.chevronLeft} size={16} />
-              </a>
-              <a class="btn small" href={href(unit(), d().range.next)} aria-label="次へ">
-                <Icon svg={icons.chevronRight} size={16} />
-              </a>
+              </LinkButton>
+              <LinkButton small icon={icons.chevronLeft} label="前へ" href={href(unit(), d().range.prev)} />
+              <LinkButton small icon={icons.chevronRight} label="次へ" href={href(unit(), d().range.next)} />
               <h1 style={{ "margin-left": "6px", "font-size": "18px" }}>{d().range.title}</h1>
               <div class="seg d-only" style={{ "margin-left": "auto" }}>
                 <For each={UNITS}>
@@ -126,18 +122,10 @@ export default function Calendar() {
                   )}
                 </For>
               </div>
-              <button type="button" class="btn primary d-only" onClick={() => setAdding(d().range.days.includes(d().today) ? d().today : d().at)}>
-                <Icon svg={icons.plus} size={14} />
-                予定を足す
-              </button>
-              <button
-                type="button"
-                class="btn small"
-                aria-label="読み直す"
-                onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")}
-              >
-                <Icon svg={icons.refresh} size={14} />
-              </button>
+              <Button variant="primary" icon={icons.plus} class="d-only" onClick={() => setAdding(d().range.days.includes(d().today) ? d().today : d().at)}>
+予定を足す
+              </Button>
+              <IconButton icon={icons.refresh} label="読み直す" onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")} />
             </div>
             <Show when={d().noCalendars}>
               <div class="notice">

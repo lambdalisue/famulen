@@ -7,6 +7,7 @@ import { usePicked } from "~/lib/picked";
 import RecordDetail from "./RecordDetail";
 import { useOwner } from "~/lib/owner";
 import RecordsPage, { type Group } from "./RecordsPage";
+import { Tag } from "~/components/ui";
 
 /** Things, or contracts: the same page over a different kind. */
 export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) {
@@ -56,13 +57,13 @@ export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) 
         <b>{r.title}</b>
         <span class="rec-sub">
           <Show when={valueOf(r, "Status") && !["owned", "active"].includes(valueOf(r, "Status"))}>
-            <span class="tag">{choiceOf(valueOf(r, "Status"))}</span>
+            <Tag>{choiceOf(valueOf(r, "Status"))}</Tag>
           </Show>
           <Show when={card && valueOf(r, "Category")}>
-            <span class="tag">{valueOf(r, "Category")}</span>
+            <Tag>{valueOf(r, "Category")}</Tag>
           </Show>
           <For each={facts(r).filter(Boolean)}>{(f) => <span>{f}</span>}</For>
-          <For each={r.labels}>{(l) => <span class="tag label">{l}</span>}</For>
+          <For each={r.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>
           <span>{workgroupNames(workgroups(), r.workgroups)}</span>
         </span>
         <Show when={card && r.notes}>

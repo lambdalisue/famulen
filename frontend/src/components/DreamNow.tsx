@@ -1,10 +1,10 @@
 import { A, createAsync, revalidate } from "@solidjs/router";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
-import Icon from "~/components/Icon";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { dreamsQuery, layersQuery } from "~/lib/memory";
+import { Button, Tag } from "~/components/ui";
 
 /** How long to wait for a dream asked for to show up before saying it did not start. */
 const START_WAIT_MS = 20000;
@@ -50,23 +50,22 @@ export default function DreamNow(props: { linkWhy?: boolean }) {
   return (
     <span class="row dream-now">
       <Show when={running()}>
-        <span class="tag" role="status">
+        <Tag role="status">
           いま見ている…
-        </span>
+        </Tag>
       </Show>
       <Show when={!running() && dreams()?.blocked}>
         {(why) => (
-          <Show when={props.linkWhy} fallback={<span class="tag warn">{why()}</span>}>
-            <A class="tag warn" style={{ "text-decoration": "none" }} href="/settings/roles/dream">
+          <Show when={props.linkWhy} fallback={<Tag tone="warn">{why()}</Tag>}>
+            <A class="tag warn" href="/settings/roles/dream">
               {why()}
             </A>
           </Show>
         )}
       </Show>
-      <button type="button" class="btn" disabled={running() || !!dreams()?.blocked} onClick={dreamNow}>
-        <Icon svg={icons.refresh} size={14} />
-        今すぐ夢を見る
-      </button>
+      <Button icon={icons.refresh} disabled={running() || !!dreams()?.blocked} onClick={dreamNow}>
+今すぐ夢を見る
+      </Button>
     </span>
   );
 }

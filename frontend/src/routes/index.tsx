@@ -1,7 +1,6 @@
 import { addDays, dateLabel, dateText, daysLeft, hm, nearness } from "~/lib/dates";
 import { A, createAsync, query, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
-import Icon from "~/components/Icon";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import TaskRow from "~/components/records/TaskRow";
 import type { Tile } from "~/gen/famulen/v1/settings_pb";
@@ -14,7 +13,7 @@ import * as icons from "~/lib/icons";
 import { bucketOf, deadlinesOf, hrefOf, excerptOf, isOver, isPast, OWNER, type Rec, recordsQuery, SECRETARY, valueOf } from "~/lib/records";
 import { setView } from "~/lib/view";
 import { useOwner } from "~/lib/owner";
-import "~/components/records/records.css";
+import { Button, EmptyState, Icon, IconButton, LinkButton, List, Select } from "~/components/ui";
 
 const homeQuery = query(() => api.settings.getHome({}), "home");
 
@@ -82,7 +81,7 @@ function TodayTile() {
   return (
     <>
       <Show when={events() && shown().length === 0}>
-        <p class="empty">今日の予定はない</p>
+        <EmptyState>今日の予定はない</EmptyState>
       </Show>
       <For each={shown()}>
         {(e) => {
@@ -110,10 +109,9 @@ function TodayTile() {
                 </Show>
               </span>
               <Show when={e.meeting && !past(e)}>
-                <a class="btn small go" href={e.meeting} target="_blank" rel="noreferrer">
-                  <Icon svg={icons.video} size={13} />
-                  入る
-                </a>
+                <LinkButton variant="go" small icon={icons.video} href={e.meeting}>
+入る
+                </LinkButton>
               </Show>
             </div>
           );
@@ -126,7 +124,7 @@ function TodayTile() {
 function ApprovalsTile() {
   const pending = useWaiting().approvals;
   return (
-    <Show when={pending().length > 0} fallback={<p class="empty">いまはない</p>}>
+    <Show when={pending().length > 0} fallback={<EmptyState>いまはない</EmptyState>}>
       <div class="row">
         <span class="mono" style={{ "font-size": "24px" }}>
           {pending().length}
@@ -140,9 +138,9 @@ function ApprovalsTile() {
           </div>
         )}
       </For>
-      <button type="button" class="btn small" onClick={openSheet}>
+      <Button small onClick={openSheet}>
         会話を開く
-      </button>
+      </Button>
     </Show>
   );
 }
@@ -156,7 +154,7 @@ function AideTile(props: { aide: string }) {
   return (
     <Show
       when={open().length > 0 || (working() ?? []).length > 0}
-      fallback={<p class="empty">{props.aide} が進めている仕事はない</p>}
+      fallback={<EmptyState>{props.aide} が進めている仕事はない</EmptyState>}
     >
       <For each={open().slice(0, 6)}>
         {(t) => (
@@ -188,7 +186,7 @@ function TaskTile() {
   return (
     <div class="rec-rows">
       <Show when={tasks() && soon().length === 0}>
-        <p class="empty">今日と今週のタスクはない</p>
+        <EmptyState>今日と今週のタスクはない</EmptyState>
       </Show>
       <For each={soon()}>
         {(t) => (
@@ -212,7 +210,7 @@ function MemosTile() {
   return (
     <>
       <Show when={memos()?.length === 0}>
-        <p class="empty">メモはまだない</p>
+        <EmptyState>メモはまだない</EmptyState>
       </Show>
       <For each={latest()}>
         {(m) => (
@@ -236,7 +234,7 @@ function DueTile() {
   const due = createAsync(() => dueQuery(workgroup()));
   const day = owner.today;
   return (
-    <Show when={(due() ?? []).length > 0} fallback={<p class="empty">近い期限はない</p>}>
+    <Show when={(due() ?? []).length > 0} fallback={<EmptyState>近い期限はない</EmptyState>}>
       <For each={(due() ?? []).slice(0, 6)}>
         {(d) => (
           <A class="home-line" href={line(d.record)}>
@@ -266,11 +264,11 @@ function SetupGuide() {
       >
         <div class="row">
           <h2 class="grow">はじめに</h2>
-          <button type="button" class="btn small ghost" onClick={() => act(() => api.settings.hideSetup({}), "")}>
+          <Button variant="ghost" small onClick={() => act(() => api.settings.hideSetup({}), "")}>
             あとで
-          </button>
+          </Button>
         </div>
-        <div class="list">
+        <List>
           <For each={steps()}>
             {(s) => (
               <A class="item" href={s.path} style={{ color: "inherit", "text-decoration": "none" }}>
@@ -281,7 +279,7 @@ function SetupGuide() {
               </A>
             )}
           </For>
-        </div>
+        </List>
       </section>
     </Show>
   );
@@ -338,10 +336,9 @@ export default function Home() {
         <span class="sub">
           予定 {shownEvents()} · あなたの今日のタスク {mine()} · {aide()} が {aides()} 件を進めている
         </span>
-        <button type="button" class="btn small ghost" style={{ "margin-left": "auto" }} onClick={toggleEditing}>
-          <Icon svg={icons.layoutGrid} size={14} />
-          並べ替える
-        </button>
+        <Button variant="ghost" small icon={icons.layoutGrid} style={{ "margin-left": "auto" }} onClick={toggleEditing}>
+並べ替える
+        </Button>
         <form
           class="row tile-ctl"
           onSubmit={(e) => {
@@ -352,7 +349,7 @@ export default function Home() {
           <label for="tile-kind" class="sr">
             足すタイル
           </label>
-          <select id="tile-kind" class="input" onChange={(e) => setKind(e.currentTarget.value)}>
+          <Select id="tile-kind" onChange={(e) => setKind(e.currentTarget.value)}>
             <For each={kinds()}>
               {(k) => (
                 <option value={k.kind} selected={k.kind === kind()}>
@@ -360,11 +357,10 @@ export default function Home() {
                 </option>
               )}
             </For>
-          </select>
-          <button type="submit" class="btn">
-            <Icon svg={icons.plus} size={14} />
-            タイルを足す
-          </button>
+          </Select>
+          <Button icon={icons.plus} type="submit">
+タイルを足す
+          </Button>
         </form>
       </div>
       <SetupGuide />
@@ -377,18 +373,10 @@ export default function Home() {
                   {label(t.kind)}
                 </h2>
                 <div class="row tile-ctl" style={{ gap: "2px" }}>
-                  <button type="button" class="btn small" aria-label="前へ" onClick={() => move(i(), "up")}>
-                    <Icon svg={icons.arrowUp} size={12} />
-                  </button>
-                  <button type="button" class="btn small" aria-label="後ろへ" onClick={() => move(i(), "down")}>
-                    <Icon svg={icons.arrowDown} size={12} />
-                  </button>
-                  <button type="button" class="btn small" aria-label="大きさを変える" onClick={() => move(i(), "size")}>
-                    <Icon svg={icons.layoutGrid} size={12} />
-                  </button>
-                  <button type="button" class="btn small" aria-label="外す" onClick={() => move(i(), "remove")}>
-                    <Icon svg={icons.x} size={12} />
-                  </button>
+                  <IconButton icon={icons.arrowUp} label="前へ" onClick={() => move(i(), "up")} />
+                  <IconButton icon={icons.arrowDown} label="後ろへ" onClick={() => move(i(), "down")} />
+                  <IconButton icon={icons.layoutGrid} label="大きさを変える" onClick={() => move(i(), "size")} />
+                  <IconButton icon={icons.x} label="外す" onClick={() => move(i(), "remove")} />
                 </div>
               </header>
               <div style={{ "overflow-y": "auto" }}>
