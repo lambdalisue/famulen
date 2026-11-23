@@ -43,6 +43,7 @@ url = "2.5.9"
 ox_content_allocator = "3.9.0"
 ox_content_ast = "3.9.0"
 ox_content_parser = "3.9.0"
+rustix = { version = "1.1.6", features = ["process"] }
 rrule = "0.14.0"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -238,7 +238,8 @@ impl<S: Slack> Approvals<S> {
     }
 
     /// Act on an answer given on the console, or a button press that passed
-    /// its checks.
+    /// its checks. `None` when there is nothing to tell the session: it was
+    /// answered before, or the call is not the session's.
     pub async fn answer_by_id(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Input>> {
         let Some(answered) = self
             .permissions
@@ -281,6 +282,10 @@ impl<S: Slack> Approvals<S> {
                 None => request_message(id, &tool, &input, Some(answer), false),
             };
             slack.update(&channel, &ts, message).await?;
+        }
+        // A worker's call is made by the pool, which sees the answer itself.
+        if answered.ticket.actor == crate::permissions::WORKER {
+            return Ok(None);
         }
         let text = match answered.ran {
             Some(Ok(())) if answer == Answer::Reject => {

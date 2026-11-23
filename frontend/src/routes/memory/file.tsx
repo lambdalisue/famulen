@@ -1,9 +1,10 @@
 import { A, createAsync, useSearchParams } from "@solidjs/router";
-import { createEffect, For, Match, Show, Switch } from "solid-js";
+import { createEffect, For, Match, Show, Switch, untrack } from "solid-js";
 import Markdown from "~/components/Markdown";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { personaQuery } from "~/lib/data";
+import { createDraft } from "~/lib/draft";
 import { memoryFileQuery, stamp } from "~/lib/memory";
 import { setView } from "~/lib/view";
 
@@ -12,6 +13,30 @@ const MODES: [string, string][] = [
   ["write", "書く"],
   ["history", "経緯"],
 ];
+
+/** A file as it is being written: what is typed stays when the page's data loads again. */
+function Writing(props: { path: string; text: string; onSave: (text: string) => void }) {
+  const [draft, setDraft] = createDraft(() => props.text);
+  return (
+    <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+      <label for="mem-edit" class="sr">
+        {props.path} を書く
+      </label>
+      <textarea
+        id="mem-edit"
+        class="input mono"
+        style={{ "min-height": "420px", "font-size": "13px", "line-height": 1.8 }}
+        value={draft()}
+        onInput={(e) => setDraft(e.currentTarget.value)}
+        onChange={(e) => props.onSave(e.currentTarget.value)}
+      >
+        {/* Also the content: the server writes `value` as an attribute, which a textarea ignores, and hydration does not set it. */}
+        {untrack(draft)}
+      </textarea>
+      <span class="sub">書き終えて離れると保存し、あなたが直したこととして経緯に残る</span>
+    </div>
+  );
+}
 
 export default function MemoryFile() {
   const [params] = useSearchParams();
@@ -50,22 +75,7 @@ export default function MemoryFile() {
         {(f) => (
           <Switch fallback={<div class="card"><Markdown text={f().text} attributes /></div>}>
             <Match when={mode() === "write"}>
-              <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-                <label for="mem-edit" class="sr">
-                  {path()} を書く
-                </label>
-                <textarea
-                  id="mem-edit"
-                  class="input mono"
-                  style={{ "min-height": "420px", "font-size": "13px", "line-height": 1.8 }}
-                  value={f().text}
-                  onChange={(e) => save(e.currentTarget.value)}
-                >
-                  {/* Also the content: the server writes `value` as an attribute, which a textarea ignores, and hydration does not set it. */}
-                  {f().text}
-                </textarea>
-                <span class="sub">書き終えて離れると保存し、あなたが直したこととして経緯に残る</span>
-              </div>
+              <Writing path={path()} text={f().text} onSave={(text) => void save(text)} />
             </Match>
             <Match when={mode() === "history"}>
               <div class="list">

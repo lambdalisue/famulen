@@ -156,6 +156,14 @@ impl Patch {
     }
 }
 
+/// What the worker pool did with a task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskNote {
+    pub(crate) line: String,
+    pub(crate) status: Option<&'static str>,
+    pub(crate) waiting_for: Option<&'static str>,
+}
+
 /// A line of a record's log.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LogLine {
@@ -220,6 +228,12 @@ pub fn log_lines(record: &Record) -> Vec<LogLine> {
             line
         })
         .collect()
+}
+
+/// Whether a task is delegated to a worker. It is its owner's, the
+/// secretary's and the pool's to change, and no chore's.
+pub fn is_delegated(task: &Record) -> bool {
+    task.kind == TASKS && task.body.value("Assignee").as_deref() == Some(crate::workers::WORKER)
 }
 
 /// Whether a task is over.
@@ -379,6 +393,7 @@ impl Records {
         let set = |w: &[String]| w.iter().cloned().collect::<BTreeSet<_>>();
         Ok(self.list(TASKS)?.into_iter().find(|t| {
             !is_over(t)
+                && !is_delegated(t)
                 && plain(&t.title()) == plain(title)
                 && set(&t.workgroups()) == set(workgroups)
         }))
@@ -525,6 +540,39 @@ impl Records {
             record.body.log(&at, "famulen", line)?;
         }
         record.body.set("Skip", skips.to_vec())?;
+        let subject = format!("{} の経過を書いた", record.title());
+        self.notebook
+            .write(&Writer::Secretary.signature(), &record, &subject)
+    }
+
+    /// Write what the worker pool did with a task: a line of its log, and how
+    /// it stands unless the task is over or taken back. Writing the same line again does
+    /// nothing.
+    pub(crate) fn note_task(&self, id: &str, note: &TaskNote) -> anyhow::Result<()> {
+        let _writing = self.writing();
+        let mut record = self.need(TASKS, id)?;
+        if log_lines(&record).iter().any(|l| l.text == note.line) {
+            return Ok(());
+        }
+        let at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+        // One taken back meanwhile is not the pool's to change.
+        let pools = is_delegated(&record) && !is_over(&record);
+        if let Some(status) = note.status.filter(|_| pools) {
+            let before = record.body.value("Status").unwrap_or_default();
+            if before != status {
+                record.body.set("Status", status)?;
+                record
+                    .body
+                    .log(&at, "famulen", &format!("{before} → {status}"))?;
+            }
+            record
+                .body
+                .set("Waiting for", note.waiting_for.unwrap_or_default())?;
+            if is_over(&record) {
+                record.body.set("Finished", at.as_str())?;
+            }
+        }
+        record.body.log(&at, "famulen", &note.line)?;
         let subject = format!("{} の経過を書いた", record.title());
         self.notebook
             .write(&Writer::Secretary.signature(), &record, &subject)

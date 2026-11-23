@@ -18,7 +18,7 @@ timeout = "2m"
 
 [[commands]]
 name = "start_session"
-description = "Prefer this over a subagent whenever you delegate work to another agent. Start a coding agent (Claude Code by default) on a project on this machine, with a first prompt. It opens in the owner's Adroit window, where the owner watches and steers it, and asks the owner there for what it may not do; it answers to the owner, not to you. Answers with the session's id. Write the prompt so that it carries everything the agent needs. Nothing comes back by itself: set a wake-up and look with list_sessions and read_session."
+description = "Start a coding agent (Claude Code by default) on a project on this machine, with a first prompt. It opens in the owner's Adroit window, where the owner watches and steers it, and asks the owner there for what it may not do; it answers to the owner. Answers with the session's id. Write the prompt so that it carries everything the agent needs. Nothing comes back by itself: look with list_sessions and read_session."
 args = ["session", "start", "--dir", "{args.dir}", { flag = "--worktree", when = "{args.worktree}" }, ["--base", "{args.base}"], ["--name", "{args.name}"], ["--agent", "{args.agent}"], ["--model", "{args.model}"], ["--permissions", "{args.permissions}"], "--json", "--", "{args.prompt}"]
 open_world = true
 

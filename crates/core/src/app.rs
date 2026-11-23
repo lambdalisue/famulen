@@ -40,6 +40,7 @@ pub struct App {
     pub console: ConsoleLog,
     pub permissions: Permissions,
     pub models: Models,
+    pub workers: crate::workers::Workers,
     pub lookout: crate::lookout::Lookout,
     pub triage: crate::triage::Triage,
     pub journal: Journal,

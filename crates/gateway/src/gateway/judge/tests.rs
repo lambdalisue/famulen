@@ -265,8 +265,8 @@ fn a_ticket_that_waited_too_long_lapses() {
             params![now() - TICKET_LIFETIME_SECS - 1, ticket.id],
         )
         .unwrap();
-    assert!(g.held_tickets().unwrap().is_empty());
     assert_eq!(g.ticket(ticket.id).unwrap().unwrap().status, "lapsed");
+    assert!(g.held_tickets().unwrap().is_empty());
 }
 
 /// An assessor that answers the same each time and counts what it weighed.
@@ -437,4 +437,65 @@ async fn the_assessor_does_not_see_a_secret_field() {
     g.judge_assessed(&secret).await.unwrap();
 
     assert_eq!(assessor.weighed.lock().unwrap()[0], json!({ "to": "…" }));
+}
+
+#[tokio::test]
+async fn a_caller_that_cannot_ask_is_refused_where_the_owner_would_be_asked() {
+    let g = gateway();
+    assessed_by(&g, lets_it_run());
+    let unasked = |tool: &str| Call {
+        never_ask: true,
+        ..call(tool)
+    };
+
+    assert!(is_allow(
+        &g.judge_assessed(&unasked("search_threads")).await.unwrap()
+    ));
+    assert!(is_allow(
+        &g.judge_assessed(&unasked("create_draft")).await.unwrap()
+    ));
+    let Verdict::Deny { reason } = g.judge_assessed(&unasked("send_message")).await.unwrap() else {
+        panic!("should be refused");
+    };
+    assert!(reason.starts_with(NEEDS_OWNER), "{reason}");
+    assert!(g.held_tickets().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_caller_that_cannot_ask_does_not_use_up_an_approval() {
+    let g = gateway();
+    let Verdict::Hold(ticket) = g.judge(&call("send_message")).unwrap() else {
+        panic!("should be held");
+    };
+    g.answer_ticket(ticket.id, Answer::Approve).await.unwrap();
+
+    let unasked = Call {
+        never_ask: true,
+        ..call("send_message")
+    };
+    assert!(matches!(g.judge(&unasked).unwrap(), Verdict::Deny { .. }));
+    assert!(is_allow(&g.judge(&call("send_message")).unwrap()));
+}
+
+#[tokio::test]
+async fn a_withdrawn_ticket_can_be_answered_no_more_and_is_found_by_its_call() {
+    let g = gateway();
+    let Verdict::Hold(ticket) = g.judge(&call("send_message")).unwrap() else {
+        panic!("should be held");
+    };
+    assert_eq!(
+        g.ticket_for(&call("send_message")).unwrap().unwrap().id,
+        ticket.id
+    );
+    assert!(g.ticket_for(&call("create_draft")).unwrap().is_none());
+
+    assert!(g.withdraw_ticket(ticket.id).unwrap());
+
+    assert!(!g.withdraw_ticket(ticket.id).unwrap());
+    assert!(
+        g.answer_ticket(ticket.id, Answer::Approve)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

@@ -17,4 +17,5 @@ mod status;
 mod support;
 mod tools;
 mod vault;
+mod workers;
 mod writable;

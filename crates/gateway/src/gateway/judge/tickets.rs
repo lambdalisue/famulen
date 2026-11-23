@@ -165,6 +165,7 @@ impl Gateway {
     }
 
     pub fn ticket(&self, id: i64) -> anyhow::Result<Option<Ticket>> {
+        self.lapse_tickets()?;
         Ok(self.tickets_where(&format!("id = {id}"))?.pop())
     }
 
@@ -222,6 +223,30 @@ impl Gateway {
             }
         }
         Ok(withdrawn)
+    }
+
+    /// Take back a held ticket whose call is wanted no more. Whether it was
+    /// still held.
+    pub fn withdraw_ticket(&self, id: i64) -> anyhow::Result<bool> {
+        let changed = self.store.conn().execute(
+            "UPDATE tickets SET status = 'lapsed', answered_at = ?1 WHERE id = ?2 AND status = 'held'",
+            params![now(), id],
+        )?;
+        if changed > 0 {
+            self.drop_sealed(id)?;
+        }
+        Ok(changed > 0)
+    }
+
+    /// The newest ticket of the same call by the same caller, however it
+    /// stands.
+    pub fn ticket_for(&self, call: &Call) -> anyhow::Result<Option<Ticket>> {
+        Ok(self.tickets_where("1")?.into_iter().rev().find(|t| {
+            t.actor == call.actor
+                && t.connection == call.connection
+                && t.tool == call.tool
+                && t.shown == call.input
+        }))
     }
 
     /// Whether the owner answered a question through a ticket.

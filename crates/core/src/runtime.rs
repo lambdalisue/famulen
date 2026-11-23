@@ -14,6 +14,7 @@ mod slack;
 mod watch;
 
 pub use dream::*;
+pub(crate) use engine::secretary as secretary_model;
 pub use open::*;
 pub use prompt::*;
 pub use receive::*;
@@ -70,6 +71,7 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     app.permissions.record_own_tools(&tools.list())?;
     tokio::spawn(chores::chores(app.clone()));
     tokio::spawn(chores::keep_finding_models(app.clone()));
+    tokio::spawn(crate::workers::run(app.clone()));
     tokio::spawn(chores::rebuild_when_redefined(app.clone()));
     let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
     let inbox: engine::ChannelInbox = Arc::new(tokio::sync::Mutex::new(inbox_rx));

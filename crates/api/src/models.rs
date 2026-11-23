@@ -10,12 +10,13 @@ use crate::pb::{self, *};
 use crate::{Api, OWNER, OrFail, fail, given};
 
 /// The roles the owner chooses a model for; the voice waits for the glasses.
-const ROLES: [(pb::Role, CoreRole, &str); 5] = [
+const ROLES: [(pb::Role, CoreRole, &str); 6] = [
     (pb::Role::ROLE_SECRETARY, CoreRole::Secretary, "秘書"),
     (pb::Role::ROLE_DREAM, CoreRole::Dream, "夢"),
     (pb::Role::ROLE_LOOKOUT, CoreRole::Lookout, "見張り"),
     (pb::Role::ROLE_TRIAGE, CoreRole::Triage, "トリアージ"),
     (pb::Role::ROLE_ASSESS, CoreRole::Assess, "見極め"),
+    (pb::Role::ROLE_WORKER, CoreRole::Worker, "手代"),
 ];
 
 fn core_role(r: pb::Role) -> Option<CoreRole> {

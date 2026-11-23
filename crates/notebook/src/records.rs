@@ -567,6 +567,31 @@ mod tests {
     }
 
     #[test]
+    fn a_standard_kind_has_its_standard_fields_whatever_its_readme_leaves_out() {
+        let (_tmp, r) = records("records-kinds-older");
+        std::fs::write(
+            r.notebook().records_dir().join("tasks/README.md"),
+            "---\ncode: todo\nfields:\n  Status: [open, done]\n  Where: text\n---\n",
+        )
+        .unwrap();
+
+        let tasks = r.kind("tasks").unwrap();
+
+        assert_eq!(tasks.code, "todo");
+        assert!(matches!(
+            tasks.field("Status"),
+            Some((_, FieldType::OneOf(c))) if c.contains(&"open".to_owned())
+        ));
+        assert!(tasks.field("Where").is_some());
+        assert!(tasks.field("Due").is_some());
+        assert!(matches!(
+            tasks.section("delegation"),
+            Some((_, SectionType::Fields(_)))
+        ));
+        assert!(tasks.layout.sections.contains(&"Delegation".to_owned()));
+    }
+
+    #[test]
     fn the_standard_kinds_declare_their_fields_sections_and_code_words() {
         let (_tmp, r) = records("records-kinds");
 

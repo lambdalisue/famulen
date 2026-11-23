@@ -23,13 +23,22 @@ use crate::store::{Store, now};
 
 /// Who the secretary is, to the gateway.
 pub const SECRETARY: &str = "secretary";
+/// Who starts and runs delegated tasks, to the gateway.
+pub const WORKER: &str = "worker";
+
+/// Built-in tools that start other agents. No model uses them: work is
+/// delegated through tasks, which the worker pool picks up.
+pub const LAUNCHERS: &[&str] = &["Task", "Agent", "Workflow", "TeamCreate"];
+
+/// What a model reads when it tries to start an agent by itself.
+pub const DELEGATE_INSTEAD: &str = "Agents are not started this way. Add a delegated task with delegate_task (runner adroit or agent): a worker picks it up in priority order, and you are told when it ends.";
 
 /// Who in the secretary's process makes a call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Caller {
     /// The session the owner talks to.
     Secretary,
-    /// A subagent it handed work to.
+    /// A subagent in it, which is let use nothing: work is delegated.
     Subagent,
 }
 
@@ -58,8 +67,6 @@ const READING_BUILTINS: &[&str] = &[
     // Only loads a skill's instructions; the copies Famulen gives the
     // secretary grant no tools, so what a skill leads to is still asked.
     "Skill",
-    "Task",
-    "Agent",
     "TaskOutput",
     "ListMcpResourcesTool",
     "ReadMcpResourceTool",
@@ -190,12 +197,22 @@ impl Permissions {
         tool_name: &str,
         input: &Value,
     ) -> anyhow::Result<Decision> {
+        if caller == Caller::Subagent {
+            return Ok(Decision::Forbid(DELEGATE_INSTEAD.to_owned()));
+        }
         let call = match split_tool(tool_name) {
+            Some((connection, tool)) if self.starts_agents(connection, tool) => {
+                return Ok(Decision::Forbid(DELEGATE_INSTEAD.to_owned()));
+            }
             Some((connection, _)) if connection != hub::SERVER_NAME => return Ok(Decision::Allow),
             Some((_, tool)) if JUDGED_ON_ARRIVAL.contains(&tool) => return Ok(Decision::Allow),
             Some((connection, tool)) => Call::new(SECRETARY, connection, tool, input.clone()),
+            None if LAUNCHERS.contains(&tool_name) => Call {
+                refuse: Some(DELEGATE_INSTEAD.to_owned()),
+                ..Call::new(SECRETARY, "", tool_name, input.clone())
+            },
             None => Call {
-                marks: Some(self.marks_of_builtin(caller, tool_name, input)),
+                marks: Some(self.marks_of_builtin(tool_name, input)),
                 waive: self.writes_memory(tool_name, input),
                 refuse: self.sealed.refusal(tool_name, input),
                 ..Call::new(SECRETARY, "", tool_name, input.clone())
@@ -206,6 +223,87 @@ impl Permissions {
             Verdict::Hold(ticket) => Decision::Held(ticket.id),
             Verdict::Deny { reason } => Decision::Forbid(format!("{tool_name}: {reason}")),
         })
+    }
+
+    /// Decide one call of a worker's model, refused when `refuse` says why. A
+    /// connection's tool is judged when it reaches the gateway. What would be
+    /// asked of the owner is refused: a worker cannot wait for the answer.
+    pub async fn decide_worker(
+        &self,
+        tool_name: &str,
+        input: &Value,
+        refuse: Option<String>,
+    ) -> anyhow::Result<Decision> {
+        if refuse.is_none() && split_tool(tool_name).is_some() {
+            return Ok(Decision::Allow);
+        }
+        let call = Call {
+            marks: Some(builtin_marks(tool_name)),
+            refuse,
+            never_ask: true,
+            ..Call::new(WORKER, "", tool_name, input.clone())
+        };
+        Ok(match self.gateway.judge_assessed(&call).await? {
+            Verdict::Allow { .. } => Decision::Allow,
+            Verdict::Hold(_) => Decision::Forbid(famulen_gateway::NEEDS_OWNER.to_owned()),
+            Verdict::Deny { reason } => Decision::Forbid(format!("{tool_name}: {reason}")),
+        })
+    }
+
+    /// Why a connection is asked about when a delegated task uses it: it is
+    /// outside one of the workgroups the task is bound to, or there is none.
+    pub fn ask_outside(
+        &self,
+        connection: &str,
+        scopes: &[String],
+    ) -> anyhow::Result<Option<String>> {
+        if scopes.is_empty() {
+            return Ok(Some(
+                "it is not known from which workgroup the task was delegated".into(),
+            ));
+        }
+        for scope in scopes {
+            if let Some(why) = self.ask_in(connection, scope)? {
+                return Ok(Some(why));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether a connection's tool starts an agent.
+    pub fn starts_agents(&self, connection: &str, tool: &str) -> bool {
+        crate::workers::adroit::LAUNCH.contains(&tool)
+            && self
+                .connections
+                .get(connection)
+                .ok()
+                .flatten()
+                .is_some_and(|c| crate::workers::adroit::is_adroit(&c))
+    }
+
+    /// The answer to an MCP message that calls a tool which starts an agent;
+    /// `None` for any other message.
+    pub fn refused_launch(&self, server: &str, message: &Value) -> Option<Value> {
+        let name = message.pointer("/params/name").and_then(Value::as_str)?;
+        if message["method"] != "tools/call" || !self.starts_agents(server, name) {
+            return None;
+        }
+        Some(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": message.get("id")?,
+            "result": { "content": [{ "type": "text", "text": DELEGATE_INSTEAD }], "isError": true },
+        }))
+    }
+
+    /// An MCP answer whose list of tools leaves out those that start agents.
+    pub fn without_launchers(&self, server: &str, mut response: Value) -> Value {
+        if let Some(tools) = response
+            .pointer_mut("/result/tools")
+            .and_then(Value::as_array_mut)
+        {
+            tools.retain(|t| !self.starts_agents(server, t["name"].as_str().unwrap_or_default()));
+        }
+        response
     }
 
     /// Why a call to `connection` made in `workgroup` is asked about even when its
@@ -227,12 +325,12 @@ impl Permissions {
         Ok((!inside).then(|| format!("{connection} is outside the workgroup {workgroup}")))
     }
 
-    fn marks_of_builtin(&self, caller: Caller, tool_name: &str, input: &Value) -> Marks {
+    fn marks_of_builtin(&self, tool_name: &str, input: &Value) -> Marks {
         let marks = builtin_marks(tool_name);
         let writes_elsewhere = FILE_WRITERS.iter().any(|(name, _)| *name == tool_name)
             && !writes_inside(self.notebook_dir.as_deref(), tool_name, input);
         Marks {
-            always_ask: marks.always_ask || caller == Caller::Secretary && writes_elsewhere,
+            always_ask: marks.always_ask || writes_elsewhere,
             ..marks
         }
     }
@@ -351,7 +449,7 @@ impl Permissions {
         };
         names
             .into_iter()
-            .filter(|name| split_tool(name).is_none())
+            .filter(|name| split_tool(name).is_none() && !LAUNCHERS.contains(&name.as_str()))
             .map(|name| {
                 let permission = self.owner_permission(&name)?;
                 let effective = permission.unwrap_or(Permission::Auto);
@@ -505,6 +603,59 @@ mod tests {
             Decision::Allow
         );
         assert!(p.gateway().log_entries(10).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_model_starts_an_agent_by_itself_whatever_the_permissions_say() {
+        let p = permissions();
+        for tool in LAUNCHERS {
+            p.set_scoped("owner", BUILTINS, tool, Some(Permission::Allow))
+                .unwrap();
+            let Decision::Forbid(why) = p.decide(tool, &json!({})).await.unwrap() else {
+                panic!("{tool} should be refused");
+            };
+            assert!(why.contains("delegate_task"), "{why}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_secretary_is_neither_offered_nor_let_use_the_tool_that_starts_an_adroit_session() {
+        let dir = crate::notebook::testing::TempDir::new("permissions-launch");
+        let app = crate::runtime::testing::app(dir.path());
+        let c = app
+            .gateway
+            .add_defined("adroit", Default::default(), None)
+            .unwrap();
+        let p = &app.permissions;
+        p.set_scoped(
+            "owner",
+            &format!("conn:{}", c.id),
+            "start_session",
+            Some(Permission::Allow),
+        )
+        .unwrap();
+
+        let tool = format!("mcp__{}__start_session", c.id);
+        assert_eq!(
+            p.decide(&tool, &json!({})).await.unwrap(),
+            Decision::Forbid(DELEGATE_INSTEAD.to_owned())
+        );
+        let call = |name: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": {} } })
+        };
+        let refused = p.refused_launch(&c.id, &call("start_session")).unwrap();
+        assert_eq!(refused["result"]["isError"], true);
+        assert!(p.refused_launch(&c.id, &call("resume_session")).is_some());
+        assert_eq!(p.refused_launch(&c.id, &call("send_to_session")), None);
+        let listed = p.without_launchers(
+            &c.id,
+            json!({ "id": 1, "result": { "tools": [{ "name": "start_session" }, { "name": "send_to_session" }] } }),
+        );
+        assert_eq!(
+            listed["result"]["tools"],
+            json!([{ "name": "send_to_session" }])
+        );
     }
 
     #[tokio::test]
@@ -700,26 +851,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_subagents_write_outside_the_notebook_is_left_to_the_assessor() {
+    async fn a_subagent_however_it_came_to_be_uses_nothing() {
         let p = permissions().with_notebook_dir(at("/data/notebook"));
-        let input = json!({ "file_path": at("/srv/code/main.rs") });
-        assert!(held(
-            &p.decide_for(Caller::Subagent, "Edit", &input)
-                .await
-                .unwrap()
-        ));
         p.gateway().set_assessor(std::sync::Arc::new(LetsRun));
-        assert_eq!(
-            p.decide_for(Caller::Subagent, "Edit", &input)
-                .await
-                .unwrap(),
-            Decision::Allow
-        );
-        assert!(held(
-            &p.decide_for(Caller::Subagent, "Bash", &json!({ "command": "ls" }))
-                .await
-                .unwrap()
-        ));
+        for (tool, input) in [
+            ("Edit", json!({ "file_path": at("/data/notebook/a.md") })),
+            ("Read", json!({ "file_path": at("/srv/a") })),
+            ("mcp__mail__search", json!({})),
+        ] {
+            assert_eq!(
+                p.decide_for(Caller::Subagent, tool, &input).await.unwrap(),
+                Decision::Forbid(DELEGATE_INSTEAD.to_owned()),
+                "{tool}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -45,11 +45,17 @@ pub struct Call {
     /// Why the caller found this call must not run whatever the permissions say,
     /// such as a file tool reaching where no tool may look.
     pub refuse: Option<String>,
+    /// Refuse this call where the owner would be asked: its caller cannot
+    /// wait for their answer.
+    pub never_ask: bool,
     /// What the assessor made of this call, once it was weighed.
     pub assessment: Option<Assessment>,
     /// What the call decides, read from where it is, for the owner to see.
     pub decides: Option<Value>,
 }
+
+/// How the refusal of a call that would have been asked about begins.
+pub const NEEDS_OWNER: &str = "this needs the owner's approval, which its caller cannot ask for";
 
 /// What the assessor made of a call the auto permission left to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +116,12 @@ pub enum Verdict {
 pub enum Outcome<T> {
     Done(T),
     Held(Ticket),
+}
+
+fn unasked(why: &str) -> Verdict {
+    Verdict::Deny {
+        reason: format!("{NEEDS_OWNER} ({why})"),
+    }
 }
 
 impl Gateway {
@@ -396,6 +408,9 @@ impl Gateway {
             && permission != Permission::Forbid
             && self.asks_each_time(&call.connection, &call.tool)?
         {
+            if call.never_ask {
+                return Ok(unasked("the owner is asked of every call"));
+            }
             return Ok(match &call.decides {
                 Some(_) => Verdict::Hold(self.hold(call, "the owner is asked of every call")?),
                 None => Verdict::Deny {
@@ -424,6 +439,9 @@ impl Gateway {
             return Ok(Verdict::Allow {
                 reason: format!("{asked}; not asked of {}", call.actor),
             });
+        }
+        if call.never_ask {
+            return Ok(unasked(&asked));
         }
         if self.take_pass(call)? {
             return Ok(Verdict::Allow {

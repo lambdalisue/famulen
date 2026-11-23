@@ -65,6 +65,7 @@ pub fn role_id(role: Role) -> &'static str {
         Role::Lookout => "lookout",
         Role::Triage => "triage",
         Role::Assess => "assess",
+        Role::Worker => "worker",
         Role::Voice => "voice",
     }
 }

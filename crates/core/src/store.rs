@@ -382,6 +382,40 @@ CREATE TABLE IF NOT EXISTS inputs (
 );
 CREATE INDEX IF NOT EXISTS inputs_status ON inputs (status, id);
 CREATE UNIQUE INDEX IF NOT EXISTS inputs_one_running ON inputs (status) WHERE status = 'running';
+-- Each run of a delegated task. A row is written before its run starts.
+CREATE TABLE IF NOT EXISTS worker_runs (
+    id         INTEGER PRIMARY KEY,
+    task       TEXT NOT NULL,
+    runner     TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    attempt    INTEGER NOT NULL,
+    -- how often its start was tried since the owner was last asked
+    tries      INTEGER NOT NULL DEFAULT 0,
+    -- what was ordered, as it stood when the run was made
+    spec       TEXT NOT NULL,
+    -- how often the owner was asked, and when a failed start is tried again
+    asks       INTEGER NOT NULL DEFAULT 0,
+    retry_at   INTEGER NOT NULL DEFAULT 0,
+    -- the Adroit connection it was started through
+    connection TEXT NOT NULL DEFAULT '',
+    session    TEXT NOT NULL DEFAULT '',
+    ticket     INTEGER,
+    outcome    TEXT NOT NULL DEFAULT '',
+    result     TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    ended_at   INTEGER
+);
+-- Who delegated a task, in which workgroup, and what it ordered then. Kept
+-- here, where a hand on the notebook does not reach.
+CREATE TABLE IF NOT EXISTS delegations (
+    task      TEXT PRIMARY KEY,
+    digest    TEXT NOT NULL,
+    by        TEXT NOT NULL,
+    workgroup TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS worker_runs_one_open ON worker_runs (task) WHERE state != 'ended';
 CREATE TABLE IF NOT EXISTS state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

@@ -1,0 +1,240 @@
+//! What an agent doing a delegated task may reach: the tools handed to it,
+//! and with its file tools nothing but its own directory and the one it was
+//! told to work in.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use super::order::may_hand;
+use crate::paths::under;
+use crate::permissions::{DELEGATE_INSTEAD, LAUNCHERS, split_tool};
+use crate::sealed::{PATH_FIELDS, Sealed, literal_prefix, read_from, resolved};
+
+#[derive(Debug, Clone)]
+pub(super) struct Bounds {
+    tools: Vec<String>,
+    workdir: PathBuf,
+    roots: Vec<PathBuf>,
+    sealed: Sealed,
+}
+
+impl Bounds {
+    pub(super) fn new(
+        tools: &[String],
+        workdir: &Path,
+        directory: Option<&Path>,
+        sealed: &[PathBuf],
+    ) -> Self {
+        Self {
+            tools: tools.to_vec(),
+            workdir: workdir.to_owned(),
+            roots: std::iter::once(workdir)
+                .chain(directory)
+                .map(Path::to_owned)
+                .collect(),
+            sealed: Sealed::new(sealed, workdir),
+        }
+    }
+
+    /// The built-in tools the model is offered.
+    pub(super) fn builtins(&self) -> Vec<&str> {
+        self.tools
+            .iter()
+            .map(String::as_str)
+            .filter(|t| split_tool(t).is_none() && may_hand(t))
+            .collect()
+    }
+
+    /// The connections some tool of which is handed over.
+    pub(super) fn connections(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .tools
+            .iter()
+            .filter(|t| may_hand(t))
+            .filter_map(|t| split_tool(t))
+            .map(|(c, _)| c.to_owned())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    pub(super) fn hands(&self, tool: &str) -> bool {
+        may_hand(tool) && self.tools.iter().any(|t| t == tool)
+    }
+
+    /// Why a call must not be made, whatever the permissions say.
+    pub(super) fn refusal(&self, tool: &str, input: &Value) -> Option<String> {
+        if LAUNCHERS.contains(&tool) {
+            return Some(DELEGATE_INSTEAD.to_owned());
+        }
+        if !self.hands(tool) {
+            return Some(format!("{tool} was not handed to you for this work."));
+        }
+        if let Some(refused) = self.sealed.refusal(tool, input) {
+            return Some(refused);
+        }
+        let mut fields = PATH_FIELDS.iter().filter(|(name, _)| *name == tool);
+        let (_, field) = fields.next()?;
+        // What is not read here as the model CLI would read it is not run.
+        let text = match input.get(*field) {
+            None | Some(Value::Null) => ".",
+            Some(Value::String(text)) => text,
+            Some(other) => return Some(format!("{tool}: {other} is no path.")),
+        };
+        let Some(mut places) = read_from(&self.workdir, text) else {
+            return Some(format!("{tool}: {text:?} cannot be told where it leads."));
+        };
+        for name in ["pattern", "glob"] {
+            let searches = matches!((tool, name), ("Glob", "pattern") | ("Grep", "glob"));
+            let pattern = match input.get(name) {
+                Some(Value::String(pattern)) if searches => pattern.trim(),
+                _ => continue,
+            };
+            if pattern.contains("..") || pattern.starts_with('~') {
+                return Some(format!("{tool}: {pattern:?} is not taken as a pattern."));
+            }
+            if tool == "Glob" {
+                let prefix = literal_prefix(pattern);
+                let read: Option<Vec<_>> = places.iter().map(|p| read_from(p, &prefix)).collect();
+                let Some(read) = read else {
+                    return Some(format!(
+                        "{tool}: {pattern:?} cannot be told where it leads."
+                    ));
+                };
+                places = read.concat();
+            }
+        }
+        // A path that may mean several places stays inside in each of them.
+        let outside = places.iter().find(|place| !self.inside(place))?;
+        Some(format!(
+            "{tool}: {} is outside the directories of this work.",
+            outside.display()
+        ))
+    }
+
+    /// Whether `path`, its links followed, stays in a root.
+    fn inside(&self, path: &Path) -> bool {
+        // Told strictly: what may be inside under another name is not.
+        let path = resolved(path);
+        self.roots.iter().any(|root| under(&path, &resolved(root)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notebook::testing::TempDir;
+    use serde_json::json;
+
+    fn bounds(dir: &TempDir, tools: &[&str]) -> Bounds {
+        for sub in ["work", "repo", "notebook"] {
+            std::fs::create_dir_all(dir.path().join(sub)).unwrap();
+        }
+        let tools: Vec<String> = tools.iter().map(|t| (*t).to_owned()).collect();
+        Bounds::new(
+            &tools,
+            &dir.path().join("work"),
+            Some(&dir.path().join("repo")),
+            &[dir.path().join("notebook")],
+        )
+    }
+
+    #[test]
+    fn only_what_was_handed_over_is_offered() {
+        let dir = TempDir::new("bounds-tools");
+        let b = bounds(
+            &dir,
+            &[
+                "Read",
+                "Task",
+                "KillShell",
+                "default",
+                "mcp__mail__search",
+                "mcp__famulen__save_record",
+            ],
+        );
+        assert_eq!(b.builtins(), ["Read"]);
+        assert_eq!(b.connections(), ["mail"]);
+        assert!(b.refusal("mcp__mail__search", &json!({})).is_none());
+        for tool in [
+            "Bash",
+            "Task",
+            "mcp__mail__send",
+            "mcp__famulen__save_record",
+            "KillShell",
+        ] {
+            assert!(b.refusal(tool, &json!({})).is_some(), "{tool}");
+        }
+    }
+
+    #[test]
+    fn file_tools_stay_in_the_directories_of_the_work() {
+        let dir = TempDir::new("bounds-files");
+        let b = bounds(&dir, &["Read", "Glob", "Grep", "Write"]);
+        let at = |rel: &str| dir.path().join(rel).display().to_string();
+        let allowed = [
+            ("Read", json!({ "file_path": at("repo/a.rs") })),
+            ("Read", json!({ "file_path": "handed/a.md" })),
+            ("Grep", json!({ "pattern": "x" })),
+            ("Glob", json!({ "pattern": "**/*.md" })),
+            ("Glob", json!({ "path": at("repo"), "pattern": "src/*" })),
+            ("Write", json!({ "file_path": at("work/out.md") })),
+        ];
+        for (tool, input) in allowed {
+            assert_eq!(b.refusal(tool, &input), None, "{tool} {input}");
+        }
+        let refused = [
+            ("Read", json!({ "file_path": at("notebook/a.md") })),
+            ("Read", json!({ "file_path": at("other") })),
+            ("Read", json!({ "file_path": "../notebook/a.md" })),
+            ("Read", json!({ "file_path": "/etc/passwd" })),
+            ("Grep", json!({ "pattern": "x", "path": at("") })),
+            ("Glob", json!({ "pattern": at("notebook/*") })),
+            ("Glob", json!({ "pattern": "*/../../notebook/*" })),
+            ("Glob", json!({ "pattern": "~/*" })),
+            ("Grep", json!({ "pattern": "x", "path": "~/.ssh" })),
+            ("Grep", json!({ "pattern": "x", "path": " /etc " })),
+            ("Read", json!({ "file_path": "~root/x" })),
+            ("Read", json!({ "file_path": ["/etc/passwd"] })),
+            ("Write", json!({ "file_path": at("out.md") })),
+        ];
+        for (tool, input) in refused {
+            assert!(b.refusal(tool, &input).is_some(), "{tool} {input}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_directory_is_told_by_windows_spellings_and_not_by_a_share_of_another_host() {
+        let dir = TempDir::new("bounds-windows");
+        let b = bounds(&dir, &["Read"]);
+        let repo = dir.path().join("repo").display().to_string();
+        let read = |path: String| b.refusal("Read", &json!({ "file_path": path }));
+        for path in [
+            format!("{repo}\\a.md"),
+            format!("{}/a.md", repo.replace('\\', "/").to_uppercase()),
+        ] {
+            assert_eq!(read(path.clone()), None, "{path}");
+        }
+        let rest = repo.split_once(':').unwrap().1;
+        assert!(read(format!(r"\\elsewhere\C${rest}\a.md")).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_does_not_lead_out() {
+        let dir = TempDir::new("bounds-links");
+        let b = bounds(&dir, &["Read"]);
+        std::os::unix::fs::symlink(dir.path(), dir.path().join("repo/up")).unwrap();
+        let through = dir.path().join("repo/up/secret.md");
+        assert!(
+            b.refusal(
+                "Read",
+                &json!({ "file_path": through.display().to_string() })
+            )
+            .is_some()
+        );
+    }
+}

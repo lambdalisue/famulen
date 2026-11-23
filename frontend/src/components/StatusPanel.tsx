@@ -32,6 +32,7 @@ const SOURCES: Record<string, string> = {
   wake: "起床予約",
   approval: "確認の答え",
   lookout: "見張り",
+  worker: "委託",
 };
 
 const STATES: Record<string, string> = {

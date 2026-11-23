@@ -41,6 +41,16 @@ pub(crate) fn may_be_within(path: &Path, dir: &Path) -> bool {
     }
 }
 
+/// A whole path of the system the tests run on.
+#[cfg(test)]
+pub(crate) fn at(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", path.replace('/', "\\"))
+    } else {
+        path.to_owned()
+    }
+}
+
 /// `path` as other programs and the owner write it: Windows puts `\\?\` in
 /// front of a path it resolved.
 pub(crate) fn plain(path: PathBuf) -> PathBuf {

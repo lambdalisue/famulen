@@ -16,6 +16,19 @@ pub struct Sealed {
     workdir: PathBuf,
 }
 
+/// The fields of the built-in tools that say where in the file system.
+pub(crate) const PATH_FIELDS: &[(&str, &str)] = &[
+    ("Read", "file_path"),
+    ("Write", "file_path"),
+    ("Edit", "file_path"),
+    ("MultiEdit", "file_path"),
+    ("NotebookEdit", "notebook_path"),
+    ("LS", "path"),
+    ("Grep", "path"),
+    ("Glob", "path"),
+    ("Glob", "pattern"),
+];
+
 /// Names a shell command must not mention, whatever the path around them:
 /// the variables the vault key and the apps' secrets come in.
 const NAMES: &[&str] = &["FAMULEN_"];
@@ -42,6 +55,17 @@ impl Sealed {
             return None;
         }
         let field = |name: &str| input.get(name).and_then(Value::as_str);
+        // A path that cannot be told where it leads is not looked at at all.
+        let odd = PATH_FIELDS
+            .iter()
+            .filter(|(name, _)| *name == tool)
+            .filter_map(|(_, name)| field(name))
+            .find(|path| written_path(path).is_none());
+        if let Some(path) = odd {
+            return Some(format!(
+                "{tool}: {path:?} cannot be told where it leads; write it as a whole path."
+            ));
+        }
         let readings = |p: &str| read_from(&self.workdir, p);
         let refused = |place: PathBuf| {
             format!(
@@ -156,14 +180,15 @@ fn shell_spellings(form: &Path) -> Vec<String> {
     }
 }
 
-/// Every place `path` may mean when read from `base`, or `None` when that
-/// cannot be told.
-fn read_from(base: &Path, path: &str) -> Option<Vec<PathBuf>> {
+/// Every place `path` may mean when the model CLI reads it from `base`, or
+/// `None` when it cannot be told where it leads.
+pub(crate) fn read_from(base: &Path, path: &str) -> Option<Vec<PathBuf>> {
+    let path = written_path(path)?;
     if cfg!(windows) {
-        let readings = paths::windows::readings(&base.to_string_lossy(), path)?;
+        let readings = paths::windows::readings(&base.to_string_lossy(), &path.to_string_lossy())?;
         Some(readings.into_iter().map(PathBuf::from).collect())
     } else {
-        Some(vec![normal(base, Path::new(path))])
+        Some(vec![normal(base, &path)])
     }
 }
 
@@ -181,9 +206,41 @@ fn names_path(command: &str, path: &str) -> bool {
     })
 }
 
+/// `text` as the model CLI reads a path: without the blanks around it, and
+/// with `~` as the home directory. `None` when it cannot be told where it
+/// leads, as another user's home cannot.
+pub(crate) fn written_path(text: &str) -> Option<PathBuf> {
+    written_path_from(text, home())
+}
+
+/// The home directory as the model CLI takes it.
+pub(crate) fn home() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(name).map(PathBuf::from)
+}
+
+fn written_path_from(text: &str, home: Option<PathBuf>) -> Option<PathBuf> {
+    // What JavaScript's trim takes away, which is more than Rust's.
+    let text = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if text.contains('\0') {
+        return None;
+    }
+    let Some(rest) = text.strip_prefix('~') else {
+        return Some(PathBuf::from(text));
+    };
+    let home = home.filter(|h| h.is_absolute())?;
+    // A separator left in front would lead to the root instead.
+    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    match rest.strip_prefix(['/', '\\']) {
+        Some(below) => Some(home.join(below.trim_start_matches(separators))),
+        None if rest.is_empty() => Some(home),
+        None => None,
+    }
+}
+
 /// `path` read against `base` when relative, with `.` and `..` worked out
 /// without touching the disk.
-fn normal(base: &Path, path: &Path) -> PathBuf {
+pub(crate) fn normal(base: &Path, path: &Path) -> PathBuf {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -205,31 +262,35 @@ fn normal(base: &Path, path: &Path) -> PathBuf {
 /// `path` as written, and with the part that exists on disk resolved, so a
 /// link does not lead around a sealed place; each in the spelling places are
 /// compared by.
-fn forms(path: &Path) -> Vec<PathBuf> {
+pub(crate) fn forms(path: &Path) -> Vec<PathBuf> {
     let mut forms = vec![path.to_path_buf()];
+    let resolved = resolved(path);
+    if resolved != path {
+        forms.push(resolved);
+    }
+    forms.iter().map(|f| paths::key(f)).collect()
+}
+
+/// `path` with the part that exists on disk resolved.
+pub(crate) fn resolved(path: &Path) -> PathBuf {
     let mut existing = path;
     let mut rest = Vec::new();
     loop {
         if let Ok(real) = existing.canonicalize() {
-            let resolved = rest.iter().rev().fold(real, |p: PathBuf, c| p.join(c));
-            if resolved != path {
-                forms.push(resolved);
-            }
-            break;
+            return rest.iter().rev().fold(real, |p: PathBuf, c| p.join(c));
         }
         match (existing.parent(), existing.file_name()) {
             (Some(parent), Some(name)) => {
                 rest.push(name.to_owned());
                 existing = parent;
             }
-            _ => break,
+            _ => return path.to_path_buf(),
         }
     }
-    forms.iter().map(|f| paths::key(f)).collect()
 }
 
 /// The part of a glob pattern before its first wildcard.
-fn literal_prefix(pattern: &str) -> String {
+pub(crate) fn literal_prefix(pattern: &str) -> String {
     let wild = |s: &str| s.contains(['*', '?', '[', '{']);
     Path::new(pattern)
         .components()
@@ -261,4 +322,71 @@ fn relative(base: &Path, path: &Path) -> Option<PathBuf> {
         out.push(c);
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod written {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_path_is_read_as_the_model_cli_reads_it() {
+        let home = || {
+            Some(PathBuf::from(if cfg!(windows) {
+                "C:/home/me"
+            } else {
+                "/home/me"
+            }))
+        };
+        for (text, expected) in [
+            ("a/b", Some("a/b")),
+            (" /a/b\n", Some("/a/b")),
+            ("\u{feff}/a", Some("/a")),
+            ("~", Some("/home/me")),
+            ("~/.ssh", Some("/home/me/.ssh")),
+            (" ~//etc", Some("/home/me/etc")),
+            ("~root/x", None),
+            ("a\0b", None),
+        ] {
+            assert_eq!(
+                written_path_from(text, home()),
+                expected.map(|e| match e.strip_prefix("/home/me") {
+                    Some(rest) => home().unwrap().join(rest.trim_start_matches('/')),
+                    None => PathBuf::from(e),
+                }),
+                "{text:?}"
+            );
+        }
+        assert_eq!(written_path_from("~/x", None), None);
+    }
+
+    #[test]
+    fn a_sealed_place_is_not_reached_by_home_or_with_blanks_around_it() {
+        let home = super::home().unwrap();
+        let sealed = Sealed::new([home.join("famulen-sealed")], home.join("w"));
+        for (tool, input) in [
+            ("Read", json!({ "file_path": "~/famulen-sealed/a" })),
+            (
+                "Read",
+                json!({ "file_path": format!("  {}/famulen-sealed/a", home.display()) }),
+            ),
+            (
+                "Grep",
+                json!({ "pattern": "x", "path": "~/famulen-sealed" }),
+            ),
+            ("Grep", json!({ "pattern": "x", "path": " ~ " })),
+            ("Glob", json!({ "pattern": "~/famulen-sealed/*" })),
+            ("Glob", json!({ "pattern": "*", "path": "~" })),
+            ("LS", json!({ "path": "~/famulen-sealed " })),
+            ("Read", json!({ "file_path": "~nobody/a" })),
+        ] {
+            assert!(sealed.refusal(tool, &input).is_some(), "{tool} {input}");
+        }
+        for (tool, input) in [
+            ("Read", json!({ "file_path": "~/other/a" })),
+            ("Grep", json!({ "pattern": "~x", "path": "src" })),
+        ] {
+            assert_eq!(sealed.refusal(tool, &input), None, "{tool} {input}");
+        }
+    }
 }
