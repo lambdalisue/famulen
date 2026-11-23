@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import Markdown from "~/components/Markdown";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import { setSelection } from "~/lib/view";
 
@@ -27,7 +28,7 @@ export function EntryRow(props: { item: MemoryItem }) {
     <div class="item">
       <SrcTag src={props.item.src} />
       <div class="grow" style={{ cursor: "pointer" }} onClick={() => setSelection(`記憶：${props.item.text}`)}>
-        <div style={{ "font-size": "14px", "line-height": 1.6 }}>{props.item.text}</div>
+        <div style={{ "font-size": "14px", "line-height": 1.6 }}><Markdown inline text={props.item.text} /></div>
         <Show when={meta().length > 0}>
           <div class="sub">{meta().join(" · ")}</div>
         </Show>

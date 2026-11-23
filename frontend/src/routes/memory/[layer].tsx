@@ -1,6 +1,7 @@
 import { A, createAsync, Navigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, For, Match, Show, Switch } from "solid-js";
 import Icon from "~/components/Icon";
+import Markdown from "~/components/Markdown";
 import { EntryRow, SrcTag } from "~/components/MemoryEntry";
 import type { Layer } from "~/gen/famulen/v1/memory_pb";
 import { workgroup } from "~/lib/workgroup";
@@ -57,7 +58,7 @@ function Pending(props: { data: Layer; aide: string }) {
           {(e) => (
             <div class="item">
               <div class="grow">
-                <div style={{ "font-size": "14px" }}>{e.text}</div>
+                <div style={{ "font-size": "14px" }}><Markdown inline text={e.text} /></div>
                 <div class="sub">
                   根拠 {e.attrs.ev ?? "0"} / 要る {e.attrs.need ?? "2"}
                   {e.attrs.against ? " · あなたの言葉と食い違う" : ""}
@@ -109,7 +110,7 @@ function Episodic(props: { data: Layer; at: string }) {
                 style={{ "font-size": "14px", cursor: "pointer" }}
                 onClick={() => setSelection(`記憶：${e.text}`)}
               >
-                {e.text}
+                <Markdown inline text={e.text} />
               </div>
               <span class="sub">{STATES[e.attrs.state ?? ""] ?? ""}</span>
             </div>
@@ -131,7 +132,7 @@ function Working(props: { data: Layer }) {
         {(w) => (
           <article class="card" style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
             <div class="row">
-              <h2 class="grow">{w.title || w.name}</h2>
+              <h2 class="grow"><Markdown inline text={w.title || w.name} /></h2>
               <FileLink path={`working/${w.name}.md`} />
             </div>
             <div
@@ -144,15 +145,15 @@ function Working(props: { data: Layer }) {
               }}
             >
               <span class="sub">ここまで</span>
-              <span style={{ "white-space": "pre-wrap" }}>{w.done}</span>
+              <div><Markdown inline text={w.done} /></div>
               <span class="sub">次にやる</span>
-              <span style={{ "white-space": "pre-wrap" }}>{w.next}</span>
+              <div><Markdown inline text={w.next} /></div>
               <span class="sub">待っている</span>
-              <span style={{ "white-space": "pre-wrap" }}>{w.waiting}</span>
+              <div><Markdown inline text={w.waiting} /></div>
               <span class="sub">手がかり</span>
-              <span class="mono" style={{ "white-space": "pre-wrap", "font-size": "12px" }}>
-                {w.clues}
-              </span>
+              <div class="mono" style={{ "font-size": "12px" }}>
+                <Markdown inline text={w.clues} />
+              </div>
             </div>
           </article>
         )}
@@ -209,7 +210,7 @@ function Long(props: { data: Layer }) {
               {(f) => (
                 <div class="card" style={{ display: "flex", "flex-direction": "column", gap: "6px" }}>
                   <div class="row">
-                    <b class="grow">{f.title.replace(/\.md$/, "")}</b>
+                    <b class="grow"><Markdown inline text={f.title.replace(/\.md$/, "")} /></b>
                     <FileLink path={f.path} />
                   </div>
                   <div class="list" style={{ border: 0, padding: 0 }}>
@@ -247,10 +248,10 @@ function Forgotten(props: { data: Layer; at: string }) {
                 <div class="item">
                   <div class="grow">
                     <div style={{ "font-size": "14px", color: "#4D4C47", "text-decoration": "line-through" }}>
-                      {e.text}
+                      <Markdown inline text={e.text} />
                     </div>
                     <div class="sub">
-                      {e.attrs.reason ?? ""} · {e.attrs.forgot ?? ""}
+                      <Markdown inline text={e.attrs.reason ?? ""} /> · {e.attrs.forgot ?? ""}
                     </div>
                   </div>
                   <button type="button" class="btn small" onClick={() => setSelection(`忘れた記憶：${e.text}`)}>

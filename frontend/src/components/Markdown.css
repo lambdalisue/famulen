@@ -1,0 +1,15 @@
+.md .markdown-viewer { padding:0 !important; background:transparent !important; min-height:0 !important; max-width:none !important; }
+.md .markdown-body { font-size:14px; max-width:none; margin:0; padding:0; }
+.md .markdown-viewer[hidden] { display:none; }
+.md-plain { margin:0; white-space:pre-wrap; font:inherit; font-size:14px; line-height:1.8; overflow-wrap:anywhere; }
+.md-link { cursor:pointer; }
+/* One line among others: in the type and colour of where it stands, with no room of its own. */
+.md-inline .markdown-viewer, .md-inline .markdown-body { font:inherit; color:inherit; line-height:inherit; }
+.md-inline .markdown-viewer:not([hidden]) { display:inline; }
+.md-inline .md-plain { font:inherit; line-height:inherit; }
+span.markdown-body::before, span.markdown-body::after { display:none !important; }
+.md-inline .markdown-body :is(ul, ol) { padding-left:1.4em; }
+.md-inline .markdown-body > * { margin-block:4px; }
+.md-inline .markdown-body > :first-child { margin-top:0; }
+.md-inline .markdown-body > :last-child { margin-bottom:0; }
+.md .attrs { font-size:11px; color:var(--muted); margin-left:6px; }

@@ -136,8 +136,6 @@ textarea.input { padding:8px 10px; min-height:120px; width:100%; }
 .meter { height:6px; border-radius:999px; background:#ECEAE3; overflow:hidden; } .meter div { height:100%; background: var(--accent); border-radius:999px; }
 .notice { background:#FDF6EC; border:1px solid var(--warn-line); border-radius:10px; padding:10px 14px; font-size:13px; color:#5C3608; }
 .empty { font-size:13px; color: var(--muted); padding:12px 0; }
-.markdown { font-size:15px; line-height:1.85; color:#24292F; }
-.markdown h1, .markdown h2 { border-bottom:1px solid #D8DEE4; padding-bottom:6px; margin:18px 0 8px; }
 details summary { cursor:pointer; }
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip: rect(0 0 0 0); }
 .m-head, .m-tabbar, .m-float, .m-sheetbar, .m-peek, .m-dismiss { display:none; }

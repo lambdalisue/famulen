@@ -1,6 +1,7 @@
 import { A, createAsync, useSearchParams } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
+import Markdown from "~/components/Markdown";
 import DreamNow from "~/components/DreamNow";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
 import { personaQuery } from "~/lib/data";
@@ -186,11 +187,18 @@ export default function Dreams() {
                   <div class="item" style={{ "align-items": "flex-start" }}>
                     <span class="tag">{OP_LABELS[c.op] ?? c.op}</span>
                     <div class="grow">
-                      <div style={{ "font-size": "13px" }}>{c.text}</div>
+                      <div style={{ "font-size": "13px" }}><Markdown inline text={c.text} /></div>
                       <div class="sub">
                         {c.fromFile ? `${c.fromFile} → ${c.file}` : c.file}
-                        {c.reason ? ` · ${c.reason}` : ""}
-                        {c.previous ? ` · 前は「${c.previous}」` : ""}
+                        <Show when={c.reason}>
+                          {" · "}
+                          <Markdown inline text={c.reason} />
+                        </Show>
+                        <Show when={c.previous}>
+                          {" · 前は「"}
+                          <Markdown inline text={c.previous} />
+                          {"」"}
+                        </Show>
                       </div>
                     </div>
                   </div>
