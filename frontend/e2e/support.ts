@@ -42,9 +42,17 @@ export function toast(page: Page) {
   return page.locator("#toast");
 }
 
-/** Accept every confirm() the page asks. */
-export function acceptDialogs(page: Page) {
-  page.on("dialog", (d) => void d.accept());
+/** Answer yes to what the page asks before it removes something. */
+export async function agree(page: Page, verb: string, about?: string | RegExp) {
+  const asked = page.getByRole("alertdialog", about ? { name: about } : {});
+  await expect(asked).toBeVisible();
+  await asked.getByRole("button", { name: verb, exact: true }).click();
+  await expect(asked).toHaveCount(0);
+}
+
+/** The pane beside the list, or beside the calendar. */
+export function pane(page: Page, name: string | RegExp) {
+  return page.getByRole("region", { name });
 }
 
 /** YYYY-MM-DD, `days` from today in Asia/Tokyo, the zone the test backend runs in. */

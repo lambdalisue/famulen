@@ -44,7 +44,7 @@ test("a loose group is added by hand, and any name finds a person", async ({ pag
   await page.getByRole("dialog").getByLabel("名前").fill("キーボード仲間");
   await page.getByRole("dialog").getByRole("button", { name: "足す", exact: true }).click();
   await expect(field(page, "種別")).toContainText("グループ");
-  await page.getByRole("link", { name: "相手の一覧" }).click();
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
   await page.getByLabel("相手を探す").fill("じろちゃん");
   await expect(row(page, "鈴木次郎さん")).toBeVisible();
   await expect(row(page, "キーボード仲間")).toHaveCount(0);

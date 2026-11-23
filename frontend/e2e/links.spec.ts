@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { acceptDialogs, call, detail, record, toast, visit } from "./support";
+import { agree, call, detail, record, toast, visit } from "./support";
 
 const back = (page: Parameters<typeof detail>[0], text: string) => detail(page).locator(".rec-links").filter({ hasText: text });
 
@@ -49,7 +49,6 @@ test("a link follows a rename, and one whose record is gone says so", async ({ p
   });
   await call(request, "RecordService", "SaveRecord", { kind: "memos", id: a.id, title: "今の名前" });
   await call(request, "RecordService", "DeleteRecord", { kind: "tasks", id: b.id });
-  acceptDialogs(page);
   await visit(page, `/memos?id=${memo.id}`, "メモ · つなぐメモ");
   await expect(detail(page).locator(".md-link", { hasText: "今の名前" })).toBeVisible();
   await expect(detail(page).locator(".md-link-missing", { hasText: "消える仕事" })).toBeVisible();

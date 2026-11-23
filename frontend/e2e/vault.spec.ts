@@ -42,12 +42,12 @@ test("a secret put in shows without its value, the field empties, and it is take
   expect(listed.secrets?.[0]).not.toHaveProperty("masked");
 
   await page.getByRole("button", { name: "bank-passwordを消す" }).click();
-  const check = page.getByRole("group", { name: "bank-passwordを消すか確かめる" });
+  const check = page.getByRole("alertdialog", { name: "「bank-password」を消す" });
   await check.getByRole("button", { name: "やめる" }).click();
   await expect(row(page, "bank-password")).toBeVisible();
 
   await page.getByRole("button", { name: "bank-passwordを消す" }).click();
-  await check.getByRole("button", { name: "消す" }).click();
+  await check.getByRole("button", { name: "消す", exact: true }).click();
   await expect(toast(page)).toHaveText("消した");
   await expect(row(page, "bank-password")).toHaveCount(0);
   await expect(added(page).getByText("まだない")).toBeVisible();
