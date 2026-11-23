@@ -1,0 +1,237 @@
+import { Switch } from "@ark-ui/solid/switch";
+import { A, createAsync } from "@solidjs/router";
+import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
+import Icon from "~/components/Icon";
+import { personaQuery } from "~/lib/data";
+import * as icons from "~/lib/icons";
+import { choiceOf, dateText, type Field, type FieldType, hrefOf, linkOf, linkTo, moneyText, OWNER, SECRETARY } from "~/lib/records";
+import RecordPicker from "./RecordPicker";
+
+export type Typed = { value: string; values: string[] };
+
+const one = (value: string): Typed => ({ value, values: [] });
+const many = (values: string[]): Typed => ({ value: "", values });
+
+/** Words the notebook gives a meaning of their own. */
+const WORDS: { [text: string]: string } = { me: "あなた", "previous unfinished": "前の回がまだ済んでいない" };
+
+/** A link to a record as a chip that opens it. */
+function RecordChip(props: { text: string }) {
+  const link = () => linkOf(props.text);
+  return (
+    <Show when={link()} fallback={<span>{WORDS[props.text] ?? props.text}</span>}>
+      {(l) => (
+        <Show when={hrefOf(l().kind, l().id)} fallback={<span class="tag">{l().title || l().id}</span>}>
+          {(href) => (
+            <A class="tag link" href={href()}>
+              {l().title || l().id}
+            </A>
+          )}
+        </Show>
+      )}
+    </Show>
+  );
+}
+
+/** A field's value as it is read. */
+export function FieldView(props: { type: FieldType; field: Field | undefined; aide: string }) {
+  const value = () => props.field?.value ?? "";
+  const t = () => props.type.type;
+  return (
+    <Cases fallback={<RecordChip text={value()} />}>
+      <Match when={t() === "choice" || t() === "flag"}>{choiceOf(value(), props.aide)}</Match>
+      <Match when={props.type.name === "Assignee"}>
+        <Show when={linkOf(value())} fallback={choiceOf(value(), props.aide)}>
+          <RecordChip text={value()} />
+        </Show>
+      </Match>
+      <Match when={t() === "date" || t() === "date-or-minute"}>{dateText(value())}</Match>
+      <Match when={t() === "money"}>{moneyText(value())}</Match>
+      <Match when={t() === "url"}>
+        <a href={value().replace(/^<|>$/g, "")} target="_blank" rel="noreferrer">
+          {value().replace(/^<|>$/g, "")}
+        </a>
+      </Match>
+      <Match when={t() === "list" || t() === "links"}>
+        <span class="chips-line">
+          <For each={props.field?.values ?? []}>
+            {(v) => (
+              <Show when={linkOf(v)} fallback={<span class="tag">{v}</span>}>
+                <RecordChip text={v} />
+              </Show>
+            )}
+          </For>
+        </span>
+      </Match>
+    </Cases>
+  );
+}
+
+function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) => void }) {
+  const [text, setText] = createSignal("");
+  const add = () => {
+    const v = text().trim();
+    if (!v || props.values.includes(v)) return;
+    props.onSave(many([...props.values, v]));
+    setText("");
+  };
+  return (
+    <span class="chips-edit">
+      <For each={props.values}>
+        {(v) => (
+          <span class="tag removable">
+            {v}
+            <button
+              type="button"
+              aria-label={`${v}を外す`}
+              onClick={() => props.onSave(props.values.length > 1 ? many(props.values.filter((x) => x !== v)) : one(""))}
+            >
+              <Icon svg={icons.x} size={12} />
+            </button>
+          </span>
+        )}
+      </For>
+      <input
+        class="input"
+        aria-label={`${props.label}に足す`}
+        placeholder="足す"
+        value={text()}
+        onInput={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.isComposing) {
+            e.preventDefault();
+            add();
+          }
+        }}
+        onBlur={add}
+      />
+    </span>
+  );
+}
+
+function LinksEdit(props: { label: string; of: string; values: string[]; single: boolean; onSave: (v: Typed) => void }) {
+  const without = (v: string) => props.values.filter((x) => x !== v);
+  const save = (values: string[]) => props.onSave(values.length === 0 ? one("") : props.single ? one(values[0]) : many(values));
+  return (
+    <span class="chips-edit">
+      <For each={props.values}>
+        {(v) => (
+          <span class="tag removable">
+            <RecordChip text={v} />
+            <button type="button" aria-label="外す" onClick={() => save(without(v))}>
+              <Icon svg={icons.x} size={12} />
+            </button>
+          </span>
+        )}
+      </For>
+      <RecordPicker
+        label={`${props.label}を選ぶ`}
+        kinds={props.of ? [props.of] : ["tasks", "memos", "parties", "holdings", "contracts", "events", "routines"]}
+        onPick={(r) => {
+          const link = linkTo(r);
+          if (!props.values.includes(link)) save(props.single ? [link] : [...props.values, link]);
+        }}
+      />
+    </span>
+  );
+}
+
+function TimeEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+  const day = () => props.value.slice(0, 10);
+  const time = () => props.value.slice(11, 16);
+  const save = (d: string, t: string) => props.onSave(one(d ? (t ? `${d} ${t}` : d) : ""));
+  return (
+    <span class="row">
+      <input class="input" type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
+      <input class="input" type="time" aria-label={`${props.label}の時刻`} value={time()} disabled={!day()} onChange={(e) => save(day(), e.currentTarget.value)} />
+    </span>
+  );
+}
+
+function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+  const amount = () => props.value.split(" ")[0] ?? "";
+  const currency = () => props.value.split(" ")[1] || "JPY";
+  const save = (a: string, c: string) => props.onSave(one(a.trim() ? `${a.trim()} ${c}` : ""));
+  return (
+    <span class="row">
+      <input class="input" inputmode="decimal" aria-label={`${props.label}の額`} value={amount()} onChange={(e) => save(e.currentTarget.value, currency())} />
+      <select class="input" aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
+        <For each={[...new Set(["JPY", "USD", "EUR", "GBP", currency()])]}>{(c) => <option value={c}>{c}</option>}</For>
+      </select>
+    </span>
+  );
+}
+
+/** The control that changes a field, by what the field holds. */
+export default function FieldEdit(props: { type: FieldType; label: string; field: Field | undefined; onSave: (v: Typed) => void }) {
+  const persona = createAsync(() => personaQuery());
+  const value = () => props.field?.value ?? "";
+  const values = () => props.field?.values ?? [];
+  const t = () => props.type.type;
+  let box: HTMLInputElement | undefined;
+  createEffect(() => {
+    if (box && document.activeElement !== box) box.value = value();
+  });
+  return (
+    <Cases
+      fallback={
+        <input
+          ref={box}
+          class="input grow"
+          aria-label={props.label}
+          type={t() === "number" ? "number" : t() === "date" ? "date" : "text"}
+          value={t() === "url" ? value().replace(/^<|>$/g, "") : value()}
+          onChange={(e) => {
+            const v = e.currentTarget.value.trim();
+            if (v !== value()) props.onSave(one(v));
+          }}
+        />
+      }
+    >
+      <Match when={t() === "choice"}>
+        <select class="input" aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
+          <option value="">—</option>
+          <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, persona()?.name)}</option>}</For>
+        </select>
+      </Match>
+      <Match when={t() === "flag"}>
+        <Switch.Root checked={value() === "yes"} onCheckedChange={(d) => props.onSave(one(d.checked ? "yes" : "no"))}>
+          <Switch.Control class="switch">
+            <Switch.Thumb class="switch-thumb" />
+          </Switch.Control>
+          <Switch.Label class="sr">{props.label}</Switch.Label>
+          <Switch.HiddenInput />
+        </Switch.Root>
+      </Match>
+      <Match when={props.type.name === "Assignee"}>
+        <span class="row">
+          <select
+            class="input"
+            aria-label={props.label}
+            value={linkOf(value()) ? "other" : value() || OWNER}
+            onChange={(e) => {
+              if (e.currentTarget.value !== "other") props.onSave(one(e.currentTarget.value));
+            }}
+          >
+            <option value={OWNER}>あなた</option>
+            <option value={SECRETARY}>{persona()?.name || "秘書"}</option>
+            <Show when={linkOf(value())}>{(l) => <option value="other">{l().title}</option>}</Show>
+          </select>
+          <RecordPicker label="相手に任せる" kinds={["parties"]} onPick={(r) => props.onSave(one(linkTo(r)))} />
+        </span>
+      </Match>
+      <Match when={t() === "date-or-minute"}>
+        <TimeEdit label={props.label} value={value()} onSave={props.onSave} />
+      </Match>
+      <Match when={t() === "money"}>
+        <MoneyEdit label={props.label} value={value()} onSave={props.onSave} />
+      </Match>
+      <Match when={t() === "list"}>
+        <ListEdit label={props.label} values={values()} onSave={props.onSave} />
+      </Match>
+      <Match when={t() === "link" || t() === "links"}>
+        <LinksEdit label={props.label} of={props.type.of} values={values()} single={t() === "link"} onSave={props.onSave} />
+      </Match>
+    </Cases>
+  );
+}
