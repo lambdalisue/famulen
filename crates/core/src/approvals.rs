@@ -1,0 +1,807 @@
+//! Asking the owner before a confirmed tool runs, and acting on the answer.
+//!
+//! The call that needs approval is refused at once, so the turn ends instead
+//! of waiting. When the owner approves, exactly that call is granted once and
+//! the session is told it may make it again.
+
+use rusqlite::{OptionalExtension, params};
+use serde_json::{Value, json};
+
+use famulen_gateway::{Question, Ticket};
+
+use crate::asking;
+use crate::input::{Input, Sender, Source};
+use crate::permissions::Permissions;
+use crate::slack::events::Action;
+use crate::slack::web::{Outgoing, Slack};
+use crate::store::{Store, now};
+
+const ACTION_PREFIX: &str = "famulen.approval.";
+/// Slack rejects a section longer than 3000 characters.
+const INPUT_PREVIEW_CHARS: usize = 2500;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    Approve,
+    Reject,
+    AlwaysAllow,
+}
+
+impl Answer {
+    fn action_id(self) -> String {
+        let name = match self {
+            Answer::Approve => "approve",
+            Answer::Reject => "reject",
+            Answer::AlwaysAllow => "always",
+        };
+        format!("{ACTION_PREFIX}{name}")
+    }
+
+    fn from_action_id(action_id: &str) -> Option<Self> {
+        match action_id.strip_prefix(ACTION_PREFIX)? {
+            "approve" => Some(Answer::Approve),
+            "reject" => Some(Answer::Reject),
+            "always" => Some(Answer::AlwaysAllow),
+            _ => None,
+        }
+    }
+
+    /// The answer a console button names: `approve`, `reject` or `always`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::from_action_id(&format!("{ACTION_PREFIX}{name}"))
+    }
+
+    fn status(self) -> &'static str {
+        match self {
+            Answer::Approve => "approved",
+            Answer::Reject => "rejected",
+            Answer::AlwaysAllow => "always_allowed",
+        }
+    }
+}
+
+/// An approval request as the console lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    pub id: i64,
+    pub tool: String,
+    pub input: String,
+    /// `pending`, `approved`, `rejected`, `always_allowed` or `withdrawn`.
+    pub status: String,
+    pub created_at: i64,
+}
+
+/// The newest requests first.
+pub fn recent(store: &Store, limit: usize) -> anyhow::Result<Vec<Request>> {
+    let conn = store.conn();
+    let mut statement = conn.prepare(
+        "SELECT id, tool, input, status, created_at FROM approvals ORDER BY id DESC LIMIT ?1",
+    )?;
+    let requests = statement
+        .query_map(params![limit as i64], |row| {
+            Ok(Request {
+                id: row.get(0)?,
+                tool: row.get(1)?,
+                input: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(requests)
+}
+
+/// Whether a Slack action belongs to an approval.
+pub fn is_approval_action(action: &Action) -> bool {
+    action.action_id.starts_with(ACTION_PREFIX) || action.action_id.starts_with(asking::PREFIX)
+}
+
+impl From<Answer> for famulen_gateway::Answer {
+    fn from(answer: Answer) -> Self {
+        match answer {
+            Answer::Approve => Self::Approve,
+            Answer::Reject => Self::Reject,
+            Answer::AlwaysAllow => Self::AlwaysAllow,
+        }
+    }
+}
+
+/// How a held call is named to the owner and the session: as the model
+/// called it, or by the change to the vault or to a definition it is.
+fn ticket_tool(ticket: &Ticket) -> String {
+    match ticket.connection.as_str() {
+        "" => ticket.tool.clone(),
+        famulen_gateway::VAULT | famulen_gateway::DEFINITIONS => {
+            format!("{}.{}", ticket.connection, ticket.tool)
+        }
+        connection => format!("mcp__{connection}__{}", ticket.tool),
+    }
+}
+
+pub struct Approvals<S> {
+    slack: Option<S>,
+    console: Option<crate::console_log::ConsoleLog>,
+    store: Store,
+    permissions: Permissions,
+    /// The workspace approvals are asked in, and the owner's ID there.
+    workspace: String,
+    owner: String,
+}
+
+impl<S: Slack> Approvals<S> {
+    pub fn new(
+        slack: Option<S>,
+        store: Store,
+        permissions: Permissions,
+        workspace: impl Into<String>,
+        owner: impl Into<String>,
+    ) -> Self {
+        Self {
+            slack,
+            console: None,
+            store,
+            permissions,
+            workspace: workspace.into(),
+            owner: owner.into(),
+        }
+    }
+
+    /// Tell open consoles when a request is asked or answered.
+    pub fn with_console(mut self, console: crate::console_log::ConsoleLog) -> Self {
+        self.console = Some(console);
+        self
+    }
+
+    fn tell_console(&self) {
+        if let Some(console) = &self.console {
+            console.notify(crate::console_log::Event::Approvals);
+        }
+    }
+
+    /// Put a ticket the gateway held to the owner: on the console, and in
+    /// their DM when Slack is connected. A ticket already put is left alone.
+    pub async fn present(&self, ticket: &Ticket) -> anyhow::Result<()> {
+        let (id, tool, input) = (ticket.id, ticket_tool(ticket), &ticket.shown);
+        let added = self.store.conn().execute(
+            "INSERT OR IGNORE INTO approvals (id, tool, input, status, created_at)
+             VALUES (?1, ?2, ?3, 'pending', ?4)",
+            params![id, tool, input.to_string(), ticket.created_at],
+        )?;
+        if added == 0 {
+            return Ok(());
+        }
+        self.tell_console();
+        if let Some(slack) = &self.slack {
+            let channel = slack.open_dm(&self.owner).await?;
+            let ts = slack
+                .post(&channel, self.ask_message(id, &tool, input))
+                .await?;
+            self.store.conn().execute(
+                "UPDATE approvals SET channel = ?1, ts = ?2 WHERE id = ?3",
+                params![channel, ts, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The message that asks for an answer to a request.
+    fn ask_message(&self, id: i64, tool: &str, input: &Value) -> Outgoing {
+        let questions = questions(&self.permissions, tool, input);
+        if questions.is_empty() {
+            return request_message(id, tool, input, None, once(&self.permissions, tool));
+        }
+        question_message(id, input, &questions)
+    }
+
+    /// Put every ticket still held that the owner has not been shown.
+    pub async fn present_held(&self) -> anyhow::Result<()> {
+        for ticket in self.permissions.gateway().held_tickets()? {
+            self.present(&ticket).await?;
+        }
+        Ok(())
+    }
+
+    /// Act on a button press. Returns the input that tells the session the
+    /// outcome, or `None` when the press is not the owner's or the request
+    /// was already answered.
+    pub async fn answer(&self, action: &Action) -> anyhow::Result<Option<Input>> {
+        if action.workspace != self.workspace || action.user != self.owner {
+            return Ok(None);
+        }
+        let Ok(id) = action.value.parse::<i64>() else {
+            return Ok(None);
+        };
+        if action.action_id.starts_with(asking::PREFIX) {
+            let Some(ticket) = self.permissions.gateway().ticket(id)? else {
+                return Ok(None);
+            };
+            let asked = questions(&self.permissions, &ticket_tool(&ticket), &ticket.shown);
+            return match asking::replies(&action.action_id, &action.fields, &asked) {
+                Some(replies) => self.fill_by_id(id, replies).await,
+                None => Ok(None),
+            };
+        }
+        let Some(answer) = Answer::from_action_id(&action.action_id) else {
+            return Ok(None);
+        };
+        self.answer_by_id(id, answer).await
+    }
+
+    /// Answer the questions a request asks, as given on the console or by a
+    /// press that passed its checks.
+    pub async fn fill_by_id(&self, id: i64, replies: Vec<String>) -> anyhow::Result<Option<Input>> {
+        let said = replies.join(" / ");
+        let Some(answered) = self.permissions.gateway().fill_ticket(id, replies).await? else {
+            return Ok(None);
+        };
+        self.settle(id, Answer::Approve, answered, Some(said)).await
+    }
+
+    /// Act on an answer given on the console, or a button press that passed
+    /// its checks.
+    pub async fn answer_by_id(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Input>> {
+        let Some(answered) = self
+            .permissions
+            .gateway()
+            .answer_ticket(id, answer.into())
+            .await?
+        else {
+            tracing::debug!(id, "the gateway's ticket was answered or lapsed already");
+            return Ok(None);
+        };
+        self.settle(id, answer, answered, None).await
+    }
+
+    /// Show a request as answered, and tell the session.
+    async fn settle(
+        &self,
+        id: i64,
+        answer: Answer,
+        answered: famulen_gateway::Answered,
+        said: Option<String>,
+    ) -> anyhow::Result<Option<Input>> {
+        let Some(Claimed {
+            tool,
+            input,
+            channel,
+            ts,
+        }) = self.claim(id, answer)?
+        else {
+            return Ok(None);
+        };
+        self.tell_console();
+        if let (Some(slack), Some(channel), Some(ts)) = (&self.slack, channel, ts) {
+            let failed = match &answered.ran {
+                Some(Err(error)) => Some(format!("届けられませんでした: {error:#}")),
+                _ => None,
+            };
+            let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
+            let message = match note {
+                Some(note) => noted_message(id, &tool, &input, &note),
+                None => request_message(id, &tool, &input, Some(answer), false),
+            };
+            slack.update(&channel, &ts, message).await?;
+        }
+        let text = match answered.ran {
+            Some(Ok(())) if answer == Answer::Reject => {
+                format!("Request #{id} ({tool}) was rejected by the owner. Do not do it.")
+            }
+            Some(Ok(())) => format!(
+                "Request #{id} ({tool}) was approved and done, and the owner sees so. Say nothing of it."
+            ),
+            Some(Err(error)) if answer == Answer::Reject => {
+                format!(
+                    "Request #{id} ({tool}) was rejected, but that could not be told: {error:#}"
+                )
+            }
+            Some(Err(error)) => {
+                format!("Request #{id} ({tool}) was approved but failed: {error:#}")
+            }
+            None => outcome_text(id, &tool, &input, answer),
+        };
+        Ok(Some(Input {
+            sender: Sender::Owner,
+            source: Source::Approval {
+                id,
+                user: self.owner.clone(),
+            },
+            text,
+        }))
+    }
+
+    /// Mark a pending request answered, once. Returns what it asked for.
+    fn claim(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Claimed>> {
+        let conn = self.store.conn();
+        let changed = conn.execute(
+            "UPDATE approvals SET status = ?1, answered_at = ?2 WHERE id = ?3 AND status = 'pending'",
+            params![answer.status(), now(), id],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        let row: Option<(String, String, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT tool, input, channel, ts FROM approvals WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        row.map(|(tool, input, channel, ts)| {
+            Ok(Claimed {
+                tool,
+                input: serde_json::from_str(&input)?,
+                channel,
+                ts,
+            })
+        })
+        .transpose()
+    }
+}
+
+/// Take back a request that is asked no more: it leaves the console, and its
+/// message on Slack loses its buttons.
+pub async fn withdraw<S: Slack>(store: &Store, slack: Option<&S>, id: i64) -> anyhow::Result<()> {
+    let row: Option<(String, Option<String>, Option<String>)> = {
+        let conn = store.conn();
+        let changed = conn.execute(
+            "UPDATE approvals SET status = 'withdrawn', answered_at = ?1 WHERE id = ?2 AND status = 'pending'",
+            params![now(), id],
+        )?;
+        if changed == 0 {
+            return Ok(());
+        }
+        conn.query_row(
+            "SELECT tool, channel, ts FROM approvals WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?
+    };
+    if let (Some(slack), Some((tool, Some(channel), Some(ts)))) = (slack, row) {
+        let text = format!("*確認 #{id}* `{tool}` は、もう要らなくなったので取り下げました");
+        let blocks = json!([section(&text)]);
+        slack
+            .update(
+                &channel,
+                &ts,
+                Outgoing {
+                    text,
+                    blocks: Some(blocks),
+                    thread_ts: None,
+                },
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+/// A request that was just answered, and where its message is.
+struct Claimed {
+    tool: String,
+    input: Value,
+    channel: Option<String>,
+    ts: Option<String>,
+}
+
+/// Whether the owner is asked of every call of `tool`, so it cannot be let
+/// run from now on.
+pub fn once(permissions: &Permissions, tool: &str) -> bool {
+    famulen_gateway::permissions::split_tool(tool).is_some_and(|(connection, tool)| {
+        permissions
+            .gateway()
+            .asks_each_time(connection, tool)
+            .unwrap_or(true)
+    })
+}
+
+/// The questions the owner answers in a request instead of approving it.
+pub fn questions(permissions: &Permissions, tool: &str, shown: &Value) -> Vec<Question> {
+    famulen_gateway::permissions::split_tool(tool)
+        .and_then(|(connection, tool)| {
+            permissions
+                .gateway()
+                .questions_of(connection, tool, shown)
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
+/// What the secretary says of a request beside what is asked.
+pub fn summary(shown: &Value) -> Option<&str> {
+    shown["call"]["summary"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+}
+
+fn section(text: &str) -> Value {
+    json!({ "type": "section", "text": { "type": "mrkdwn", "text": text } })
+}
+
+fn context(text: &str) -> Value {
+    json!({ "type": "context", "elements": [{ "type": "mrkdwn", "text": text }] })
+}
+
+/// The part of a request's message that says what it is about.
+fn heading(id: i64, what: &str, shown: &Value) -> Vec<Value> {
+    let mut blocks = vec![section(&format!("*確認 #{id}* {what}"))];
+    if let Some(summary) = summary(shown) {
+        let text: String = crate::slack::mrkdwn::to_mrkdwn(summary)
+            .chars()
+            .take(INPUT_PREVIEW_CHARS)
+            .collect();
+        blocks.push(section(&text));
+    }
+    blocks
+}
+
+fn question_message(id: i64, shown: &Value, asked: &[Question]) -> Outgoing {
+    let mut blocks = heading(id, "セッションからの質問", shown);
+    match asking::blocks(id, asked) {
+        Some(asking) => blocks.extend(asking),
+        None => blocks.push(context("長くて全部は出せないので、コンソールで答える")),
+    }
+    Outgoing {
+        text: format!(
+            "確認 #{id}: {}",
+            asked
+                .first()
+                .map(|q| q.question.as_str())
+                .unwrap_or_default()
+        ),
+        blocks: Some(Value::Array(blocks)),
+        thread_ts: None,
+    }
+}
+
+/// A request's message once it is answered, with how.
+fn noted_message(id: i64, tool: &str, shown: &Value, note: &str) -> Outgoing {
+    let mut blocks = heading(id, &format!("`{tool}`"), shown);
+    blocks.push(json!({ "type": "section", "text": { "type": "plain_text", "text": note.chars().take(INPUT_PREVIEW_CHARS).collect::<String>() } }));
+    Outgoing {
+        text: format!("確認 #{id}: {note}"),
+        blocks: Some(Value::Array(blocks)),
+        thread_ts: None,
+    }
+}
+
+fn request_message(
+    id: i64,
+    tool: &str,
+    input: &Value,
+    answered: Option<Answer>,
+    once: bool,
+) -> Outgoing {
+    let mut blocks = heading(id, &format!("`{tool}` を使ってよいですか？"), input);
+    // What is decided is shown as it is, without the secretary's own words.
+    let input = input.get("decides").unwrap_or(input);
+    blocks.push(section(&format!("```{}```", preview(input))));
+    match answered {
+        None => {
+            // What is decided only once is not approved unread.
+            let unread = once && pretty(input).chars().count() > INPUT_PREVIEW_CHARS;
+            let mut buttons = Vec::new();
+            if unread {
+                blocks.push(context("長くて全部は出せないので、承認はコンソールでする"));
+            } else {
+                buttons.push(button("承認", Answer::Approve, id, Some("primary")));
+            }
+            buttons.push(button("却下", Answer::Reject, id, Some("danger")));
+            if !once {
+                buttons.push(button("今後は常に許可", Answer::AlwaysAllow, id, None));
+            }
+            blocks.push(json!({ "type": "actions", "elements": buttons }));
+        }
+        Some(answer) => {
+            let note = match answer {
+                Answer::Approve => "承認しました",
+                Answer::Reject => "却下しました",
+                Answer::AlwaysAllow => "承認し、今後は常に許可にしました",
+            };
+            blocks.push(context(note));
+        }
+    }
+    Outgoing {
+        text: format!("確認 #{id}: {tool}"),
+        blocks: Some(Value::Array(blocks)),
+        thread_ts: None,
+    }
+}
+
+fn button(label: &str, answer: Answer, id: i64, style: Option<&str>) -> Value {
+    let mut button = json!({
+        "type": "button",
+        "text": { "type": "plain_text", "text": label },
+        "action_id": answer.action_id(),
+        "value": id.to_string(),
+    });
+    if let Some(style) = style {
+        button["style"] = json!(style);
+    }
+    button
+}
+
+fn pretty(input: &Value) -> String {
+    serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
+}
+
+fn preview(input: &Value) -> String {
+    let text = pretty(input);
+    if text.chars().count() <= INPUT_PREVIEW_CHARS {
+        return text;
+    }
+    let mut cut: String = text.chars().take(INPUT_PREVIEW_CHARS).collect();
+    cut.push_str("\n…");
+    cut
+}
+
+fn outcome_text(id: i64, tool: &str, input: &Value, answer: Answer) -> String {
+    match answer {
+        Answer::Approve => format!(
+            "Request #{id} was approved. You may now call {tool} once, with exactly this input:\n{input}"
+        ),
+        Answer::AlwaysAllow => format!(
+            "Request #{id} was approved, and the owner now allows {tool} without asking. Call it with this input:\n{input}"
+        ),
+        Answer::Reject => {
+            format!("Request #{id} ({tool}) was rejected by the owner. Do not do it.")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permissions::{Decision, Permission};
+    use crate::slack::fake::FakeSlack;
+
+    const OWNER: &str = "U1";
+
+    fn press(answer: Answer, id: i64, user: &str) -> Action {
+        Action {
+            workspace: "w1".into(),
+            user: user.into(),
+            action_id: answer.action_id(),
+            value: id.to_string(),
+            fields: Value::Null,
+        }
+    }
+
+    /// One of Famulen's own tools the owner is asked about first.
+    const TOOL: &str = "mcp__famulen__send_mail";
+
+    fn setup(slack: &FakeSlack) -> (Approvals<&FakeSlack>, Permissions) {
+        let store = Store::open_in_memory().unwrap();
+        let permissions = Permissions::new(
+            store.clone(),
+            crate::permissions::test_gateway(
+                famulen_gateway::store::Store::open_in_memory().unwrap(),
+            ),
+        );
+        permissions
+            .record_own_tools(&[crate::hub::ToolDef {
+                name: "send_mail".into(),
+                description: String::new(),
+                input_schema: json!({}),
+                read_only: false,
+                confirm: true,
+            }])
+            .unwrap();
+        (
+            Approvals::new(Some(slack), store, permissions.clone(), "w1", OWNER),
+            permissions,
+        )
+    }
+
+    fn input() -> Value {
+        json!({ "to": "a@example.com", "body": "hi" })
+    }
+
+    /// Have the call held and put to the owner, as a turn would.
+    async fn request(approvals: &Approvals<&FakeSlack>, permissions: &Permissions) -> i64 {
+        let Decision::Held(id) = permissions.decide(TOOL, &input()).await.unwrap() else {
+            panic!("held");
+        };
+        approvals.present_held().await.unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn a_request_reaches_the_owners_dm_with_three_buttons() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        let posts = slack.posts();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].0, "DM-U1");
+        let blocks = posts[0].1.blocks.clone().unwrap();
+        let buttons = blocks[2]["elements"].as_array().unwrap();
+        let ids: Vec<&str> = buttons
+            .iter()
+            .map(|b| b["action_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "famulen.approval.approve",
+                "famulen.approval.reject",
+                "famulen.approval.always"
+            ]
+        );
+        assert!(
+            buttons
+                .iter()
+                .all(|b| b["value"].as_str() == Some(id.to_string().as_str()))
+        );
+        assert!(
+            blocks[1]["text"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("a@example.com")
+        );
+    }
+
+    #[tokio::test]
+    async fn approving_lets_exactly_that_call_through_once_and_tells_the_session() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        let outcome = approvals
+            .answer(&press(Answer::Approve, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(outcome.source, Source::Approval { id: got, .. } if got == id));
+        assert!(outcome.text.contains("approved"));
+        assert_eq!(
+            permissions.decide(TOOL, &input()).await.unwrap(),
+            Decision::Allow
+        );
+        assert!(matches!(
+            permissions.decide(TOOL, &input()).await.unwrap(),
+            Decision::Held(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejecting_grants_nothing_and_tells_the_session() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        let outcome = approvals
+            .answer(&press(Answer::Reject, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(outcome.text.contains("rejected"));
+        assert!(matches!(
+            permissions.decide(TOOL, &input()).await.unwrap(),
+            Decision::Held(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn always_allow_raises_the_tool_to_allow() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        approvals
+            .answer(&press(Answer::AlwaysAllow, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(permissions.permission(TOOL).unwrap(), Permission::Allow);
+        assert_eq!(
+            permissions
+                .decide(TOOL, &json!({ "other": 1 }))
+                .await
+                .unwrap(),
+            Decision::Allow
+        );
+    }
+
+    #[tokio::test]
+    async fn the_answered_message_loses_its_buttons() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        approvals
+            .answer(&press(Answer::Approve, id, OWNER))
+            .await
+            .unwrap();
+        let updates = slack.updates();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(
+            (updates[0].0.as_str(), updates[0].1.as_str()),
+            ("DM-U1", "9.1")
+        );
+        let blocks = updates[0].2.blocks.clone().unwrap();
+        assert!(
+            blocks
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|b| b["type"] != "actions")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answered_request_cannot_be_answered_again() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        approvals
+            .answer(&press(Answer::Reject, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            approvals
+                .answer(&press(Answer::Approve, id, OWNER))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(matches!(
+            permissions.decide(TOOL, &input()).await.unwrap(),
+            Decision::Held(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_press_in_another_workspace_does_nothing() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        let mut action = press(Answer::Approve, id, OWNER);
+        action.workspace = "w2".into();
+        assert_eq!(approvals.answer(&action).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_press_by_someone_else_does_nothing() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let id = request(&approvals, &permissions).await;
+        assert_eq!(
+            approvals
+                .answer(&press(Answer::Approve, id, "U2"))
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(matches!(
+            permissions.decide(TOOL, &input()).await.unwrap(),
+            Decision::Held(_)
+        ));
+        assert!(slack.updates().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_long_input_is_cut_on_a_character_boundary() {
+        let long = json!({ "body": "あ".repeat(4000) });
+        let shown = preview(&long);
+        assert!(shown.chars().count() <= INPUT_PREVIEW_CHARS + 2);
+        assert!(shown.ends_with('…'));
+    }
+
+    #[test]
+    fn what_is_decided_once_has_no_button_for_from_now_on_and_is_not_approved_unread() {
+        let buttons = |input: &Value, once: bool| -> Vec<String> {
+            let blocks = request_message(1, "t", input, None, once).blocks.unwrap();
+            blocks
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|b| b["type"] == "actions")
+                .flat_map(|b| b["elements"].as_array().unwrap().clone())
+                .map(|e| e["text"]["text"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let short = json!({ "a": 1 });
+        let long = json!({ "a": "x".repeat(INPUT_PREVIEW_CHARS) });
+        assert_eq!(buttons(&short, false), ["承認", "却下", "今後は常に許可"]);
+        assert_eq!(buttons(&short, true), ["承認", "却下"]);
+        assert_eq!(buttons(&long, true), ["却下"]);
+        assert_eq!(buttons(&long, false).len(), 3);
+    }
+}
