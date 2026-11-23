@@ -1,0 +1,168 @@
+//! The jobs that run whatever the engine does.
+
+use std::time::Duration;
+
+use chrono::{NaiveDateTime, Timelike, Utc};
+
+use tokio::sync::broadcast::error::RecvError;
+
+use super::dream::dream_and_record;
+use super::keep;
+use super::receive::sync_receivers;
+use super::watch::poll_lookout;
+use crate::app::App;
+use crate::console_log::Event;
+use crate::dream_settings::{self, DreamSettings};
+use crate::dreaming;
+use crate::models::Role;
+use crate::store::Store;
+
+const CHORE_TICK: Duration = Duration::from_secs(60);
+const FIND_MODELS_EVERY: Duration = Duration::from_secs(60 * 60);
+const CALENDAR_EVERY: i64 = 15 * 60;
+/// How often each Google account's mail is read again from the last read,
+/// for the mail whose notice was taken but not read.
+const MAIL_CATCH_UP_EVERY: i64 = 5 * 60;
+const DIGEST_AT: u32 = 8;
+
+/// Build the engine again between turns once a change to a service definition
+/// goes in, so the session's model CLI reads the connections' new tools.
+pub(super) async fn rebuild_when_redefined(app: App) {
+    let mut redefined = app.gateway.subscribe_redefined();
+    loop {
+        match redefined.recv().await {
+            Ok(id) => tracing::info!(definition = %id, "a service definition changed"),
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+        app.changed.notify_one();
+    }
+}
+
+pub(super) async fn keep_finding_models(app: App) {
+    let mut tick = tokio::time::interval(FIND_MODELS_EVERY);
+    loop {
+        tick.tick().await;
+        if let Err(error) = app.find_models().await {
+            tracing::warn!(%error, "could not register the models on this machine");
+        }
+        app.console.notify(Event::Records);
+    }
+}
+
+pub(super) async fn chores(app: App) {
+    let mut tick = tokio::time::interval(CHORE_TICK);
+    let mut last_calendar = 0_i64;
+    let mut last_mail = 0_i64;
+    loop {
+        tick.tick().await;
+        let tz = app.tz();
+        let now = Utc::now();
+        let local = now.with_timezone(&tz);
+        if now.timestamp() - last_calendar >= CALENDAR_EVERY {
+            last_calendar = now.timestamp();
+            app.refresh_calendars().await;
+            app.console.notify(Event::Records);
+        }
+        if now.timestamp() - last_mail >= MAIL_CATCH_UP_EVERY {
+            last_mail = now.timestamp();
+            app.catch_up_mail().await;
+        }
+        app.renew_google_watches(app.receive_url.as_deref()).await;
+        if let Err(error) = app.gateway.refresh_due().await {
+            tracing::warn!(%error, "could not refresh logins");
+        }
+        if let Err(error) = sync_receivers(&app) {
+            tracing::warn!(%error, "could not open the receiving connections");
+        }
+        if let Err(error) = remind(&app, local.date_naive()) {
+            tracing::warn!(%error, "could not check due dates");
+        }
+        if let Err(error) = poll_lookout(&app).await {
+            tracing::warn!(%error, "the lookout failed");
+        }
+        match daily_due(&app.store, "lookout.digest_on", DIGEST_AT, local) {
+            Ok(true) => match app.lookout.digest() {
+                Ok(Some(input)) => {
+                    let _ = keep(&app.store, &app.inputs, &input);
+                }
+                Ok(None) => {}
+                Err(error) => tracing::warn!(%error, "could not make the digest"),
+            },
+            Ok(false) => {}
+            Err(error) => tracing::warn!(%error, "could not check the digest"),
+        }
+        dream_when_due(&app, local.naive_local()).await;
+    }
+}
+
+/// Dream when the owner's schedule says so, or enough notes wait.
+async fn dream_when_due(app: &App, now: NaiveDateTime) {
+    if app.models.assignment(Role::Dream).ok().flatten().is_none() {
+        return;
+    }
+    let plan = DreamSettings::load(&app.store).unwrap_or_default();
+    let last = dream_settings::last(&app.store).ok().flatten();
+    let waiting = dreaming::waiting_notes(&app.memory_dir)
+        .unwrap_or_default()
+        .len();
+    let scheduled = plan.due(last, now);
+    if scheduled {
+        let _ = app
+            .store
+            .set_state(dream_settings::LAST_KEY, now.date().to_string());
+    }
+    if scheduled || plan.early(waiting) {
+        dream_and_record(app).await;
+    }
+}
+
+fn remind(app: &App, today: chrono::NaiveDate) -> anyhow::Result<()> {
+    let made = app.records.remind_deadlines(today)?;
+    if !made.is_empty() {
+        app.console.notify(Event::Records);
+    }
+    Ok(())
+}
+
+/// Whether the daily job at `hour` is due: past the hour today and not yet
+/// run today. Marks it run.
+fn daily_due(
+    store: &Store,
+    key: &str,
+    hour: u32,
+    now: chrono::DateTime<chrono_tz::Tz>,
+) -> anyhow::Result<bool> {
+    let today = now.date_naive().to_string();
+    if now.hour() < hour || store.state(key)?.as_deref() == Some(today.as_str()) {
+        return Ok(false);
+    }
+    store.set_state(key, &today)?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn a_daily_job_runs_once_after_its_hour() {
+        let store = Store::open_in_memory().unwrap();
+        let tz = chrono_tz::Asia::Tokyo;
+        let early = tz.with_ymd_and_hms(2026, 11, 21, 3, 0, 0).unwrap();
+        let late = tz.with_ymd_and_hms(2026, 11, 21, 5, 0, 0).unwrap();
+        assert!(!daily_due(&store, "k", 4, early).unwrap());
+        assert!(daily_due(&store, "k", 4, late).unwrap());
+        assert!(!daily_due(&store, "k", 4, late).unwrap());
+        assert!(
+            daily_due(
+                &store,
+                "k",
+                4,
+                tz.with_ymd_and_hms(2026, 11, 22, 4, 0, 0).unwrap()
+            )
+            .unwrap()
+        );
+    }
+}
