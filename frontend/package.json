@@ -1,0 +1,36 @@
+{
+  "name": "famulen-console",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gen": "buf generate ../proto",
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "node .output/server/index.mjs",
+    "check": "tsc --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@ark-ui/solid": "5.40.0",
+    "@arto-app/markdown": "0.50.0",
+    "@bufbuild/protobuf": "2.17.0",
+    "@connectrpc/connect": "2.3.0",
+    "@connectrpc/connect-web": "2.3.0",
+    "@solidjs/meta": "0.29.8",
+    "@solidjs/router": "1.0.3",
+    "@solidjs/start": "2.2.3",
+    "@tabler/icons": "3.52.0",
+    "nitro": "3.0.261103-rc",
+    "solid-js": "1.9.20",
+    "vite": "8.3.8"
+  },
+  "devDependencies": {
+    "@bufbuild/protoc-gen-es": "2.17.0",
+    "@playwright/test": "1.65.1",
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

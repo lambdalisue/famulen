@@ -1,0 +1,8 @@
+/node_modules/
+/.output/
+/.nitro/
+/.vinxi/
+/dist/
+/src/gen/
+/test-results/
+/playwright-report/
