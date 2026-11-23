@@ -98,6 +98,20 @@ message LookoutPreset {
 }
 
 // What the lookout decided about one item.
+// What the lookout did with an item.
+enum LookoutOutcome {
+  LOOKOUT_OUTCOME_UNSPECIFIED = 0;
+  // It does not concern the owner.
+  LOOKOUT_OUTCOME_UNRELATED = 1;
+  // It concerns the owner, who only wants it in the log.
+  LOOKOUT_OUTCOME_LOGGED = 2;
+  LOOKOUT_OUTCOME_DIGEST = 3;
+  // To the secretary, to tell the owner.
+  LOOKOUT_OUTCOME_NOTIFY = 4;
+  // To the secretary, to act on.
+  LOOKOUT_OUTCOME_ACT = 5;
+}
+
 message LookoutDecision {
   int64 id = 1;
   string source = 2;
@@ -112,6 +126,7 @@ message LookoutDecision {
   // It went to the secretary; otherwise it was dropped or kept for the
   // digest.
   bool passed_on = 8;
+  LookoutOutcome outcome_kind = 9;
 }
 
 message LookoutOverview {

@@ -21,6 +21,23 @@ pub(crate) fn status_label(status: &str) -> &str {
     given(status).unwrap_or("ログイン待ち")
 }
 
+pub(crate) fn state_of(status: &str) -> ConnectionState {
+    match status.trim() {
+        CONNECTED => ConnectionState::CONNECTION_STATE_CONNECTED,
+        "" => ConnectionState::CONNECTION_STATE_LOGIN_PENDING,
+        _ => ConnectionState::CONNECTION_STATE_TROUBLED,
+    }
+}
+
+fn transport_kind(transport: &Transport) -> TransportKind {
+    match transport {
+        Transport::McpRemote { .. } => TransportKind::TRANSPORT_KIND_MCP_REMOTE,
+        Transport::McpLocal { .. } => TransportKind::TRANSPORT_KIND_MCP_LOCAL,
+        Transport::Api { .. } => TransportKind::TRANSPORT_KIND_API,
+        Transport::Defined { .. } => TransportKind::TRANSPORT_KIND_DEFINITION,
+    }
+}
+
 pub(crate) fn is_slack(c: &core::Connection) -> bool {
     matches!(&c.transport, Transport::Defined { definition, .. } if definition == famulen_core::channel::DEFINITION)
 }
@@ -51,6 +68,8 @@ pub(crate) fn connection(c: &core::Connection) -> Connection {
         account: c.account.clone(),
         transport: c.transport.label().into(),
         status: status_label(&c.status).into(),
+        state: state_of(&c.status).into(),
+        transport_kind: transport_kind(&c.transport).into(),
         ready: c.secret.holds("bearer")
             || c.secret.holds("api_key")
             || (!definition.is_empty() && c.status == CONNECTED),
@@ -764,5 +783,28 @@ impl ConnectionService for Api {
         self.app.changed.notify_one();
         changed(self);
         Response::ok(self.connection_detail(&r.connection).or_fail()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_connection_stands_well_waits_for_its_login_or_is_in_trouble() {
+        for (status, state) in [
+            (
+                "つながっている",
+                ConnectionState::CONNECTION_STATE_CONNECTED,
+            ),
+            ("", ConnectionState::CONNECTION_STATE_LOGIN_PENDING),
+            ("ログインし直す", ConnectionState::CONNECTION_STATE_TROUBLED),
+            (
+                "つながらない（x）",
+                ConnectionState::CONNECTION_STATE_TROUBLED,
+            ),
+        ] {
+            assert_eq!(state_of(status), state, "{status}");
+        }
     }
 }

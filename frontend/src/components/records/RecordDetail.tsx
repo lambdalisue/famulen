@@ -516,7 +516,7 @@ export default function RecordDetail(props: {
   const copy = (text: string, what: string) => void navigator.clipboard?.writeText(text).then(() => say(`${what}を写した`));
 
   return (
-    <Show when={record()} fallback={<p class="empty">この記録はもうない。</p>}>
+    <Show when={record()} fallback={<p class="empty">{record() === null ? "この記録はもうない。" : "読み込んでいる"}</p>}>
       {(r) => (
         <KnownLinks.Provider value={() => r().links}>
         <article class="rec">

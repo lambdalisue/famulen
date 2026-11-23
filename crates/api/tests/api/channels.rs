@@ -69,6 +69,14 @@ async fn a_service_added_with_a_receiver_for_the_channel_is_listed_as_a_channel_
     assert_eq!(listed["channels"][0]["service"], "Glasses");
     assert_eq!(listed["channels"][0]["enabled"], json!(true));
     assert_eq!(
+        listed["channels"][0]["state"],
+        detail["connection"]["state"]
+    );
+    assert_eq!(
+        detail["connection"]["transportKind"], "TRANSPORT_KIND_DEFINITION",
+        "{detail}"
+    );
+    assert_eq!(
         off["channels"][0]["enabled"],
         Value::Null,
         "turned off, the channel is still listed: {off}"

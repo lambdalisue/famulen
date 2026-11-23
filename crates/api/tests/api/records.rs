@@ -151,3 +151,23 @@ async fn a_working_memory_goes_on_though_a_link_in_it_came_to_fit_several() {
     assert_eq!(working["done"], "[[同じ]] を見た");
     assert_eq!(working["next"], "尋ねる");
 }
+
+#[tokio::test]
+async fn a_record_that_is_not_there_is_answered_as_not_found() {
+    let dir = temp();
+    let api = open(&dir);
+    let memo = save(&api, json!({ "kind": "memos", "title": "x" })).await;
+    let get = |id: &Value| json!({ "kind": "memos", "id": id });
+
+    let (found, _) = try_call(&api, "RecordService/GetRecord", get(&memo["id"])).await;
+    let (status, gone) = try_call(
+        &api,
+        "RecordService/GetRecord",
+        get(&json!("01ARZ3NDEKTSV4RRFFQ69G5FAV")),
+    )
+    .await;
+
+    assert_eq!(found, 200);
+    assert_eq!(status, 404, "{gone}");
+    assert_eq!(gone["code"], "not_found");
+}

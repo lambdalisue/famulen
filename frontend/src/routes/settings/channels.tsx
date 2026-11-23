@@ -2,6 +2,7 @@ import { A, createAsync } from "@solidjs/router";
 import { createSignal, For, onMount, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import { ChannelSwitch, MainWorkspace } from "~/components/ServiceSections";
+import { ConnectionState } from "~/gen/famulen/v1/services_pb";
 import { channelsQuery } from "~/lib/connections";
 import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
@@ -51,7 +52,7 @@ export default function Channels() {
                 <br />
                 <span class="sub">{c.service}</span>
               </A>
-              <span class={`tag${c.status === "つながっている" ? " confirmed" : " warn"}`}>{c.status}</span>
+              <span class={`tag${c.state === ConnectionState.CONNECTED ? " confirmed" : " warn"}`}>{c.status}</span>
               <MainWorkspace connection={c.connection} />
               <ChannelSwitch channel={c}>
                 <span class="sub">{c.enabled ? "受ける" : "受けない"}</span>

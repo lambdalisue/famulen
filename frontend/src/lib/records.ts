@@ -1,3 +1,4 @@
+import { Code, ConnectError } from "@connectrpc/connect";
 import { query } from "@solidjs/router";
 import type { Field, FieldType, LinkAccountRequest, Record as Rec, RecordItem, RecordKind } from "~/gen/famulen/v1/records_pb";
 import type { Workgroup } from "~/gen/famulen/v1/workgroups_pb";
@@ -17,12 +18,13 @@ export const recordsQuery = query(
   "records",
 );
 
-/** One record whole, or nothing when it is gone. */
+/** One record whole, or null when there is none; a read that fails is thrown, not taken for a record that is gone. */
 export const recordQuery = query(async (kind: string, id: string) => {
   try {
     return await api.records.getRecord({ kind, id });
-  } catch {
-    return undefined;
+  } catch (e) {
+    if (ConnectError.from(e).code === Code.NotFound) return null;
+    throw e;
   }
 }, "record");
 

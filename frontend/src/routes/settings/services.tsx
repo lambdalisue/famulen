@@ -9,9 +9,11 @@ import { CalendarsSection, ChannelsSection, LookoutSection, Pref } from "~/compo
 import {
   type Connection,
   type ConnectionDetail,
+  ConnectionState,
   type DefinitionChange,
   Permission,
   type ToolSetting,
+  TransportKind,
 } from "~/gen/famulen/v1/services_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -32,9 +34,6 @@ import { shortTime } from "~/lib/time";
 import { setSelection, setView } from "~/lib/view";
 
 const OWN = "famulen";
-const CONNECTED = "つながっている";
-/** A connection added from a definition whose login was never finished. */
-const PENDING = "ログイン待ち";
 const GOOGLE = "google";
 const SLACK = "slack";
 
@@ -82,7 +81,7 @@ function ConnectionRow(props: { c: Connection; icon: string }) {
           <span class="sub">{sub()}</span>
         </Show>
       </div>
-      <span class={`tag${props.c.status !== CONNECTED ? " warn" : ""}`}>{props.c.status}</span>
+      <span class={`tag${props.c.state !== ConnectionState.CONNECTED ? " warn" : ""}`}>{props.c.status}</span>
       <Icon svg={icons.chevronRight} size={14} />
     </A>
   );
@@ -531,7 +530,7 @@ function ServiceDetail(props: { id: string }) {
   const [key, setKey] = createSignal("");
   const [header, setHeader] = createSignal("");
   /** The definition says what the account is, so it is not the owner's to write. */
-  const defined = () => c()?.transport === "サービス定義" && Boolean(c()?.account);
+  const defined = () => c()?.transportKind === TransportKind.DEFINITION && Boolean(c()?.account);
   const navigate = useNavigate();
   const persona = createAsync(() => personaQuery());
 
@@ -624,16 +623,16 @@ function ServiceDetail(props: { id: string }) {
                     </Show>
                   </div>
                 </Show>
-                <Show when={detail()?.login && conn().status === CONNECTED}>
+                <Show when={detail()?.login && conn().state === ConnectionState.CONNECTED}>
                   <p class="sub">
                     つながっているので、ログインは要らない。切れたときや、許す範囲を変えるときにだけログインし直す。
                   </p>
                 </Show>
                 <div class="row">
                   <Show when={detail()?.login}>
-                    <button type="button" class="btn" classList={{ primary: conn().status !== CONNECTED }} onClick={login}>
+                    <button type="button" class="btn" classList={{ primary: conn().state !== ConnectionState.CONNECTED }} onClick={login}>
                       <Icon svg={icons.login2} size={14} />
-                      {conn().status === PENDING ? "ログインを続ける" : "ログインし直す"}
+                      {conn().state === ConnectionState.LOGIN_PENDING ? "ログインを続ける" : "ログインし直す"}
                     </button>
                   </Show>
                   <button
@@ -649,7 +648,7 @@ function ServiceDetail(props: { id: string }) {
                     外す
                   </button>
                 </div>
-                <Show when={!managed() && conn().transport === "API"}>
+                <Show when={!managed() && conn().transportKind === TransportKind.API}>
                   <form class="row" onSubmit={setSecret}>
                     <input
                       class="input"

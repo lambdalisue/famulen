@@ -39,6 +39,16 @@ const TOOL_PRESETS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
+fn outcome_kind(outcome: Outcome) -> LookoutOutcome {
+    match outcome {
+        Outcome::Unrelated => LookoutOutcome::LOOKOUT_OUTCOME_UNRELATED,
+        Outcome::Logged => LookoutOutcome::LOOKOUT_OUTCOME_LOGGED,
+        Outcome::Digest => LookoutOutcome::LOOKOUT_OUTCOME_DIGEST,
+        Outcome::Notify => LookoutOutcome::LOOKOUT_OUTCOME_NOTIFY,
+        Outcome::Act => LookoutOutcome::LOOKOUT_OUTCOME_ACT,
+    }
+}
+
 pub(crate) fn decision(d: famulen_core::lookout::Decision) -> LookoutDecision {
     LookoutDecision {
         id: d.id,
@@ -47,6 +57,7 @@ pub(crate) fn decision(d: famulen_core::lookout::Decision) -> LookoutDecision {
         title: d.title,
         passed_on: matches!(d.outcome, Outcome::Notify | Outcome::Act),
         outcome: d.outcome.label().into(),
+        outcome_kind: outcome_kind(d.outcome).into(),
         reason: d.reason,
         feedback: match d.feedback.as_deref() {
             Some("wanted") => 1,

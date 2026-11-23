@@ -1,7 +1,7 @@
 import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import Icon from "~/components/Icon";
-import type { LookoutDecision } from "~/gen/famulen/v1/lookout_pb";
+import { type LookoutDecision, LookoutOutcome } from "~/gen/famulen/v1/lookout_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { personaQuery } from "~/lib/data";
@@ -17,7 +17,7 @@ const lookoutLogQuery = query(async (before: number) => {
 
 /** Whether the lookout passed the item on, so the owner's answer would be "not wanted". */
 function passedOn(d: LookoutDecision): boolean {
-  return d.outcome.startsWith("秘書へ") || d.outcome === "朝のまとめへ";
+  return d.passedOn || d.outcomeKind === LookoutOutcome.DIGEST;
 }
 
 /** What the lookout decided about each item it read, and the owner's answers to it. */
@@ -36,7 +36,7 @@ export default function LookoutLog() {
                 <span class="mono sub" style={{ width: "90px" }}>
                   {shortTime(d.at, persona()?.timezone ?? "")}
                 </span>
-                <span class={`tag${d.outcome.startsWith("秘書へ") ? " aide" : ""}`}>{d.outcome}</span>
+                <span class={`tag${d.passedOn ? " aide" : ""}`}>{d.outcome}</span>
                 <div class="grow">
                   <div style={{ "font-size": "13px" }}>{d.title}</div>
                   <Show when={d.reason}>
