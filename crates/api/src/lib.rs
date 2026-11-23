@@ -7,12 +7,22 @@
 #![allow(refining_impl_trait)]
 
 mod calendar;
+mod channels;
+mod connections;
 mod console;
+mod definitions;
+mod logs;
+mod lookout;
 mod memory;
+mod models;
 mod notebook;
 mod paging;
+mod permissions;
 mod records;
 mod routines;
+mod settings;
+pub mod tools;
+mod vault;
 mod workgroups;
 
 use std::sync::Arc;
@@ -66,8 +76,16 @@ impl Api {
         let router = ConsoleServiceExt::register(api.clone(), router);
         let router = CalendarServiceExt::register(api.clone(), router);
         let router = WorkgroupServiceExt::register(api.clone(), router);
+        let router = SettingsServiceExt::register(api.clone(), router);
+        let router = ModelServiceExt::register(api.clone(), router);
         let router = RoutineServiceExt::register(api.clone(), router);
+        let router = LogServiceExt::register(api.clone(), router);
+        let router = ConnectionServiceExt::register(api.clone(), router);
+        let router = ChannelServiceExt::register(api.clone(), router);
+        let router = LookoutServiceExt::register(api.clone(), router);
         let router = NotebookServiceExt::register(api.clone(), router);
+        let router = VaultServiceExt::register(api.clone(), router);
+        let router = GatewayLogServiceExt::register(api.clone(), router);
         MemoryServiceExt::register(api.clone(), router)
     }
 
