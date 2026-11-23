@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::store::Store;
 
 const KEY: &str = "setting.dream";
-/// The day the last scheduled dream ran; an early dream does not count.
+/// The day the last scheduled dream succeeded or was given up; an early
+/// dream does not count.
 pub const LAST_KEY: &str = "dream.last";
 
 /// The most core lines the owner may ask for. A core longer than this
@@ -30,6 +31,7 @@ pub enum Frequency {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DreamSettings {
     /// The time of day the scheduled dream runs, in the owner's time zone.
     pub hour: u32,
@@ -40,6 +42,8 @@ pub struct DreamSettings {
     /// How many lines core may hold: the dream keeps it within this, and a
     /// new session is handed no more than this.
     pub core_lines: u32,
+    /// Whether the dream also tidies records.
+    pub tidy_records: bool,
 }
 
 impl Default for DreamSettings {
@@ -50,6 +54,7 @@ impl Default for DreamSettings {
             frequency: Frequency::Nightly,
             early_at: 30,
             core_lines: 150,
+            tidy_records: true,
         }
     }
 }
@@ -92,7 +97,7 @@ impl DreamSettings {
         NaiveTime::from_hms_opt(self.hour, self.minute, 0)
     }
 
-    /// Whether the scheduled dream may run on `day`, given the day it last ran.
+    /// Whether the scheduled dream may run on `day`, given the day it last counted for.
     fn runs_on(&self, day: NaiveDate, last: Option<NaiveDate>) -> bool {
         if last == Some(day) {
             return false;
@@ -142,7 +147,7 @@ impl DreamSettings {
     }
 }
 
-/// The day the last scheduled dream ran.
+/// The day the last scheduled dream succeeded or was given up.
 pub fn last(store: &Store) -> anyhow::Result<Option<NaiveDate>> {
     Ok(store.state(LAST_KEY)?.and_then(|d| d.parse().ok()))
 }
@@ -181,6 +186,7 @@ mod tests {
             frequency: Frequency::Weekly { weekday: 3 },
             early_at: 0,
             core_lines: 80,
+            tidy_records: false,
         };
         s.save(&store).unwrap();
         assert_eq!(DreamSettings::load(&store).unwrap(), s);

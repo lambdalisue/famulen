@@ -21,7 +21,7 @@ use crate::link::found;
 use crate::{Notebook, Page, README, RECORDS, Signature, link_target};
 
 /// The metadata every kind of record has, in its frontmatter.
-pub const METADATA: [&str; 8] = [
+pub const METADATA: &[&str] = &[
     "id",
     "labels",
     "workgroup",
@@ -30,10 +30,22 @@ pub const METADATA: [&str; 8] = [
     "updated",
     "google",
     "url",
+    "obsolete",
+    "obsolete_reason",
+    "moved",
 ];
 
 /// How much of an id its code takes at least.
 const CODE_LENGTH: usize = 6;
+
+/// The mark of a record that may no longer be true.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Obsolete {
+    /// The day it was marked, `YYYY-MM-DD`.
+    pub on: String,
+    /// Why it looks out of date.
+    pub reason: String,
+}
 
 /// One record: its kind, its id (the file name), its metadata and its body.
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +92,29 @@ impl Record {
 
     pub fn labels(&self) -> Vec<String> {
         self.meta.list("labels")
+    }
+
+    /// The mark that it may no longer be true, when it carries one.
+    pub fn obsolete(&self) -> Option<Obsolete> {
+        Some(Obsolete {
+            on: self.meta.text("obsolete")?,
+            reason: self.meta.text("obsolete_reason").unwrap_or_default(),
+        })
+    }
+
+    /// Mark it as doubtful, or take the mark off.
+    pub fn set_obsolete(&mut self, mark: Option<&Obsolete>) {
+        self.meta.set_opt("obsolete", mark.map(|m| m.on.as_str()));
+        self.meta.set_opt(
+            "obsolete_reason",
+            mark.map(|m| m.reason.as_str()).filter(|r| !r.is_empty()),
+        );
+    }
+
+    /// The kind and id of the record it was made into.
+    pub fn moved(&self) -> Option<(String, String)> {
+        let target = self.meta.text("moved")?;
+        record_of(target.trim()).map(|(k, i)| (k.to_owned(), i.to_owned()))
     }
 
     /// Where it is in the notebook, without `.md`: what a wiki link to it
@@ -389,6 +424,11 @@ impl Records {
         Ok(())
     }
 
+    /// Refuse what [`Self::save`] would refuse, writing nothing.
+    pub fn verify(&self, record: &Record) -> anyhow::Result<()> {
+        crate::check::refuse_new_errors(self, record, &record.render())
+    }
+
     /// Write a record and commit it. When its title changed, the links that
     /// carried the old one are brought along.
     pub fn write(
@@ -684,6 +724,58 @@ mod tests {
         let mut read = r.get("tasks", &record.id).unwrap().unwrap();
         read.body.set("Priority", "high").unwrap();
         r.write(&me(), &read, "直した").unwrap();
+    }
+
+    #[test]
+    fn a_mark_of_doubt_is_read_back_and_taken_off_leaving_the_rest_as_it_was() {
+        let (tmp, r) = records("records-obsolete");
+        for kind in ["memos", "contracts"] {
+            let record = r.draft(kind, "回線").unwrap();
+            r.write(&me(), &record, "足した").unwrap();
+            let before = r.get(kind, &record.id).unwrap().unwrap();
+            let mark = Obsolete {
+                on: "2026-11-24".into(),
+                reason: "料金: 2 年前のまま".into(),
+            };
+
+            let mut marked = before.clone();
+            marked.set_obsolete(Some(&mark));
+            r.write(&me(), &marked, "印を付けた").unwrap();
+
+            let mut read = r.get(kind, &record.id).unwrap().unwrap();
+            assert_eq!(read.obsolete(), Some(mark));
+            assert_eq!(read.body, before.body);
+            let findings = crate::check::check(r.notebook()).unwrap();
+            assert_eq!(findings, [], "{kind}");
+            read.set_obsolete(None);
+            assert_eq!(read.obsolete(), None);
+            let text = read.render();
+            assert!(!text.contains("obsolete"), "{text}");
+        }
+        drop(tmp);
+    }
+
+    #[test]
+    fn a_record_says_what_it_was_made_into() {
+        let (_tmp, r) = records("records-moved");
+        let mut memo = r.draft("memos", "電話する").unwrap();
+        assert_eq!(memo.moved(), None);
+        memo.meta
+            .set("moved", "records/tasks/01kat3v8q4zj6m2x9r5c7w1hbn");
+        assert_eq!(
+            memo.moved(),
+            Some(("tasks".into(), "01kat3v8q4zj6m2x9r5c7w1hbn".into()))
+        );
+    }
+
+    #[test]
+    fn verifying_refuses_what_writing_would_and_writes_nothing() {
+        let (_tmp, r) = records("records-verify");
+        let mut record = task(&r, "x");
+        r.verify(&record).unwrap();
+        record.body.set("Due", "tomorrow").unwrap();
+        assert!(r.verify(&record).is_err());
+        assert!(r.list("tasks").unwrap().is_empty());
     }
 
     #[test]

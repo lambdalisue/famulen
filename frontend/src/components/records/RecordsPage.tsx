@@ -110,6 +110,7 @@ export default function RecordsPage(props: {
   const [labels, setLabels] = createSignal<string[]>([]);
   const [chosen, setChosen] = createSignal<{ [field: string]: string }>({});
   const [withOver, setWithOver] = createSignal(false);
+  const [onlyDoubted, setOnlyDoubted] = createSignal(false);
   const [look, setLook] = createSignal("list");
   const [adding, setAdding] = createSignal(false);
   const key = () => `famulen.look.${props.kind}`;
@@ -138,11 +139,13 @@ export default function RecordsPage(props: {
     (all() ?? []).filter(
       (r) =>
         (withOver() || !props.over?.(r) || Object.values(chosen()).some((v) => v)) &&
+        (!onlyDoubted() || !!r.obsolete) &&
         (!words().trim() || matches(r, words().trim())) &&
         labels().every((l) => r.labels.includes(l)) &&
         Object.entries(chosen()).every(([f, v]) => !v || valueOf(r, f) === v),
     ),
   );
+  const anyDoubted = createMemo(() => onlyDoubted() || (all() ?? []).some((r) => r.obsolete));
   const groups = createMemo<Group[]>(() => props.groups?.(found()) ?? [{ name: "", records: found() }]);
 
   const order = createMemo(() => groups().flatMap((g) => g.records));
@@ -178,7 +181,7 @@ export default function RecordsPage(props: {
   const one = (r: Rec) => (
     <div
       class={look() === "card" ? "rec-card" : "rec-row"}
-      classList={{ on: r.id === id(), over: props.over?.(r) }}
+      classList={{ on: r.id === id(), over: props.over?.(r), doubted: !!r.obsolete }}
       data-record={r.id}
       onClick={(e) => {
         const on = e.target instanceof Element ? e.target.closest("a,button,input,select,label") : null;
@@ -186,6 +189,11 @@ export default function RecordsPage(props: {
       }}
     >
       {look() === "card" ? (props.card ?? props.row)(r) : props.row(r)}
+      <Show when={r.obsolete}>
+        <span class="tag warn" title={r.obsoleteReason}>
+          古いかも
+        </span>
+      </Show>
     </div>
   );
 
@@ -241,6 +249,12 @@ export default function RecordsPage(props: {
             <label class="records-over">
               <input type="checkbox" checked={withOver()} onChange={(e) => setWithOver(e.currentTarget.checked)} />
               {props.overLabel}
+            </label>
+          </Show>
+          <Show when={anyDoubted()}>
+            <label class="records-over">
+              <input type="checkbox" checked={onlyDoubted()} onChange={(e) => setOnlyDoubted(e.currentTarget.checked)} />
+              古いかもしれないものだけ
             </label>
           </Show>
         </div>

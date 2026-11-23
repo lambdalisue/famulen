@@ -5,12 +5,24 @@
 #
 # Asked once for a dream plan (--json-schema with the dream's prompt), it
 # forgets the long-term item whose id starts with `e2e-done`, so a night with
-# a commit and a reason can be seen; any other one-shot call gets no answer.
+# a commit and a reason can be seen; asked to tidy records, it makes a
+# task of those titled `e2e-todo` and doubts those titled `e2e-stale`; any
+# other one-shot call gets no answer.
 use strict;
 use warnings;
 $| = 1;
 if (grep { $_ eq "--json-schema" } @ARGV) {
     my $prompt = do { local $/; <STDIN> } // "";
+    if ($prompt =~ /^Records to look at/) {
+        my @records;
+        while ($prompt =~ /<record>.*?\nid: (\w+)\n.*?\n# (e2e-todo|e2e-stale).*?<\/record>/gs) {
+            my ($id, $verdict, $kind) = ($1, $2 eq "e2e-todo" ? "task" : "suspect", "memos");
+            push @records, qq({"record":"records/$kind/$id","verdict":"$verdict","reason":"e2e-why"});
+        }
+        my $answer = '{"records":[' . join(",", @records) . ']}';
+        print qq({"type":"result","subtype":"success","is_error":false,"result":"","structured_output":$answer,"usage":{"input_tokens":1,"output_tokens":1}}\n);
+        exit 0;
+    }
     exit 0 unless $prompt =~ /^Episodic notes:/;
     my @edits = map { qq({"op":"forget","id":"$_","reason":"e2eで済んだ"}) } ($prompt =~ /\{id: (e2e-done[\w-]*)/g);
     my $plan = '{"edits":[' . join(",", @edits) . '],"settled":[]}';

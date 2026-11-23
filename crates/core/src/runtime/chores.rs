@@ -2,17 +2,17 @@
 
 use std::time::Duration;
 
-use chrono::{NaiveDateTime, Timelike, Utc};
+use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
 
 use tokio::sync::broadcast::error::RecvError;
 
-use super::dream::dream_and_record;
+use super::dream::{Dreamt, dream_and_record};
 use super::keep;
 use super::receive::sync_receivers;
 use super::watch::poll_lookout;
 use crate::app::App;
 use crate::console_log::Event;
-use crate::dream_settings::{self, DreamSettings};
+use crate::dream_schedule;
 use crate::dreaming;
 use crate::models::Role;
 use crate::store::Store;
@@ -92,28 +92,40 @@ pub(super) async fn chores(app: App) {
             Ok(false) => {}
             Err(error) => tracing::warn!(%error, "could not check the digest"),
         }
-        dream_when_due(&app, local.naive_local()).await;
+        dream_when_due(&app, now, local.naive_local()).await;
     }
 }
 
-/// Dream when the owner's schedule says so, or enough notes wait.
-async fn dream_when_due(app: &App, now: NaiveDateTime) {
-    if app.models.assignment(Role::Dream).ok().flatten().is_none() {
+/// Dream when the owner's schedule says so, enough notes wait, or a dream
+/// that failed is to be tried again. Without a model, or past its daily cap,
+/// there is nothing to try.
+async fn dream_when_due(app: &App, now: DateTime<Utc>, local: NaiveDateTime) {
+    if app.models.assignment(Role::Dream).ok().flatten().is_none()
+        || !app
+            .models
+            .within_cap(Role::Dream, app.tz(), now)
+            .unwrap_or(false)
+    {
         return;
     }
-    let plan = DreamSettings::load(&app.store).unwrap_or_default();
-    let last = dream_settings::last(&app.store).ok().flatten();
     let waiting = dreaming::waiting_notes(&app.memory_dir)
         .unwrap_or_default()
         .len();
-    let scheduled = plan.due(last, now);
-    if scheduled {
-        let _ = app
-            .store
-            .set_state(dream_settings::LAST_KEY, now.date().to_string());
-    }
-    if scheduled || plan.early(waiting) {
-        dream_and_record(app).await;
+    let due = match dream_schedule::due(&app.store, now, local, waiting) {
+        Ok(Some(due)) => due,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, "could not tell whether to dream");
+            return;
+        }
+    };
+    let succeeded = match dream_and_record(app).await {
+        Dreamt::Applied => true,
+        Dreamt::Failed => false,
+        Dreamt::Busy => return,
+    };
+    if let Err(error) = dream_schedule::ended(&app.store, due, succeeded, Utc::now()) {
+        tracing::warn!(%error, "could not note how the dream went");
     }
 }
 

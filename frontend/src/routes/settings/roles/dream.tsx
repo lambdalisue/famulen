@@ -1,6 +1,7 @@
 import { NumberInput } from "@ark-ui/solid/number-input";
 import { SegmentGroup } from "@ark-ui/solid/segment-group";
 import { Select, createListCollection } from "@ark-ui/solid/select";
+import { Switch } from "@ark-ui/solid/switch";
 import { A, createAsync } from "@solidjs/router";
 import { For, Show, createMemo } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -32,7 +33,7 @@ const TIMES = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).
 /** How a time reads on the page: 4:00, not 04:00. */
 const shownTime = (at: string) => at.replace(/^0(\d)/, "$1");
 
-type Change = Partial<Pick<DreamSettings, "at" | "frequency" | "weekday" | "earlyAt" | "coreLines">>;
+type Change = Partial<Pick<DreamSettings, "at" | "frequency" | "weekday" | "earlyAt" | "coreLines" | "tidyRecords">>;
 
 /** A count saved when its field is left; an empty or broken field goes back. */
 function Count(props: {
@@ -208,6 +209,30 @@ function Reach(props: { plan: DreamSettings; save: (c: Change) => void }) {
   );
 }
 
+function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
+  return (
+    <section class="pref">
+      <div class="pref-head">
+        <h2>記録を整える</h2>
+        <p class="sub">
+          夢のあとに、することを書いたメモをタスクにし、古くなったかもしれない記録に印を付けて、確かめるタスクを足す。一晩に見るのは少しずつで、書いてあることは変えず、消さない。
+        </p>
+      </div>
+      <Switch.Root
+        class="role-field row"
+        checked={props.plan.tidyRecords ?? true}
+        onCheckedChange={(d) => props.save({ tidyRecords: d.checked })}
+      >
+        <Switch.Label class="grow">記録も整える</Switch.Label>
+        <Switch.Control class="switch">
+          <Switch.Thumb class="switch-thumb" />
+        </Switch.Control>
+        <Switch.HiddenInput />
+      </Switch.Root>
+    </section>
+  );
+}
+
 /** Dreaming: putting the day's memories in order overnight. */
 export default function Dream() {
   setView("設定 · 夢");
@@ -222,6 +247,7 @@ export default function Dream() {
         weekday: p.weekday,
         earlyAt: p.earlyAt,
         coreLines: p.coreLines,
+        tidyRecords: p.tidyRecords,
         ...change,
       }),
     );
@@ -245,6 +271,7 @@ export default function Dream() {
             <>
               <When plan={p()} save={save} />
               <Reach plan={p()} save={save} />
+              <Records plan={p()} save={save} />
             </>
           )}
         </Show>

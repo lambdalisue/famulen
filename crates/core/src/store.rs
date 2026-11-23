@@ -542,6 +542,14 @@ CREATE TABLE IF NOT EXISTS dreams (
     status    TEXT NOT NULL,
     summary   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS record_looks (
+    kind        TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    looked_on   TEXT NOT NULL,
+    verdict     TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
 ";
 
 pub(crate) fn now() -> i64 {

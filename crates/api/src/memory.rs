@@ -57,6 +57,8 @@ pub(crate) fn dream(n: famulen_core::dreaming::Night) -> Dream {
         archived: c.archived as i32,
         confirmed: c.confirmed as i32,
         pending_added: c.pending_added as i32,
+        task_made: c.task_made as i32,
+        doubted: c.doubted as i32,
         changes: n
             .summary
             .changes
@@ -98,6 +100,7 @@ impl Api {
             early_at: plan.early_at as i32,
             core_lines: plan.core_lines as i32,
             next: self.next_dream()?,
+            tidy_records: Some(plan.tidy_records),
             ..Default::default()
         })
     }
@@ -181,6 +184,7 @@ impl Api {
             .chain((workgroup != ALL).then(|| ("workgroup".to_owned(), workgroup.to_owned())))
             .collect(),
             reason: None,
+            record: None,
         };
         let skipped = famulen_core::dreaming::apply(&self.app.memory_dir, &[edit], today)?;
         anyhow::ensure!(
@@ -530,7 +534,9 @@ impl MemoryService for Api {
     ) -> ServiceResult<Empty> {
         writer(&ctx).may_write().or_fail()?;
         let app = self.app.clone();
-        tokio::spawn(async move { famulen_core::runtime::dream_and_record(&app).await });
+        tokio::spawn(async move {
+            famulen_core::runtime::dream_and_record(&app).await;
+        });
         Response::ok(Empty::default())
     }
 
@@ -567,6 +573,10 @@ impl MemoryService for Api {
             frequency,
             early_at: count(r.early_at)?,
             core_lines: count(r.core_lines)?,
+            tidy_records: match r.tidy_records {
+                Some(on) => on,
+                None => Plan::load(&self.app.store).or_fail()?.tidy_records,
+            },
         };
         plan.save(&self.app.store).or_fail()?;
         self.app.journal.record("setting", "dream changed");

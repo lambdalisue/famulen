@@ -1,4 +1,4 @@
-import { createAsync, useNavigate } from "@solidjs/router";
+import { A, createAsync, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, Index, type JSX, on, Show } from "solid-js";
 import Icon from "~/components/Icon";
 import Markdown from "~/components/Markdown";
@@ -12,6 +12,7 @@ import {
   type Field,
   fieldOf,
   type FieldType,
+  hrefOf,
   KIND_NAMES,
   kindsQuery,
   nameOf,
@@ -419,6 +420,40 @@ function Labels(props: { record: Rec; onSave: (change: (labels: string[]) => str
   );
 }
 
+/** That a record may be out of date, or lives on as another, above all it says. */
+function Standing(props: { record: Rec }) {
+  const r = () => props.record;
+  return (
+    <>
+      <Show when={r().obsolete}>
+        <div class="callout warn">
+          <Icon svg={icons.alertTriangle} size={14} />
+          <span class="grow">
+            古くなったかもしれない（{r().obsolete}）{r().obsoleteReason ? `：${r().obsoleteReason}` : ""}
+          </span>
+          <button
+            type="button"
+            class="btn small"
+            onClick={() => void act(() => api.records.clearObsolete({ kind: r().kind, id: r().id }), "印を外した")}
+          >
+            確かめたので印を外す
+          </button>
+        </div>
+      </Show>
+      <Show when={r().movedTo}>
+        {(to) => (
+          <div class="callout">
+            <span class="grow">
+              {KIND_NAMES[to().kind] ?? to().kind}に移した：
+              <A href={hrefOf(to().kind, to().id) ?? "#"}>{to().title}</A>
+            </span>
+          </div>
+        )}
+      </Show>
+    </>
+  );
+}
+
 /** Everything one record says, each part changed where it stands. */
 export default function RecordDetail(props: {
   kind: string;
@@ -559,6 +594,7 @@ export default function RecordDetail(props: {
               </section>
             }
           >
+            <Standing record={r()} />
             {props.top?.(r())}
             <div class="rec-columns" classList={{ plain: kind()?.free }}>
             <div class="rec-aside">

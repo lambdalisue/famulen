@@ -67,7 +67,7 @@ impl Doc {
     }
 
     /// The prose of a long-term memory file.
-    pub(crate) fn long_text(&self) -> Option<&str> {
+    pub fn long_text(&self) -> Option<&str> {
         self.long.as_ref().map(Page::body)
     }
 

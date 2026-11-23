@@ -90,6 +90,10 @@ impl Api {
             .link(records, &r.kind, &r.id, String::new())
             .map(|l| l.code)
             .unwrap_or_default();
+        let obsolete = r.obsolete();
+        let moved_to = r
+            .moved()
+            .and_then(|(kind, id)| names.link(records, &kind, &id, String::new()));
         let meta = |name: &str| r.meta.text(name).unwrap_or_default();
         Record {
             kind: r.kind.clone(),
@@ -133,6 +137,9 @@ impl Api {
                 })
                 .collect(),
             links,
+            obsolete: obsolete.as_ref().map(|m| m.on.clone()).unwrap_or_default(),
+            obsolete_reason: obsolete.map(|m| m.reason).unwrap_or_default(),
+            moved_to: moved_to.into(),
             ..Default::default()
         }
     }
@@ -381,6 +388,26 @@ impl RecordService for Api {
         }
         changed(self);
         Response::ok(self.whole(&r.kind, &saved.id).or_fail()?)
+    }
+
+    async fn clear_obsolete(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, RecordRef>,
+    ) -> ServiceResult<Record> {
+        let records = &self.app.records;
+        let marked = records.need(request.kind, request.id).or_fail()?;
+        let cleared = records
+            .clear_obsolete(writer(&ctx), request.kind, request.id)
+            .or_fail()?;
+        if marked.obsolete().is_some() {
+            let today = chrono::Utc::now()
+                .with_timezone(&self.app.tz())
+                .date_naive();
+            famulen_core::tidying::confirmed(&self.app.store, &cleared, today).or_fail()?;
+        }
+        changed(self);
+        Response::ok(self.whole(&cleared.kind, &cleared.id).or_fail()?)
     }
 
     async fn delete_record(

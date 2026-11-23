@@ -90,13 +90,12 @@ pub fn relevance_profile(app: &App) -> String {
     }
     let mut holdings: Vec<String> = Vec::new();
     for kind in [records::HOLDINGS, records::CONTRACTS] {
-        holdings.extend(
-            app.records
-                .list(kind)
-                .unwrap_or_default()
-                .iter()
-                .map(|h| h.title()),
-        );
+        holdings.extend(app.records.list(kind).unwrap_or_default().iter().map(
+            |h| match h.obsolete() {
+                Some(_) => format!("{} (may be out of date)", h.title()),
+                None => h.title(),
+            },
+        ));
     }
     if !holdings.is_empty() {
         profile.push_str(&format!("\nOwned and subscribed: {}", holdings.join(", ")));

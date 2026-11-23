@@ -25,6 +25,8 @@ const OP_LABELS: Record<string, string> = {
   pending_added: "保留にした",
   moved: "移した",
   deleted: "消した",
+  task_made: "タスクにした",
+  doubted: "古いかも",
 };
 
 const BAR_HEIGHT = 150;
@@ -158,7 +160,7 @@ export default function Dreams() {
                 </span>
               </Show>
             </div>
-            <div style={{ display: "grid", "grid-template-columns": "repeat(6,minmax(0,1fr))", gap: "8px" }}>
+            <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fit,minmax(96px,1fr))", gap: "8px" }}>
               <For
                 each={
                   [
@@ -168,6 +170,8 @@ export default function Dreams() {
                     ["確かめた", n().confirmed],
                     ["忘れた", n().archived],
                     ["保留にした", n().pendingAdded],
+                    ["タスクにした", n().taskMade],
+                    ["古いかもの印", n().doubted],
                   ] as const
                 }
               >
@@ -206,7 +210,7 @@ export default function Dreams() {
               </For>
             </div>
             <p class="sub">
-              夢は 1 つのコミットにまとまる。全体の書き直しはせず、項目ごとの小さな変更だけを当てる。ファイルを半分より小さくする変更と、あなたの言ったことを消す変更は当てない。
+              記憶の変更は 1 つのコミットにまとまる。全体の書き直しはせず、項目ごとの小さな変更だけを当てる。ファイルを半分より小さくする変更と、あなたの言ったことを消す変更は当てない。
             </p>
           </section>
         )}

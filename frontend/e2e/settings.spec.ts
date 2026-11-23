@@ -418,6 +418,16 @@ test.describe("役のモデル", () => {
     expect(await capOf("ROLE_TRIAGE")).toBe(triageBefore);
   });
 
+  test("tidying records is turned off on the dream's page and stays so after a reload", async ({ page }) => {
+    await visit(page, "/settings/roles/dream", "設定 · 夢");
+    const tidy = page.getByRole("checkbox", { name: "記録も整える" });
+    await expect(tidy).toBeChecked();
+    await page.getByText("記録も整える", { exact: true }).click();
+    await expect(toast(page)).toHaveText("保存した");
+    await page.reload();
+    await expect(tidy).not.toBeChecked();
+  });
+
   test("choosing 使わない takes the model off a role", async ({ page }) => {
     await visit(page, "/settings/roles/dream", "設定 · 夢");
     await chooseModel(page, "使わない");

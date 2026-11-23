@@ -15,6 +15,7 @@ async fn without_a_choice_the_dream_runs_nightly_at_four() {
     assert_eq!(s["frequency"], "DREAM_FREQUENCY_NIGHTLY");
     assert_eq!(s["earlyAt"], 30);
     assert_eq!(s["coreLines"], 150);
+    assert_eq!(s["tidyRecords"], true);
     assert!(s["next"].as_str().unwrap().ends_with(" 4:00"), "{s}");
 }
 
@@ -85,4 +86,19 @@ async fn the_core_layer_counts_its_lines_against_the_limit_the_owner_set() {
 
     let count = core["layer"]["count"].as_str().unwrap();
     assert!(count.ends_with("/ 80 行"), "{core}");
+}
+
+#[tokio::test]
+async fn tidying_records_is_turned_off_and_stays_so_when_left_out() {
+    let dir = temp();
+    let api = open(&dir);
+    let mut settings = json!({
+        "at": "04:00", "frequency": "DREAM_FREQUENCY_NIGHTLY", "coreLines": 150, "tidyRecords": false
+    });
+    for _ in 0..2 {
+        try_call(&api, "MemoryService/SetDreamSettings", settings.clone()).await;
+        let (_, s) = try_call(&api, "MemoryService/GetDreamSettings", json!({})).await;
+        assert_eq!(s["tidyRecords"], false, "{s}");
+        settings.as_object_mut().unwrap().remove("tidyRecords");
+    }
 }

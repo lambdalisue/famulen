@@ -3,17 +3,21 @@
 //! written; here is what Famulen does when one is written, and who may.
 
 mod deadlines;
+mod obsolete;
 mod parties;
 
+pub use obsolete::CONFIRM_SOURCE;
 pub use parties::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Context as _;
 
 use famulen_notebook::body::{DETAILS, Item, LOG, NewItem, Value, same};
-pub use famulen_notebook::records::{Backlink, FieldType, Kind, Names, Record, SectionType};
+pub use famulen_notebook::records::{
+    Backlink, FieldType, Kind, Names, Obsolete, Record, SectionType,
+};
 use famulen_notebook::records::{Records as NotebookRecords, record_of};
 
 use crate::notebook::{Notebook, Writer, link_target};
@@ -254,6 +258,15 @@ impl Records {
         self.writing.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Keep the records from other writers while more than one of them is
+    /// read, checked and written.
+    pub(crate) fn hold(&self) -> Held<'_> {
+        Held {
+            records: self,
+            _writing: self.writing(),
+        }
+    }
+
     pub fn notebook(&self) -> &Notebook {
         self.notebook.notebook()
     }
@@ -307,9 +320,18 @@ impl Records {
     }
 
     /// Add a record.
-    pub fn add(&self, writer: Writer, kind: &str, mut patch: Patch) -> anyhow::Result<Record> {
+    pub fn add(&self, writer: Writer, kind: &str, patch: Patch) -> anyhow::Result<Record> {
+        self.hold().add(writer, kind, patch)
+    }
+
+    /// Refuse what [`Self::add`] would refuse, writing nothing.
+    pub fn check_add(&self, writer: Writer, kind: &str, patch: Patch) -> anyhow::Result<()> {
         writer.may_write()?;
-        let _writing = self.writing();
+        self.notebook.verify(&self.drafted(writer, kind, patch)?)
+    }
+
+    /// A record as it would be added.
+    fn drafted(&self, writer: Writer, kind: &str, mut patch: Patch) -> anyhow::Result<Record> {
         let title = patch.title.take().unwrap_or_default();
         let mut record = self.notebook.draft(kind, &title)?;
         match kind {
@@ -326,10 +348,7 @@ impl Records {
             _ => {}
         }
         self.apply(writer, &mut record, patch)?;
-        let subject = format!("{} を足した", record.title());
-        self.notebook
-            .write(&writer.signature(), &record, &subject)?;
-        self.need(kind, &record.id)
+        Ok(record)
     }
 
     /// Change a record, named by its id or code.
@@ -340,30 +359,34 @@ impl Records {
         id: &str,
         patch: Patch,
     ) -> anyhow::Result<Record> {
-        writer.may_write()?;
-        let _writing = self.writing();
-        let mut record = self.need(kind, id)?;
-        self.may_change(writer, &record)?;
-        let before = record.clone();
-        self.apply(writer, &mut record, patch)?;
-        if record != before {
-            let subject = format!("{} を直した", record.title());
-            self.notebook
-                .write(&writer.signature(), &record, &subject)?;
-        }
-        self.need(kind, &record.id)
+        self.hold().change(writer, kind, id, patch)
+    }
+
+    /// Say that a record was made into a task.
+    pub fn moved_to_task(&self, kind: &str, id: &str, task: &Record) -> anyhow::Result<Record> {
+        self.hold().moved_to_task(kind, id, task)
+    }
+
+    /// A task not over of the same title in the same workgroups. What is put
+    /// into a task shows where the task does: in fewer it would be lost from
+    /// where it belongs, in more it would show where it does not.
+    pub fn open_task_titled(
+        &self,
+        title: &str,
+        workgroups: &[String],
+    ) -> anyhow::Result<Option<Record>> {
+        let plain = |t: &str| t.split_whitespace().collect::<String>().to_lowercase();
+        let set = |w: &[String]| w.iter().cloned().collect::<BTreeSet<_>>();
+        Ok(self.list(TASKS)?.into_iter().find(|t| {
+            !is_over(t)
+                && plain(&t.title()) == plain(title)
+                && set(&t.workgroups()) == set(workgroups)
+        }))
     }
 
     /// Remove a record for good.
     pub fn remove(&self, writer: Writer, kind: &str, id: &str) -> anyhow::Result<()> {
-        writer.may_write()?;
-        let _writing = self.writing();
-        let record = self.need(kind, id)?;
-        self.may_change(writer, &record)?;
-        let subject = format!("{} を消した", record.title());
-        self.notebook
-            .remove(&writer.signature(), kind, &record.id, &subject)?;
-        Ok(())
+        self.hold().remove(writer, kind, id)
     }
 
     /// What the owner decided about a routine is the owner's to change.
@@ -539,6 +562,74 @@ impl Records {
 }
 
 /// Make a section of fields hold exactly these.
+/// The records kept from other writers.
+pub(crate) struct Held<'a> {
+    records: &'a Records,
+    _writing: MutexGuard<'a, ()>,
+}
+
+impl Held<'_> {
+    pub(crate) fn records(&self) -> &Records {
+        self.records
+    }
+
+    pub(crate) fn add(&self, writer: Writer, kind: &str, patch: Patch) -> anyhow::Result<Record> {
+        writer.may_write()?;
+        let r = self.records;
+        let record = r.drafted(writer, kind, patch)?;
+        let subject = format!("{} を足した", record.title());
+        r.notebook.write(&writer.signature(), &record, &subject)?;
+        r.need(kind, &record.id)
+    }
+
+    pub(crate) fn change(
+        &self,
+        writer: Writer,
+        kind: &str,
+        id: &str,
+        patch: Patch,
+    ) -> anyhow::Result<Record> {
+        writer.may_write()?;
+        let r = self.records;
+        let mut record = r.need(kind, id)?;
+        r.may_change(writer, &record)?;
+        let before = record.clone();
+        r.apply(writer, &mut record, patch)?;
+        if record != before {
+            let subject = format!("{} を直した", record.title());
+            r.notebook.write(&writer.signature(), &record, &subject)?;
+        }
+        r.need(kind, &record.id)
+    }
+
+    pub(crate) fn remove(&self, writer: Writer, kind: &str, id: &str) -> anyhow::Result<()> {
+        writer.may_write()?;
+        let r = self.records;
+        let record = r.need(kind, id)?;
+        r.may_change(writer, &record)?;
+        let subject = format!("{} を消した", record.title());
+        r.notebook
+            .remove(&writer.signature(), kind, &record.id, &subject)?;
+        Ok(())
+    }
+
+    /// It stays as it is, so what links to it keeps resolving.
+    pub(crate) fn moved_to_task(
+        &self,
+        kind: &str,
+        id: &str,
+        task: &Record,
+    ) -> anyhow::Result<Record> {
+        let r = self.records;
+        let mut record = r.need(kind, id)?;
+        record.meta.set("moved", task.target());
+        let subject = format!("{} をタスクに移した", record.title());
+        r.notebook
+            .write(&Writer::Secretary.signature(), &record, &subject)?;
+        r.need(kind, id)
+    }
+}
+
 fn set_fields(record: &mut Record, section: &str, wanted: &[Field]) -> anyhow::Result<()> {
     let now: Vec<Field> = record
         .body
