@@ -2,6 +2,7 @@
 
 pub mod approvals;
 pub mod asking;
+pub mod calendars;
 pub mod console_log;
 pub mod hub;
 pub mod input;
