@@ -22,6 +22,7 @@ pub mod models;
 pub mod notebook;
 pub mod notebook_place;
 mod paths;
+pub mod people;
 pub mod permissions;
 pub mod persona;
 pub mod records;

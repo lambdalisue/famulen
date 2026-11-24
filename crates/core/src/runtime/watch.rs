@@ -4,10 +4,13 @@ use chrono::Utc;
 
 use super::keep;
 use crate::app::App;
-use crate::lookout::{self, Item, LookoutSource, More, Reading};
+use crate::console_log::Event;
+use crate::lookout::{self, Feed, Item, LookoutSource, More, Reading};
 use crate::memory;
 use crate::models::Role;
+use crate::people;
 use crate::records;
+use crate::workgroups::MemberKind;
 
 /// What the lookout's model is told to pick what to read in full. What the
 /// owner cares about follows.
@@ -58,6 +61,8 @@ pub fn relevance_profile(app: &App) -> String {
         .filter(|g| g.group == memory::LongGroup::Semantic)
         .flat_map(|g| g.files)
         .flat_map(|f| f.entries)
+        // What another is like is not what the owner cares about.
+        .filter(|e| e.get("person").is_none())
         .map(|e| e.body().to_owned())
         .take(40)
         .collect();
@@ -212,6 +217,45 @@ async fn ask_lookout(
     Ok(Some(answer))
 }
 
+/// Whether a source reads what people write to each other.
+fn tells_of_people(source: &LookoutSource) -> bool {
+    source.tool == lookout::ARRIVED && matches!(source.feed, Feed::Chat | Feed::Mail)
+}
+
+/// Keep what the lookout noted of people as episodic memory. Being no concern
+/// of the owner's does not matter here.
+fn note_people(
+    app: &App,
+    source: &LookoutSource,
+    items: &[Item],
+    answer: &serde_json::Value,
+) -> anyhow::Result<()> {
+    if !tells_of_people(source) {
+        return Ok(());
+    }
+    let noted = people::noted_from(answer);
+    if noted.is_empty() {
+        return Ok(());
+    }
+    let _hold = app.notebook.hold()?;
+    people::write_down(
+        &app.records,
+        &app.memory_dir,
+        Utc::now().with_timezone(&app.tz()).naive_local(),
+        &people::Place {
+            feed: source.feed,
+            name: &source.name,
+            workgroups: &app
+                .workgroups
+                .workgroups_of(MemberKind::Lookout, source.id.to_string())?,
+        },
+        items,
+        &noted,
+    )?;
+    app.console.notify(Event::Records);
+    Ok(())
+}
+
 pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
     let at = Utc::now().timestamp();
     let due = app.lookout.due(at)?;
@@ -237,9 +281,18 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
         let source_ref = &source;
         let open = move |url: String| async move { open_page(app, source_ref, &url).await };
         let model = async |items: Vec<Item>| {
-            let system = format!("{SCREEN}{profile}");
-            let schema = lookout::verdict_schema();
+            let mut system = format!("{SCREEN}{profile}");
+            let mut schema = lookout::verdict_schema();
+            if tells_of_people(source_ref) {
+                system.insert_str(0, people::ASK);
+                schema = people::with_people(schema);
+            }
             let answer = ask_lookout(app, tz, &system, &items, &schema).await?;
+            if let Some(answer) = &answer
+                && let Err(error) = note_people(app, source_ref, &items, answer)
+            {
+                tracing::warn!(source = %source_ref.name, %error, "could not note what was seen of people");
+            }
             Ok(answer.map(|a| lookout::verdict_from(&a, items.len())))
         };
         let inputs = app
@@ -256,6 +309,7 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dreaming;
     use crate::runtime::testing;
 
     #[tokio::test]
@@ -339,6 +393,43 @@ mod tests {
     }
 
     #[test]
+    fn what_is_seen_of_people_in_chat_and_mail_becomes_episodic_memory() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-people");
+        let app = testing::app(dir.path());
+        memory::ensure(&app.memory_dir).unwrap();
+        let items = [Item {
+            title: "a".into(),
+            body: "channel: C1 · from: U1 · ts: 1.0\na".into(),
+        }];
+        let answer = serde_json::json!({
+            "items": [{ "index": 0, "related": false, "urgency": "later" }],
+            "groups": [],
+            "people": [{ "item": 0, "who": "", "note": "経理の担当" }]
+        });
+        let mut source = LookoutSource {
+            id: 1,
+            name: "会社".into(),
+            connection: "w1".into(),
+            tool: "get_feed".into(),
+            args: serde_json::json!({}),
+            interval: 60,
+            own_interval: None,
+            feed: Feed::Chat,
+            route: None,
+            enabled: true,
+            last_run: None,
+        };
+
+        note_people(&app, &source, &items, &answer).unwrap();
+        assert!(dreaming::waiting_notes(&app.memory_dir).unwrap().is_empty());
+        source.tool = lookout::ARRIVED.into();
+        note_people(&app, &source, &items, &answer).unwrap();
+
+        let notes = dreaming::waiting_notes(&app.memory_dir).unwrap();
+        assert_eq!(notes[0].1.body(), "U1（会社）：経理の担当");
+    }
+
+    #[test]
     fn the_lookout_judges_by_records_and_memory() {
         let dir = crate::notebook::testing::TempDir::new("runtime-profile");
         let app = testing::app(dir.path());
@@ -357,8 +448,17 @@ mod tests {
         )
         .unwrap();
 
+        memory::write_file(
+            &app.memory_dir,
+            "long/semantic/tanaka.md",
+            "---\nid: m2\nsummary: 田中さんは朝が早い\nperson: 田中\n---\n\n田中さんは朝が早い。\n"
+                .as_bytes(),
+        )
+        .unwrap();
+
         let profile = relevance_profile(&app);
 
+        assert!(!profile.contains("朝が早い"), "{profile}");
         assert!(profile.contains("請求書を送る"), "{profile}");
         assert!(profile.contains("セールの知らせは要らない"), "{profile}");
     }
