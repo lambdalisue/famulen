@@ -98,6 +98,8 @@ textarea.input.rec-notes { min-height:260px; font-family:"IBM Plex Mono", ui-mon
 .rec-log-text { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
 .rec-log .sub { flex:none; }
 .rec-foot { border-top:1px solid var(--line2); padding-top:10px; margin:0; }
+.tag.missing { color:#8F2D14; text-decoration:line-through; cursor:default; }
+.pick-list .folder-item[aria-current] { background:var(--line2); }
 .pick-list { list-style:none; margin:0; padding:0; max-height:min(420px, 60vh); overflow-y:auto; }
 .callout { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; border-radius:10px; background:var(--soft); font-size:13px; }
 .callout.warn { background:var(--warn-soft); color:var(--warn); }

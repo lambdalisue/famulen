@@ -8,6 +8,8 @@ import mermaidUrl from "@arto-app/markdown/bundles/page-mermaid.iife.js?url";
 import wasmUrl from "@arto-app/markdown/wasm/arto_markdown_wasm_bg.wasm?url";
 import type { Library } from "@arto-app/markdown/wasm";
 import { isMap, isScalar, isSeq, parseDocument } from "yaml";
+import type { RecordLink } from "~/gen/famulen/v1/records_pb";
+import { memoryHref } from "./memory";
 import { hrefOf } from "./records";
 
 declare global {
@@ -68,14 +70,13 @@ function fileName(path: string): string {
   }
 }
 
+const RECORD = /^(?:\.?\/)?records\/([^/]+)\/([^/]+?)(?:\.md)?(?:#.*)?$/;
+
 /** Where a link in the notebook leads on the console: to a record, or to a memory file. */
 export function notebookHref(path: string): string | undefined {
-  const m = /^(?:\.?\/)?(records|memory)\/(.+?)(?:\.md)?(?:#.*)?$/.exec(path);
-  if (!m) return undefined;
-  const at = fileName(m[2]);
-  if (m[1] === "memory") return `/memory/file?path=${encodeURIComponent(`${at}.md`)}`;
-  const [kind, id, ...rest] = at.split("/");
-  return id && rest.length === 0 ? hrefOf(kind, id) : undefined;
+  const at = fileName(path.replace(/#.*$/, ""));
+  const m = RECORD.exec(at);
+  return m ? hrefOf(m[1], m[2]) : memoryHref(at);
 }
 
 /** Whether the notebook reads `group` as attributes: a YAML mapping of keys to scalars or lists of them. */
@@ -159,16 +160,25 @@ function putBack(article: HTMLElement, attributes: string[]) {
 /**
  * Draw Markdown in `viewer` the way Arto does. Whoever wrote it, nothing in
  * it runs or is fetched from elsewhere: HTML is shown as text, and the
- * renderer is the one for documents that did not come from a file.
+ * renderer is the one for documents that did not come from a file. `links`
+ * says what the records it links to are called now, and which are gone.
  */
 export async function draw(
   viewer: HTMLElement,
   markdown: string,
-  how: { inline?: boolean; attributes?: boolean } = {},
+  { links = [], ...how }: { inline?: boolean; attributes?: boolean; links?: RecordLink[] } = {},
 ) {
   const arto = await start();
+  const known = (path: string) => {
+    const m = RECORD.exec(path);
+    return m && links.find((l) => l.kind === m[1] && l.id === m[2]);
+  };
   const files = {
-    stat: (path: string) => (/\/(records|memory)\//.test(path.replace(WIKI, "")) ? { path, len: 1 } : null),
+    stat: (path: string) => {
+      const target = path.replace(WIKI, "");
+      const there = /^\/notebook\/(records|memory)\//.test(target) && !known(target.slice("/notebook/".length))?.missing;
+      return there ? { path, len: 1 } : null;
+    },
     read: () => null,
   };
   const { text, attributes } = how.attributes ? setApart(markdown) : { text: markdown, attributes: [] };
@@ -191,6 +201,19 @@ export async function draw(
   for (const a of article.querySelectorAll<HTMLAnchorElement>("a[href^='http']")) {
     a.target = "_blank";
     a.rel = "noreferrer";
+  }
+  for (const a of article.querySelectorAll<HTMLElement>(".md-link")) {
+    const path = a.dataset.mdLink ?? "";
+    const now = known(path);
+    if (a.classList.contains("md-link-missing")) {
+      a.title = "リンクの先がない";
+      a.removeAttribute("onmousedown");
+      continue;
+    }
+    if (now?.title && a.textContent === path.replace(/\.md$/, "")) a.textContent = now.title;
+    if (now?.title) a.title = now.title;
+    a.tabIndex = 0;
+    a.setAttribute("role", "link");
   }
   viewer.replaceChildren(article);
   window.ArtoRenderer?.render(viewer);

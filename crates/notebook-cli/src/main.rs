@@ -12,7 +12,7 @@ use famulen_notebook::body::{Value, split_commas};
 use famulen_notebook::check::{self, Severity};
 use famulen_notebook::index::Index;
 use famulen_notebook::memory::{self, Layer, LongGroup};
-use famulen_notebook::records::{METADATA, Record, Records};
+use famulen_notebook::records::{METADATA, Names, Record, Records, record_of};
 use famulen_notebook::search::Query;
 use famulen_notebook::{Author, Doc, Entry, EpisodeState, MEMORY, Notebook, Signature};
 use serde_json::json;
@@ -164,6 +164,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
             app.write(&record, "を直した")?;
         }
+        Command::Links { kind, id, json } => app.links(&kind, &id, json)?,
         Command::Rm { kind, id } => {
             let record = app.named(&kind, &id)?;
             let subject = format!("{} を消した", record.title());
@@ -336,6 +337,52 @@ impl App {
         Ok(())
     }
 
+    fn links(&self, kind: &str, id: &str, json: bool) -> anyhow::Result<()> {
+        let record = self.named(kind, id)?;
+        let to_it = Index::open(&self.notebook)?.backlinks(kind, &record.id)?;
+        let title = |target: &str| {
+            let (kind, id) = record_of(target)?;
+            Some(self.records.get(kind, id).ok()??.title())
+        };
+        let out: Vec<_> = record
+            .links()
+            .into_iter()
+            .map(|(from, target)| (from, title(&target), target))
+            .collect();
+        let inward: Vec<_> = to_it
+            .records
+            .into_iter()
+            .map(|b| (b.from, b.title, format!("records/{}/{}", b.kind, b.id)))
+            .chain(to_it.memories.into_iter().map(|m| {
+                let path = m.path.trim_end_matches(".md").to_owned();
+                (String::new(), m.title, path)
+            }))
+            .collect();
+        if json {
+            return print_json(&json!({
+                "links": out.iter().map(|(from, title, target)| json!({
+                    "from": from, "title": title, "target": target,
+                })).collect::<Vec<_>>(),
+                "backlinks": inward.iter().map(|(from, title, source)| json!({
+                    "from": from, "title": title, "source": source,
+                })).collect::<Vec<_>>(),
+            }));
+        }
+        for (from, title, target) in &out {
+            let title = title.as_deref().unwrap_or_default();
+            println!("->\t{target}\t{title}\t{from}");
+        }
+        for (from, title, source) in &inward {
+            println!("<-\t{source}\t{title}\t{from}");
+        }
+        Ok(())
+    }
+
+    /// A memory's text with its links in the form they are kept in.
+    fn linked(&self, text: &str) -> anyhow::Result<String> {
+        Names::new(self.records.clone()).canonical_text(text, "")
+    }
+
     fn add(
         &self,
         kind: &str,
@@ -360,6 +407,7 @@ impl App {
     fn remember(&self, layer: &str, text: &str, attrs: &[(String, String)]) -> anyhow::Result<()> {
         // Signed first, so that nothing is written that cannot be committed.
         let signature = self.signature()?;
+        let text = &self.linked(text)?;
         let dir = self.notebook.memory_dir();
         let (rel, id) = match layer {
             "episodic" => {
@@ -412,14 +460,15 @@ impl App {
         let dir = self.notebook.memory_dir();
         let path = dir.join(&rel);
         anyhow::ensure!(!path.exists(), "{rel} already holds a memory");
-        let entry = new_entry(&dir, summary, attrs)?;
+        let summary = self.linked(summary)?;
+        let text = match text.trim() {
+            "" => summary.clone(),
+            _ => self.linked(text)?,
+        };
+        let entry = new_entry(&dir, &summary, attrs)?;
         let id = entry.id().unwrap_or_default().to_owned();
         let mut doc = Doc::new_long();
-        doc.set_long_text(if text.trim().is_empty() {
-            summary
-        } else {
-            text
-        })?;
+        doc.set_long_text(&text)?;
         doc.push(entry)?;
         doc.save(&path)?;
         self.notebook.commit(

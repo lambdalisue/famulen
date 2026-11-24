@@ -5,8 +5,8 @@ use anyhow::Context as _;
 use serde_norway::{Mapping, Value};
 
 use super::record_of;
-use crate::body::{COMMON_SECTIONS, Item, Layout, same, split_commas};
-use crate::{Page, link_target};
+use crate::body::{COMMON_SECTIONS, Item, Layout, RELATED, same, split_commas};
+use crate::{Page, link, link_target};
 
 /// What a declared field may hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,8 +171,7 @@ fn is_url(text: &str) -> bool {
 
 fn is_link(text: &str, kind: Option<&str>) -> bool {
     let text = text.trim();
-    text.starts_with("[[")
-        && text.ends_with("]]")
+    link::is_link(text)
         && kind.is_none_or(|kind| record_of(link_target(text)).is_some_and(|(k, _)| k == kind))
 }
 
@@ -256,6 +255,13 @@ impl Kind {
             Some("free") => true,
             Some(other) => anyhow::bail!("a body is free or not given, not {other}"),
         };
+        // Not the README's to declare, so that a kind whose README was
+        // written before, or is not there, has it too.
+        let related = (RELATED.to_owned(), FieldType::Links(None));
+        let mut fields = if free { Vec::new() } else { fields };
+        if !fields.iter().any(|(n, _)| same(n, RELATED)) {
+            fields.push(related);
+        }
         Ok(Self {
             name: name.to_owned(),
             code,

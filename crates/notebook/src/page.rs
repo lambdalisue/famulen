@@ -212,7 +212,7 @@ fn yaml_lines(name: &str, value: &Value) -> String {
 }
 
 /// Split `---\n<yaml>\n---\n<body>` into the YAML and the body.
-fn split(text: &str) -> Option<(&str, &str)> {
+pub(crate) fn split(text: &str) -> Option<(&str, &str)> {
     let rest = text
         .strip_prefix("---\n")
         .or_else(|| text.strip_prefix("---\r\n"))?;

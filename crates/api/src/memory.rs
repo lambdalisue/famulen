@@ -346,7 +346,14 @@ impl MemoryService for Api {
         writer(&ctx).may_write().or_fail()?;
         let r = request.to_owned_message();
         let dir = &self.app.memory_dir;
-        m::write_file(dir, &r.path, r.text.as_bytes()).or_fail()?;
+        let before = m::read_file(dir, &r.path).unwrap_or_default();
+        let text = self
+            .app
+            .records
+            .names()
+            .canonical_memory(&r.text, before)
+            .or_fail()?;
+        m::write_file(dir, &r.path, text.as_bytes()).or_fail()?;
         notebook::commit_all(
             dir,
             &writer(&ctx).author(),
@@ -356,7 +363,7 @@ impl MemoryService for Api {
         changed(self);
         Response::ok(FileContent {
             path: r.path,
-            text: r.text,
+            text,
             ..Default::default()
         })
     }
@@ -379,6 +386,9 @@ impl MemoryService for Api {
         if text.is_empty() {
             return Err(fail("nothing to remember"));
         }
+        let names = self.app.records.names();
+        let text = names.canonical_text(text, "").or_fail()?;
+        let text = text.as_str();
         let kept = !r.keep_in.is_empty() && r.said;
         if kept {
             self.keep_now(&r.keep_in, text, &workgroup, at.date())
@@ -417,24 +427,28 @@ impl MemoryService for Api {
         {
             return Err(fail("name is lowercase letters, digits and -"));
         }
-        m::write_working(
-            &self.app.memory_dir,
-            &m::WorkingMemory {
-                name: r.name.clone(),
-                title: r.name.clone(),
-                done: r.done.clone(),
-                next: r.next.clone(),
-                waiting: r.waiting.clone(),
-                clues: r.clues.clone(),
-            },
-        )
-        .or_fail()?;
+        let names = self.app.records.names();
+        let before = m::working_memories(&self.app.memory_dir)
+            .or_fail()?
+            .into_iter()
+            .find(|w| w.name == r.name)
+            .unwrap_or_default();
+        let linked = |text: &str, before: &str| names.canonical_text(text, before).or_fail();
+        let working = m::WorkingMemory {
+            name: r.name.clone(),
+            title: r.name,
+            done: linked(&r.done, &before.done)?,
+            next: linked(&r.next, &before.next)?,
+            waiting: linked(&r.waiting, &before.waiting)?,
+            clues: linked(&r.clues, &before.clues)?,
+        };
+        m::write_working(&self.app.memory_dir, &working).or_fail()?;
         Response::ok(WorkingMemory {
-            name: r.name,
-            done: r.done,
-            next: r.next,
-            waiting: r.waiting,
-            clues: r.clues,
+            name: working.name,
+            done: working.done,
+            next: working.next,
+            waiting: working.waiting,
+            clues: working.clues,
             ..Default::default()
         })
     }

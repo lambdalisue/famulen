@@ -15,9 +15,9 @@ pub(crate) use refuse::refuse_new_errors;
 
 use std::collections::BTreeMap;
 
-use crate::link::links;
+use crate::link::{found, with_extension};
 use crate::memory::{self, Layer};
-use crate::records::{Kind, Records};
+use crate::records::{Ambiguous, Kind, Names, Records};
 use crate::{MEMORY, Notebook, Page, README, RECORDS, SHAPE, slash, workgroups};
 use place::{Place, all_files, place_of};
 use relations::ByKey;
@@ -117,6 +117,7 @@ struct Known {
     workgroups: Vec<String>,
     /// The files that hold each memory's or record's id.
     ids: BTreeMap<String, Vec<String>>,
+    names: Names,
 }
 
 impl Known {
@@ -130,6 +131,7 @@ impl Known {
                 .map(|w| w.id)
                 .collect(),
             ids: BTreeMap::new(),
+            names: Names::new(Records::new(notebook.clone())),
         };
         let records = Records::new(notebook.clone());
         for name in records.kind_names()? {
@@ -209,7 +211,7 @@ fn check_file(notebook: &Notebook, known: &Known, findings: &mut Findings) {
             return;
         }
     };
-    text_findings(notebook, &text, findings);
+    text_findings(&known.names, &text, findings);
     match place {
         Place::Readme => check_readme(known, &text, findings),
         Place::Record { kind, id } => {
@@ -277,19 +279,33 @@ fn check_memory(notebook: &Notebook, known: &Known, layer: Layer, findings: &mut
 }
 
 /// What is wrong with any text: links to nothing and secrets.
-fn text_findings(notebook: &Notebook, text: &str, findings: &mut Findings) {
+fn text_findings(names: &Names, text: &str, findings: &mut Findings) {
     for secret in secrets::secrets(text) {
         findings.error(1, "secret", format!("looks like a secret: {secret}"));
     }
-    for target in links(text) {
-        if !notebook.root().join(format!("{target}.md")).is_file()
-            && !notebook.root().join(&target).exists()
-        {
-            let line = text
-                .find(&format!("[[{target}"))
-                .map_or(1, |at| line_at(text, at));
-            let why = format!("links to nothing: [[{target}]]");
-            findings.error(line, "broken-link", why);
+    let mut seen: Vec<&str> = Vec::new();
+    for link in found(text) {
+        let target = link.target;
+        let there = names.is_there(target);
+        let written = with_extension(link.whole);
+        if target.is_empty() || seen.contains(&target) || there && !written {
+            continue;
+        }
+        seen.push(target);
+        let line = line_at(text, link.at);
+        match names.find(target, None) {
+            Ok(Some(one)) => {
+                let why = format!("{} is written {}", link.whole, one.link());
+                findings.warning(line, "link-form", why);
+            }
+            Err(error) if error.is::<Ambiguous>() => {
+                findings.error(line, "broken-link", format!("links to several: {error}"));
+            }
+            _ if there => {}
+            _ => {
+                let why = format!("links to nothing: [[{target}]]");
+                findings.error(line, "broken-link", why);
+            }
         }
     }
 }

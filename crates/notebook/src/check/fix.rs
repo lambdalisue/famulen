@@ -6,8 +6,10 @@ use super::place::{Place, all_files, place_of};
 use super::{Known, has_t};
 use crate::Notebook;
 use crate::body::{Body, Item, LOG, NOTES, Section, same};
-use crate::link::titled_links;
-use crate::records::{FieldType, Kind, Record, SectionType, minute, record_of, titled_link};
+use crate::link::rewrite as rewrite_links;
+use crate::records::{
+    FieldType, Kind, Record, SectionType, Unsure, minute, record_of, titled_link,
+};
 
 /// Put right what there is one way to put right in these files, or in every
 /// file when none is named. Returns the files changed, without committing
@@ -21,27 +23,33 @@ pub fn fix(notebook: &Notebook, files: &[String]) -> anyhow::Result<Vec<String>>
     let known = Known::read(notebook)?;
     let mut changed = Vec::new();
     for path in files {
-        let Place::Record { kind, id } = place_of(&path) else {
-            continue;
-        };
-        let Some(Ok(declared)) = known.kinds.get(&kind) else {
-            continue;
-        };
         let full = notebook.root().join(&path);
         let Ok(text) = std::fs::read_to_string(&full) else {
             continue;
         };
-        let Ok(record) = Record::parse(declared, &id, &text) else {
-            continue;
+        let new = match place_of(&path) {
+            Place::Record { kind, id } => {
+                let Some(Ok(declared)) = known.kinds.get(&kind) else {
+                    continue;
+                };
+                let Ok(record) = Record::parse(declared, &id, &text) else {
+                    continue;
+                };
+                let mut new = known.names.record(declared, &record, "", Unsure::Leave)?;
+                if !declared.layout.free && new.body.title().is_some() {
+                    let body = fixed(&known, declared, &new)?;
+                    new.body = Body::parse(body, &declared.layout)?;
+                }
+                if new == record {
+                    continue;
+                }
+                new.render()
+            }
+            Place::Memory(_) => known.names.memory(&text, "", Unsure::Leave)?,
+            _ => continue,
         };
-        if declared.layout.free || record.body.title().is_none() {
-            continue;
-        }
-        let body = fixed(&known, declared, &record)?;
-        if body != record.body.text() {
-            let mut record = record;
-            record.body = Body::parse(body, &declared.layout)?;
-            std::fs::write(&full, record.render())?;
+        if new != text {
+            std::fs::write(&full, new)?;
             changed.push(path);
         }
     }
@@ -175,15 +183,12 @@ fn fixed_field(known: &Known, text: &str, item: &Item, declared: &[(String, Fiel
 }
 
 fn fixed_titles(known: &Known, text: &str) -> String {
-    let mut out = text.to_owned();
-    for link in titled_links(text) {
-        if let Some((kind, id)) = record_of(link.target)
-            && let Some(title) = known.title(kind, id)
-        {
-            out = out.replace(link.whole, &titled_link(kind, id, &title));
-        }
-    }
-    out
+    rewrite_links(text, |link| {
+        Ok(record_of(link.target)
+            .filter(|_| link.title.is_some())
+            .and_then(|(kind, id)| Some(titled_link(kind, id, &known.title(kind, id)?))))
+    })
+    .unwrap_or_else(|_| text.to_owned())
 }
 
 #[cfg(test)]

@@ -53,3 +53,9 @@ export function stamp(at: bigint, tz: string): string {
     minute: "2-digit",
   }).format(new Date(Number(at) * 1000));
 }
+
+/** Where a wiki link to a memory file opens. */
+export function memoryHref(target: string): string | undefined {
+  const m = /^(?:\.?\/)?memory\/(.+?)(?:\.md)?(?:#.*)?$/.exec(target);
+  return m ? `/memory/file?path=${encodeURIComponent(`${m[1]}.md`)}` : undefined;
+}

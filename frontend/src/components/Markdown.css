@@ -3,6 +3,7 @@
 .md .markdown-viewer[hidden] { display:none; }
 .md-plain { margin:0; white-space:pre-wrap; font:inherit; font-size:14px; line-height:1.8; overflow-wrap:anywhere; }
 .md-link { cursor:pointer; }
+.md-link-missing { color:#8F2D14; text-decoration:line-through; cursor:default; }
 /* One line among others: in the type and colour of where it stands, with no room of its own. */
 .md-inline .markdown-viewer, .md-inline .markdown-body { font:inherit; color:inherit; line-height:inherit; }
 .md-inline .markdown-viewer:not([hidden]) { display:inline; }

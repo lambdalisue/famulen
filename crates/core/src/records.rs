@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::Context as _;
 
 use famulen_notebook::body::{DETAILS, Item, LOG, NewItem, Value, same};
-pub use famulen_notebook::records::{Backlink, FieldType, Kind, Record, SectionType};
+pub use famulen_notebook::records::{Backlink, FieldType, Kind, Names, Record, SectionType};
 use famulen_notebook::records::{Records as NotebookRecords, record_of};
 
 use crate::notebook::{Notebook, Writer, link_target};
@@ -301,6 +301,11 @@ impl Records {
         self.notebook.backlinks(kind, id)
     }
 
+    /// The records as a text may name them.
+    pub fn names(&self) -> Names {
+        Names::new(self.notebook.clone())
+    }
+
     /// Add a record.
     pub fn add(&self, writer: Writer, kind: &str, mut patch: Patch) -> anyhow::Result<Record> {
         writer.may_write()?;
@@ -398,8 +403,8 @@ impl Records {
         }
         if kind.layout.free {
             anyhow::ensure!(
-                patch.fields.is_empty() && patch.sections.is_empty() && patch.details.is_none(),
-                "a record of {} has no fields",
+                patch.sections.is_empty() && patch.details.is_none(),
+                "a record of {} has no sections or details",
                 kind.name
             );
         }

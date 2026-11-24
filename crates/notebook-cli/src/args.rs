@@ -78,7 +78,8 @@ pub enum Command {
         kind: String,
         #[arg(long)]
         title: String,
-        /// Its notes.
+        /// Its notes. A link may name a record by code, title or id, such as
+        /// `[[task-7w1hbn]]`; a link in a field may leave out the brackets.
         #[arg(long, default_value = "")]
         text: String,
         /// A field, `Name=value`, or metadata such as `labels=[a, b]`. A field
@@ -101,6 +102,14 @@ pub enum Command {
         /// A field to remove.
         #[arg(long = "unset")]
         unset: Vec<String>,
+    },
+    /// What a record links to, and what links to it.
+    Links {
+        kind: String,
+        /// Its id or code.
+        id: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Remove a record.
     Rm {

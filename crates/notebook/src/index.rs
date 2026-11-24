@@ -11,8 +11,9 @@ use anyhow::Context as _;
 use chrono::NaiveDate;
 use rusqlite::{Connection, TransactionBehavior, params};
 
+use crate::link::links;
 use crate::memory::{self, Layer};
-use crate::records::Records;
+use crate::records::{Backlink, Records};
 use crate::search::{FullText, Hit, Query, Searcher};
 use crate::{MEMORY, Notebook, RECORDS, slash};
 
@@ -20,7 +21,7 @@ const FILE: &str = "index.sqlite3";
 
 /// Raised whenever the tables below change, so that an index made before is
 /// read again from the files.
-const SHAPE: i64 = 1;
+const SHAPE: i64 = 2;
 
 /// What the files can give again. `uses` is not here: the files do not hold
 /// it.
@@ -28,6 +29,7 @@ const DROP: &str = "
 DROP TABLE IF EXISTS files;
 DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS items_text;
+DROP TABLE IF EXISTS links;
 ";
 
 const SCHEMA: &str = "
@@ -48,6 +50,14 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS items_path ON items (path);
 CREATE VIRTUAL TABLE IF NOT EXISTS items_text USING fts5 (title, body, tokenize = 'trigram');
+CREATE TABLE IF NOT EXISTS links (
+    path   TEXT NOT NULL,
+    item   INTEGER NOT NULL,
+    place  TEXT NOT NULL,
+    target TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS links_target ON links (target);
+CREATE INDEX IF NOT EXISTS links_path ON links (path);
 CREATE TABLE IF NOT EXISTS uses (
     id   TEXT PRIMARY KEY,
     uses INTEGER NOT NULL,
@@ -77,6 +87,25 @@ pub(crate) struct Item {
     pub workgroup: Vec<String>,
     pub date: Option<String>,
     pub fields: BTreeMap<String, String>,
+    /// The field or section each link is in, and what it leads to.
+    pub links: Vec<(String, String)>,
+}
+
+/// What links to a record.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Backlinks {
+    pub records: Vec<Backlink>,
+    /// Forgotten memories are left out.
+    pub memories: Vec<MemoryLink>,
+}
+
+/// A memory that links to a record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryLink {
+    /// The file it is in, relative to the notebook.
+    pub path: String,
+    pub id: String,
+    pub title: String,
 }
 
 /// The index of a notebook, in its `.notebook/`.
@@ -159,6 +188,7 @@ impl Index {
             [path],
         )?;
         tx.execute("DELETE FROM items WHERE path = ?1", [path])?;
+        tx.execute("DELETE FROM links WHERE path = ?1", [path])?;
         tx.execute("DELETE FROM files WHERE path = ?1", [path])?;
         tx.commit()?;
         Ok(())
@@ -197,6 +227,12 @@ impl Index {
                 "INSERT INTO items_text (rowid, title, body) VALUES (?1, ?2, ?3)",
                 params![rowid, item.title, item.body],
             )?;
+            for (place, target) in &item.links {
+                tx.execute(
+                    "INSERT INTO links (path, item, place, target) VALUES (?1, ?2, ?3, ?4)",
+                    params![item.path, rowid, place, target],
+                )?;
+            }
         }
         tx.execute(
             "INSERT INTO files (path, stamp) VALUES (?1, ?2)
@@ -244,6 +280,7 @@ impl Index {
                 workgroup: record.workgroups(),
                 date,
                 fields,
+                links: record.links(),
             }]);
         }
         let rel = path
@@ -263,6 +300,7 @@ impl Index {
                 scope,
                 id: name,
                 title: working.title.clone(),
+                links: outward(&text),
                 body: text,
                 workgroup: Vec::new(),
                 date: None,
@@ -293,6 +331,7 @@ impl Index {
                     path: path.to_owned(),
                     scope: scope.clone(),
                     title: e.body().to_owned(),
+                    links: outward(&body),
                     body,
                     workgroup: e.workgroup(),
                     date: e.get("from").map(str::to_owned).or_else(|| date.clone()),
@@ -301,6 +340,50 @@ impl Index {
                 })
             })
             .collect())
+    }
+
+    /// What links to a record, on an index brought up to date.
+    pub fn backlinks(
+        &self,
+        kind: impl AsRef<str>,
+        id: impl AsRef<str>,
+    ) -> anyhow::Result<Backlinks> {
+        self.refresh()?;
+        let target = format!("{RECORDS}/{}/{}", kind.as_ref(), id.as_ref());
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT i.path, i.scope, i.id, i.title, l.place
+             FROM links l JOIN items i ON i.rowid = l.item
+             WHERE l.target = ?1 ORDER BY i.path, l.rowid",
+        )?;
+        let rows = stmt.query_map([&target], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        let forgotten = format!("{MEMORY}/{}", Layer::Forgotten.scope());
+        let own = format!("{target}.md");
+        let mut found = Backlinks::default();
+        for row in rows {
+            let (path, scope, id, title, from) = row?;
+            if path == own || scope == forgotten {
+                continue;
+            }
+            match scope.strip_prefix(&format!("{RECORDS}/")) {
+                Some(kind) => found.records.push(Backlink {
+                    kind: kind.to_owned(),
+                    id,
+                    title,
+                    from,
+                }),
+                None => found.memories.push(MemoryLink { path, id, title }),
+            }
+        }
+        Ok(found)
     }
 
     /// Count one use of a memory on `day`.
@@ -355,6 +438,13 @@ impl Index {
         self.refresh()?;
         searcher.search(self, query)
     }
+}
+
+fn outward(text: &str) -> Vec<(String, String)> {
+    links(text)
+        .into_iter()
+        .map(|target| (String::new(), target))
+        .collect()
 }
 
 fn plain(value: &serde_norway::Value) -> Option<String> {

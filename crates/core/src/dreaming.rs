@@ -105,7 +105,7 @@ Rules:
 - The lookout judges what concerns the owner by semantic memory and records alone. Notes about lookout decisions the owner marked 要らなかった or 拾ってほしかった, \
   and what the owner said does or does not concern them (\"これは関係ない\"), become or back semantic memories of what they care about and what not to bring them, \
   so the lookout picks up and passes over the same things next time.
-- Who a person is to the owner (their company, role, how to deal with them) is memory: keep it in long/semantic/<name>.md and link their record ([[records/parties/<id>]]) in the prose. Their contact accounts are records.
+- Who a person is to the owner (their company, role, how to deal with them) is memory: keep it in long/semantic/<name>.md and link their record ([[records/parties/<id>]]) in the prose. Link the other records a memory speaks of the same way ([[records/<kind>/<id>|title]]), and keep the links a note has. Their contact accounts are records.
 - Deal with every episodic note: file it, back an item with it, or decide it needs nothing. List every note id you dealt with in settled; a note left out is shown to you again next night.
 - Write in the language the notes are written in. Do nothing when nothing needs to change.";
 

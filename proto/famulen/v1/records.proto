@@ -9,8 +9,8 @@ import "famulen/v1/options.proto";
 message Field {
   string name = 1;
   // Empty removes the field. Dates are YYYY-MM-DD, times YYYY-MM-DD HH:MM,
-  // money "1200 JPY", yes or no for a flag, [[records/<kind>/<id>|title]] for
-  // a link.
+  // money "1200 JPY", yes or no for a flag. A link is a record's code, title or
+  // id; it is kept as [[records/<kind>/<id>|title]].
   string value = 2;
   // The values of a field that holds several; leave value empty then.
   repeated string values = 3;
@@ -47,6 +47,16 @@ message RecordLink {
   string code = 4;
   // The field or section a link to this record is in; empty for free text.
   string from = 5;
+  // There is no such record any more.
+  bool missing = 6;
+}
+
+// A memory that links to a record.
+message MemoryLink {
+  // The file it is in, relative to the memory directory.
+  string file = 1;
+  string id = 2;
+  string title = 3;
 }
 
 // A record of the notebook.
@@ -84,6 +94,8 @@ message Record {
   string markdown = 19;
   // The tasks it waits for that are not over, for a task.
   repeated RecordLink blockers = 20;
+  // Every memory that links to it, but forgotten ones. Only from GetRecord.
+  repeated MemoryLink memories = 21;
 }
 
 message FieldType {
@@ -144,7 +156,9 @@ message SaveRecordRequest {
   string id = 2;
   // What is left out stays.
   optional string title = 3;
-  // Free Markdown.
+  // Free Markdown. Link every record it mentions as [[code]], [[title]] or
+  // [[id]], or [[code|another name]]; a name that fits several records is
+  // refused with the records it fits.
   optional string notes = 4;
   repeated string labels = 5;
   // Replace the labels, even with none.
@@ -153,14 +167,16 @@ message SaveRecordRequest {
   bool set_workgroups = 8;
   // Where a new record came from, in words.
   string source = 9;
-  // The fields to change. An empty value removes one.
+  // The fields to change. An empty value removes one. Every kind, memos too,
+  // has Related: links to whatever records it has to do with, of any kind.
+  // A relation is written on one side; the other shows it by itself.
   repeated Field fields = 10;
   // Each section given is replaced whole.
   repeated RecordSection sections = 11;
   // Facts the kind has no field for, replaced whole.
   repeated Field details = 12;
   bool set_details = 13;
-  // Lines to add to the log: what happened.
+  // Lines to add to the log: what happened. Links work as in the notes.
   repeated string log = 14;
   // The id of the Google event a new record of events adds notes to.
   string google = 15;
@@ -196,7 +212,8 @@ service RecordService {
   rpc GetRecord(RecordRef) returns (Record) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  // Add a record, or change one.
+  // Add a record, or change one. Records it mentions are to be linked, in
+  // Related or where they are mentioned.
   rpc SaveRecord(SaveRecordRequest) returns (Record);
   // Remove a record for good.
   rpc DeleteRecord(RecordRef) returns (Empty) {

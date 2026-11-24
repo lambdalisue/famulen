@@ -4,8 +4,10 @@
 //! declares how its bodies are laid out.
 
 mod kind;
+mod names;
 
 pub use kind::*;
+pub use names::*;
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -14,7 +16,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context as _;
 
 use crate::body::Body;
-use crate::link::links;
+use crate::index::Index;
+use crate::link::found;
 use crate::{Notebook, Page, README, RECORDS, Signature, link_target};
 
 /// The metadata every kind of record has, in its frontmatter.
@@ -88,6 +91,29 @@ impl Record {
     /// Where it is in the notebook.
     pub fn rel(&self) -> String {
         format!("{}.md", self.target())
+    }
+
+    /// Every link it holds, once for each field or section it stands in, which
+    /// is nothing for free text outside them.
+    pub fn links(&self) -> Vec<(String, String)> {
+        let body = &self.body;
+        let place = |at: usize| -> &str {
+            let field = body.fields().iter().find(|f| f.span.contains(&at));
+            let section = body.sections().iter().find(|s| s.content.contains(&at));
+            match (field.and_then(|f| f.field()), section) {
+                (Some((name, _)), _) => name,
+                (None, Some(section)) => &section.name,
+                (None, None) => "",
+            }
+        };
+        let mut all = Vec::new();
+        for link in found(body.text()) {
+            let one = (place(link.at).to_owned(), link.target.to_owned());
+            if !all.contains(&one) {
+                all.push(one);
+            }
+        }
+        all
     }
 
     /// A wiki link to it, with its title.
@@ -331,7 +357,14 @@ impl Records {
     pub fn save(&self, record: &Record) -> anyhow::Result<()> {
         check_kind(&record.kind)?;
         check_id(&record.id)?;
-        let mut record = record.clone();
+        let path = self.path(&record.kind, &record.id);
+        let before = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut record = Names::new(self.clone()).record(
+            &self.kind(&record.kind)?,
+            record,
+            &before,
+            Unsure::Refuse,
+        )?;
         let now = now();
         if record.meta.text("created").is_none() {
             record.meta.set("created", now.as_str());
@@ -342,7 +375,6 @@ impl Records {
         record.meta.set("updated", now);
         let text = record.render();
         crate::check::refuse_new_errors(self, &record, &text)?;
-        let path = self.path(&record.kind, &record.id);
         if path.exists() {
             std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
             return Ok(());
@@ -417,41 +449,9 @@ impl Records {
         Ok(true)
     }
 
-    /// The records that link to one, with what they link from: the field or
-    /// section, or nothing when it is free text.
+    /// The records that link to one, with what they link from.
     pub fn backlinks(&self, kind: &str, id: &str) -> anyhow::Result<Vec<Backlink>> {
-        let target = format!("{RECORDS}/{kind}/{id}");
-        let mut found = Vec::new();
-        for name in self.kind_names()? {
-            for record in self.list(&name)? {
-                if record.target() == target {
-                    continue;
-                }
-                let names = |text: &str| links(text).contains(&target);
-                let mut from = Vec::new();
-                for field in record.body.fields() {
-                    if names(&field.value()) {
-                        from.extend(field.field().map(|(n, _)| n.to_owned()));
-                    }
-                }
-                for section in record.body.sections() {
-                    let text = &record.body.text()[section.content.clone()];
-                    if names(text) {
-                        from.push(section.name.clone());
-                    }
-                }
-                if from.is_empty() && names(record.body.text()) {
-                    from.push(String::new());
-                }
-                found.extend(from.into_iter().map(|from| Backlink {
-                    kind: record.kind.clone(),
-                    id: record.id.clone(),
-                    title: record.title(),
-                    from,
-                }));
-            }
-        }
-        Ok(found)
+        Ok(Index::open(&self.notebook)?.backlinks(kind, id)?.records)
     }
 }
 

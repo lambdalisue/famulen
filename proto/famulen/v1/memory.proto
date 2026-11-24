@@ -90,6 +90,8 @@ message WriteFileRequest {
 }
 
 message RememberRequest {
+  // Link every record it mentions as [[code]], [[title]] or [[id]], such as
+  // [[task-7w1hbn]].
   string text = 1;
   // The owner said it, rather than it being concluded.
   bool said = 2;
