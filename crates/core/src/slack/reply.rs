@@ -1,7 +1,7 @@
 //! What the secretary says on Slack: in the thread of the message it
 //! answers, in Slack's own format.
 
-use crate::input::Source;
+use crate::input::{Sender, Source};
 use crate::slack::mrkdwn::to_mrkdwn;
 use crate::slack::presence;
 use crate::slack::web::{Outgoing, Slack};
@@ -32,7 +32,6 @@ fn answered(store: &Store, workspace: &str, channel: &str) -> anyhow::Result<Opt
         channel: at,
         ts,
         thread_ts,
-        unmentioned,
         ..
     } = row.input.source
     else {
@@ -41,7 +40,7 @@ fn answered(store: &Store, workspace: &str, channel: &str) -> anyhow::Result<Opt
     Ok((from == workspace && at == channel).then(|| Answered {
         input: row.id,
         thread: thread_ts.unwrap_or(ts),
-        shown: !unmentioned,
+        shown: row.input.sender == Sender::Owner,
     }))
 }
 
@@ -89,14 +88,18 @@ pub async fn send<S: Slack>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{Input, Sender};
+    use crate::input::Input;
     use crate::slack::fake::FakeSlack;
 
     /// A store whose running turn answers a message on Slack.
     fn answering(thread_ts: Option<&str>, unmentioned: bool) -> Store {
+        answering_to(Sender::Owner, thread_ts, unmentioned)
+    }
+
+    fn answering_to(sender: Sender, thread_ts: Option<&str>, unmentioned: bool) -> Store {
         let store = Store::open_in_memory().unwrap();
         let input = Input {
-            sender: Sender::Owner,
+            sender,
             source: Source::Slack {
                 workspace: "w1".into(),
                 channel: "D1".into(),
@@ -172,7 +175,11 @@ mod tests {
             [("D1".into(), "2.0".into(), String::new())]
         );
 
-        let never_shown = sent(&answering(None, true), here, Some("1.0")).await;
+        let unmentioned = sent(&answering(None, true), here, Some("1.0")).await;
+        assert_eq!(unmentioned.statuses(), outside.statuses());
+
+        let others = answering_to(Sender::Other, None, true);
+        let never_shown = sent(&others, here, Some("1.0")).await;
         assert!(never_shown.statuses().is_empty());
     }
 

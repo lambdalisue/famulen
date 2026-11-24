@@ -2,12 +2,15 @@
 
 use std::time::{Duration, Instant};
 
+use crate::input::{Sender, Source};
 use crate::slack::web::Slack;
 use crate::store::{Status, Store, now};
 
-const WORKING: &str = "考えています…";
+pub const WORKING: &str = "考えています…";
 /// Slack takes the status away two minutes after it was set.
 const SET_AGAIN: Duration = Duration::from_secs(90);
+/// What arrives next waits no longer than this for Slack.
+const GIVE_UP_EXPECTING: Duration = Duration::from_secs(5);
 const LOOK_AGAIN: Duration = Duration::from_secs(1);
 /// The input answered last. One turn runs at a time, so one is enough.
 const ANSWERED_KEY: &str = "slack.answered";
@@ -23,13 +26,16 @@ pub struct At {
     pub channel: String,
     pub ts: String,
     pub thread_ts: Option<String>,
+    /// It was said without a mention, in an attended channel.
+    pub unmentioned: bool,
     /// When Famulen received it.
     pub received: Instant,
 }
 
 /// Show that input `id` is being worked on until it is answered or its turn
 /// ends. Where Slack
-/// shows no status, the first message of a conversation gets a reaction.
+/// shows no status, the first message of a conversation gets a reaction,
+/// unless it was said without a mention.
 pub async fn show_working<S: Slack>(
     slack: &S,
     store: &Store,
@@ -40,7 +46,7 @@ pub async fn show_working<S: Slack>(
     let thread = at.thread_ts.as_deref().unwrap_or(&at.ts);
     if let Err(error) = slack.set_status(&at.channel, thread, WORKING).await {
         tracing::debug!(%error, "Slack shows no status here");
-        if first {
+        if first && !at.unmentioned {
             slack.react(&at.channel, &at.ts, "eyes").await?;
         }
         return Ok(());
@@ -63,6 +69,73 @@ pub async fn show_working<S: Slack>(
     // A reply takes it away by itself, but one that came while the status was
     // on its way to Slack took away nothing.
     slack.set_status(&at.channel, thread, "").await
+}
+
+/// Show a message that may not be for the secretary as worked on while it is
+/// weighed. Returns whether it has to be withdrawn when it is not. A thread
+/// that shows an input already is left alone: withdrawing would take that
+/// away.
+pub async fn expect<S: Slack>(
+    slack: &S,
+    store: &Store,
+    workspace: &str,
+    channel: &str,
+    thread: &str,
+) -> anyhow::Result<bool> {
+    if shows_an_input(store, workspace, channel, thread)? {
+        return Ok(false);
+    }
+    match tokio::time::timeout(
+        GIVE_UP_EXPECTING,
+        slack.set_status(channel, thread, WORKING),
+    )
+    .await
+    {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(error)) => Err(error),
+        // It may have reached Slack all the same.
+        Err(_) => Ok(true),
+    }
+}
+
+/// The message `expect` showed was not for the secretary.
+pub async fn withdraw<S: Slack>(slack: &S, channel: &str, thread: &str) {
+    // Awaited, not spawned: a status taken away late would be that of the
+    // next message in the thread.
+    match tokio::time::timeout(GIVE_UP_EXPECTING, slack.set_status(channel, thread, "")).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::debug!(%error, "could not take the status away"),
+        Err(_) => tracing::debug!("taking the status away took too long"),
+    }
+}
+
+fn shows_an_input(
+    store: &Store,
+    workspace: &str,
+    channel: &str,
+    thread: &str,
+) -> anyhow::Result<bool> {
+    for row in store.in_hand()? {
+        let Source::Slack {
+            workspace: from,
+            channel: at,
+            ts,
+            thread_ts,
+            ..
+        } = &row.input.source
+        else {
+            continue;
+        };
+        if row.input.sender == Sender::Owner
+            && from == workspace
+            && at == channel
+            && thread_ts.as_ref().unwrap_or(ts) == thread
+            && !is_answered(store, row.id)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The secretary replied to input `id`: it is shown no longer.
@@ -102,7 +175,7 @@ fn starts_conversation(store: &Store, at: &At) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{Input, Sender, Source};
+    use crate::input::Input;
     use crate::slack::fake::FakeSlack;
 
     fn taken(store: &Store, ts: &str) -> (At, i64) {
@@ -124,6 +197,7 @@ mod tests {
             channel: "D1".into(),
             ts: ts.into(),
             thread_ts: None,
+            unmentioned: false,
             received: Instant::now(),
         };
         (at, id)
