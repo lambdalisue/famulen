@@ -298,7 +298,18 @@ export default function Home() {
   createEffect(() => setView("ホーム", dateLabel(day())));
 
   const [kind, setKind] = createSignal("");
-  const setTiles = (next: TileShape[]) => act(() => api.settings.setTiles({ tiles: next }), "");
+  // A press is worked out from the tiles on screen, so the next one waits
+  // until this one is saved and shown.
+  const [saving, setSaving] = createSignal(false);
+  const setTiles = async (next: TileShape[]) => {
+    if (saving()) return;
+    setSaving(true);
+    try {
+      await act(() => api.settings.setTiles({ tiles: next }), "");
+    } finally {
+      setSaving(false);
+    }
+  };
   const move = (i: number, op: Op) => setTiles(changed(tiles(), i, op));
   const addTile = () => {
     const k = kind() || kinds()[0]?.kind;
@@ -346,7 +357,7 @@ export default function Home() {
               )}
             </For>
           </Select>
-          <Button type="submit" icon={icons.plus}>
+          <Button type="submit" icon={icons.plus} disabled={saving()}>
             タイルを足す
           </Button>
         </form>
@@ -379,23 +390,30 @@ export default function Home() {
                     plain
                     icon={icons.arrowUp}
                     label={`${label(t.kind)}を前へ`}
-                    disabled={i() === 0}
+                    disabled={saving() || i() === 0}
                     onClick={() => void move(i(), "up")}
                   />
                   <IconButton
                     plain
                     icon={icons.arrowDown}
                     label={`${label(t.kind)}を後ろへ`}
-                    disabled={i() === tiles().length - 1}
+                    disabled={saving() || i() === tiles().length - 1}
                     onClick={() => void move(i(), "down")}
                   />
                   <IconButton
                     plain
                     icon={icons.layoutGrid}
                     label={`${label(t.kind)}の大きさを変える`}
+                    disabled={saving()}
                     onClick={() => void move(i(), "size")}
                   />
-                  <IconButton plain icon={icons.x} label={`${label(t.kind)}を外す`} onClick={() => void move(i(), "remove")} />
+                  <IconButton
+                    plain
+                    icon={icons.x}
+                    label={`${label(t.kind)}を外す`}
+                    disabled={saving()}
+                    onClick={() => void move(i(), "remove")}
+                  />
                 </Show>
               </header>
               <div class="tile-body">
