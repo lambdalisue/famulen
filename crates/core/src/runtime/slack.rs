@@ -11,7 +11,7 @@ use crate::console_log::{ConsoleLog, Who};
 use crate::gateway::Arrival;
 use crate::input::{Input, Sender, Source};
 use crate::lookout::{Item, title_of};
-use crate::models::{ModelKind, Models, Role};
+use crate::models::{Assignment, ModelKind, Models, Role};
 use crate::slack::attention;
 use crate::slack::clients::SlackClients;
 use crate::slack::events::{self, Said};
@@ -47,7 +47,10 @@ pub(super) async fn read_channel(
     if let Some(said) = attended {
         let (models, tz, name) = (app.models.clone(), app.tz(), app.aide_name());
         let judge = |item: Item, before: Vec<String>| ask_triage(models, tz, name, item, before);
-        if let Some(input) = attend_to(app, workspace, said, judge, Utc::now()).await?
+        let asked = triage_model(&app.models, app.tz())?.is_some();
+        let slack = client_of(clients, workspace);
+        if let Some(input) =
+            take_attended(app, slack, workspace, said, asked, judge, received).await?
             && input.sender == Sender::Owner
         {
             show_on_console(
@@ -59,10 +62,8 @@ pub(super) async fn read_channel(
         }
     }
     if let Some(input) = kept {
-        if let Some(clients) = clients
-            && let Ok(slack) = clients.get(Some(workspace))
-        {
-            show_working(app, slack.clone(), &input, received);
+        if let Some(slack) = client_of(clients, workspace) {
+            show_working(app, slack, &input, received);
         }
         show_on_console(
             &app.console,
@@ -83,14 +84,70 @@ pub(super) async fn read_channel(
     Ok(())
 }
 
+fn client_of(
+    clients: Option<&SlackClients<GatewaySlack>>,
+    workspace: &str,
+) -> Option<GatewaySlack> {
+    clients.and_then(|c| c.get(Some(workspace)).ok()).cloned()
+}
+
+/// Weigh a message in an attended channel. The owner's is shown as worked on
+/// while triage, when `asked`, weighs it, and on when it becomes an input.
+async fn take_attended<S, J, F>(
+    app: &App,
+    slack: Option<S>,
+    workspace: &str,
+    said: Said,
+    asked: bool,
+    judge: J,
+    received: std::time::Instant,
+) -> anyhow::Result<Option<Input>>
+where
+    S: Slack + Clone + 'static,
+    J: FnOnce(Item, Vec<String>) -> F,
+    F: std::future::Future<Output = anyhow::Result<Option<bool>>>,
+{
+    let slack = slack.filter(|_| said.by_owner);
+    let (channel, thread) = (
+        said.channel.clone(),
+        said.thread_ts.clone().unwrap_or_else(|| said.ts.clone()),
+    );
+    let expect = async {
+        match &slack {
+            Some(slack) if asked => {
+                presence::expect(slack, &app.store, workspace, &channel, &thread).await
+            }
+            _ => Ok(false),
+        }
+    };
+    let (expected, weighed) =
+        tokio::join!(expect, attend_to(app, workspace, said, judge, Utc::now()));
+    let expected = expected.unwrap_or_else(|error| {
+        tracing::debug!(%error, "could not show that the message is weighed");
+        false
+    });
+    match (&slack, &weighed) {
+        (Some(slack), Ok(Some(input))) => show_working(app, slack.clone(), input, received),
+        (Some(slack), _) if expected => presence::withdraw(slack, &channel, &thread).await,
+        _ => {}
+    }
+    weighed
+}
+
 /// Show on Slack that `input` is being worked on, without holding back what
 /// arrives next.
-fn show_working(app: &App, slack: GatewaySlack, input: &Input, received: std::time::Instant) {
+fn show_working<S: Slack + 'static>(
+    app: &App,
+    slack: S,
+    input: &Input,
+    received: std::time::Instant,
+) {
     let Source::Slack {
         workspace,
         channel,
         ts,
         thread_ts,
+        unmentioned,
         ..
     } = &input.source
     else {
@@ -101,6 +158,7 @@ fn show_working(app: &App, slack: GatewaySlack, input: &Input, received: std::ti
         channel: channel.clone(),
         ts: ts.clone(),
         thread_ts: thread_ts.clone(),
+        unmentioned: *unmentioned,
         received,
     };
     let (store, key) = (app.store.clone(), input.dedup_key());
@@ -262,6 +320,15 @@ where
     }
 }
 
+/// Triage's model, unless there is none or it is over its cap.
+fn triage_model(models: &Models, tz: chrono_tz::Tz) -> anyhow::Result<Option<Assignment>> {
+    let assigned = models.assignment(Role::Triage)?;
+    Ok(match assigned {
+        Some(assigned) if models.within_cap(Role::Triage, tz, Utc::now())? => Some(assigned),
+        _ => None,
+    })
+}
+
 /// Triage's model, asked one narrow question of one message: is it said to
 /// the secretary? `None` when triage has no model or is over its cap, so
 /// the channel falls back to mentions only.
@@ -272,12 +339,9 @@ async fn ask_triage(
     item: Item,
     before: Vec<String>,
 ) -> anyhow::Result<Option<bool>> {
-    let Some(assigned) = models.assignment(Role::Triage)? else {
+    let Some(assigned) = triage_model(&models, tz)? else {
         return Ok(None);
     };
-    if !models.within_cap(Role::Triage, tz, Utc::now())? {
-        return Ok(None);
-    }
     let before = if before.is_empty() {
         "(nothing)".to_owned()
     } else {
@@ -393,6 +457,7 @@ fn show_on_console(console: &ConsoleLog, workgroups: &Workgroups, input: &Input,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slack::fake::FakeSlack;
 
     fn slack_arrival(event: serde_json::Value) -> Arrival {
         Arrival {
@@ -826,5 +891,151 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    fn leaked(slack: FakeSlack) -> &'static FakeSlack {
+        Box::leak(Box::new(slack))
+    }
+
+    /// What Slack was told to show, once as many statuses as `count` came.
+    async fn statuses(slack: &FakeSlack, count: usize) -> Vec<(String, String, String)> {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while slack.statuses().len() < count {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the statuses are shown");
+        slack.statuses()
+    }
+
+    fn status(text: &str) -> (String, String, String) {
+        ("C1".into(), "8.0".into(), text.into())
+    }
+
+    async fn weigh(
+        app: &App,
+        slack: &'static FakeSlack,
+        said: Said,
+        answer: Option<bool>,
+    ) -> Option<Input> {
+        let judge = judging(answer);
+        let asked = answer.is_some();
+        let received = std::time::Instant::now();
+        take_attended(app, Some(slack), "slack", said, asked, judge, received)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_owners_unmentioned_words_are_shown_as_worked_on_until_the_turn_ends() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+
+        let input = weigh(&app, slack, said("U1", "9.1", "それで"), Some(true))
+            .await
+            .unwrap();
+
+        let id = app.store.id_of(&input.dedup_key()).unwrap().unwrap();
+        assert_eq!(
+            statuses(slack, 2).await,
+            [status(presence::WORKING), status(presence::WORKING)],
+            "while it is weighed, and once it is an input"
+        );
+        app.store.start_turn(id, "all").unwrap();
+        app.store.end_turn().unwrap();
+        assert_eq!(statuses(slack, 3).await[2], status(""));
+    }
+
+    #[tokio::test]
+    async fn the_owners_words_are_shown_while_they_are_weighed() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-weighed");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+        let judge = |_, _| async move {
+            assert_eq!(statuses(slack, 1).await, [status(presence::WORKING)]);
+            Ok(Some(false))
+        };
+
+        let received = std::time::Instant::now();
+        let words = said("U1", "9.1", "了解です");
+        take_attended(&app, Some(slack), "slack", words, true, judge, received)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            slack.statuses(),
+            [status(presence::WORKING), status("")],
+            "words not said to the secretary are shown no longer"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_status_goes_away_when_weighing_fails() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-failed");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+        let judge = |_, _| std::future::ready(Err(anyhow::anyhow!("no answer")));
+
+        let received = std::time::Instant::now();
+        let words = said("U1", "9.1", "それで");
+        let _ = take_attended(&app, Some(slack), "slack", words, true, judge, received).await;
+
+        assert_eq!(slack.statuses(), [status(presence::WORKING), status("")]);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_shown_of_words_triage_is_not_asked_about() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-cap");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+
+        weigh(&app, slack, said("U1", "9.1", "それで"), None).await;
+
+        assert!(slack.statuses().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nothing_is_shown_of_what_others_say() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-other");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+
+        for (ts, answer) in [("9.1", true), ("9.2", false)] {
+            weigh(&app, slack, said("U2", ts, "資料どこ？"), Some(answer)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        assert!(slack.statuses().is_empty());
+    }
+
+    #[tokio::test]
+    async fn words_not_said_to_the_secretary_leave_the_status_of_an_input_in_the_same_thread() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-busy");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack::default());
+        weigh(&app, slack, said("U1", "9.1", "調べて"), Some(true)).await;
+        let before = statuses(slack, 2).await;
+
+        weigh(&app, slack, said("U1", "9.2", "了解です"), Some(false)).await;
+
+        assert_eq!(slack.statuses(), before);
+    }
+
+    #[tokio::test]
+    async fn unmentioned_words_get_no_reaction_where_slack_shows_no_status() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-status-none");
+        let app = channel_app(dir.path());
+        let slack = leaked(FakeSlack {
+            no_status: true,
+            ..Default::default()
+        });
+
+        let input = weigh(&app, slack, said("U1", "9.1", "それで"), Some(true)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        assert!(input.is_some());
+        assert!(slack.reactions.lock().unwrap().is_empty());
     }
 }

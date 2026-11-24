@@ -297,10 +297,18 @@ impl Store {
 
     /// The inputs held for the owner, oldest first.
     pub fn held(&self) -> anyhow::Result<Vec<StoredInput>> {
+        self.inputs_in("SELECT id FROM inputs WHERE status = 'held' ORDER BY id")
+    }
+
+    /// The inputs waiting for their turn or in it, oldest first.
+    pub fn in_hand(&self) -> anyhow::Result<Vec<StoredInput>> {
+        self.inputs_in("SELECT id FROM inputs WHERE status IN ('pending', 'running') ORDER BY id")
+    }
+
+    fn inputs_in(&self, select_ids: &str) -> anyhow::Result<Vec<StoredInput>> {
         let ids: Vec<i64> = {
             let conn = self.conn();
-            let mut stmt =
-                conn.prepare("SELECT id FROM inputs WHERE status = 'held' ORDER BY id")?;
+            let mut stmt = conn.prepare(select_ids)?;
             stmt.query_map([], |r| r.get(0))?
                 .collect::<Result<_, _>>()?
         };
