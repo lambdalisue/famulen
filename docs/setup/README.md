@@ -35,3 +35,16 @@ docker compose up -d --build
 ```
 
 コンソールは `http://127.0.0.1:3000/` で開く。ほかの端末から開くときは、Tailscale Serve などで https に包み、その URL を `FAMULEN_CONSOLE_URL` に入れる。そのほかのホスト名でも開くなら、`FAMULEN_CONSOLE_HOSTS` にカンマ区切りで書く。書いていないホスト名で届いた要求は、コンソールが断る。API も同じで、コンソールの `FAMULEN_API_URL` に localhost と待ち受け先の番地のほかの名前を使うなら、その名前を本体の `FAMULEN_API_HOSTS` に書く（`compose.yaml` では書いてある）。
+
+## ほかのマシンの AI と手帳を共有する
+
+コンソールの設定の「秘書」の頁で「手帳の共有」を有効にすると、コンソールを開ける端末から、手帳を Git で読み書きできる（[手帳の共有](../spec/notebook.md#手帳の共有)）。コンソールを Tailscale Serve で https に包んでいれば、新しい待ち受けは要らない。
+
+ほかのマシンには `famulen-notebook` と Git（2.38 以降）を入れ、頁に出るコマンドで手帳のコピーを作る。
+
+```sh
+cargo install --git https://github.com/lambdalisue/famulen famulen-notebook-cli
+famulen-notebook clone https://<コンソールのホスト名>/notebook.git ~/notebook
+```
+
+AI には `FAMULEN_NOTEBOOK` でコピーの場所を、`FAMULEN_NOTEBOOK_AUTHOR`・`FAMULEN_NOTEBOOK_AGENT`・`FAMULEN_NOTEBOOK_MODEL` で書いた者を伝える。読む前の取り込みと、書いた後の送り出しは、コマンドがそのたびに行う。

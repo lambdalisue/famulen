@@ -64,3 +64,15 @@ test("the console refuses another host and changes from another site", async ({ 
   });
   expect(crossSite.status()).toBe(403);
 });
+
+test("Git's own requests pass without an origin, and a page of another site cannot send them", async ({ request }) => {
+  const push = (headers: Record<string, string>) =>
+    request.post("/notebook.git/git-receive-pack", { headers, data: "0000" });
+  const git = { "content-type": "application/x-git-receive-pack-request" };
+  // Past the console; the notebook is not shared.
+  expect((await push(git)).status()).toBe(404);
+  expect((await push({ ...git, Origin: "http://evil.example" })).status()).toBe(403);
+  expect((await push({ "content-type": "text/plain" })).status()).toBe(403);
+  const elsewhere = await request.post("/famulen.v1.RecordService/SaveRecord", { headers: git, data: "{}" });
+  expect(elsewhere.status()).toBe(403);
+});

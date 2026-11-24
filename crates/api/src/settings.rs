@@ -301,6 +301,34 @@ impl SettingsService for Api {
         Response::ok(answer)
     }
 
+    async fn get_notebook_sharing(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<NotebookSharing> {
+        Response::ok(notebook_sharing(&self.app).or_fail()?)
+    }
+
+    async fn set_notebook_sharing(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, SetNotebookSharingRequest>,
+    ) -> ServiceResult<NotebookSharing> {
+        // No push is being taken once it is off.
+        let hold = self.app.notebook.hold().or_fail()?;
+        famulen_core::notebook::set_shared(&self.app.store, request.on).or_fail()?;
+        drop(hold);
+        self.app.journal.record(
+            "setting",
+            if request.on {
+                "the notebook is shared"
+            } else {
+                "the notebook is no longer shared"
+            },
+        );
+        Response::ok(notebook_sharing(&self.app).or_fail()?)
+    }
+
     async fn get_folder(
         &self,
         _ctx: RequestContext,
@@ -357,6 +385,18 @@ fn notebook_place(app: &famulen_core::app::App) -> anyhow::Result<NotebookPlace>
         moving_to: shown(status.moving),
         failed: status.failed.unwrap_or_default(),
         leftover: shown(status.leftover),
+        ..Default::default()
+    })
+}
+
+fn notebook_sharing(app: &famulen_core::app::App) -> anyhow::Result<NotebookSharing> {
+    let url = app
+        .console_url
+        .as_deref()
+        .map(|url| format!("{}{}", url.trim_end_matches('/'), crate::sharing::PATH));
+    Ok(NotebookSharing {
+        on: famulen_core::notebook::is_shared(&app.store)?,
+        url: url.unwrap_or_default(),
         ..Default::default()
     })
 }

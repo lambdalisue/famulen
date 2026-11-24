@@ -22,6 +22,7 @@ mod permissions;
 mod records;
 mod routines;
 mod settings;
+mod sharing;
 pub mod tools;
 mod vault;
 mod workers;
@@ -92,9 +93,11 @@ impl Api {
         MemoryServiceExt::register(api.clone(), router)
     }
 
-    /// The router as an axum app, with a plain liveness probe.
+    /// The router as an axum app, with a plain liveness probe and the
+    /// notebook's Git.
     pub fn axum(self) -> axum::Router {
-        axum::Router::new()
+        sharing::router()
+            .with_state(self.clone())
             .route("/health", axum::routing::get(|| async { "OK" }))
             .fallback_service(self.router().into_axum_service())
     }

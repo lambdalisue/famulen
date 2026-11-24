@@ -86,6 +86,7 @@ pub fn set(
     signature: &Signature,
     workgroup: &Workgroup,
 ) -> anyhow::Result<()> {
+    let _hold = notebook.hold()?;
     let mut body = load(notebook)?;
     let at = body
         .items(LIST)
@@ -112,6 +113,7 @@ pub fn set(
 }
 
 pub fn remove(notebook: &Notebook, signature: &Signature, id: &str) -> anyhow::Result<()> {
+    let _hold = notebook.hold()?;
     let mut body = load(notebook)?;
     let at = body.items(LIST).iter().position(|i| i.plain() == id);
     if let Some(at) = at {

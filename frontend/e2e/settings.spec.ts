@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +65,48 @@ test.describe("秘書", () => {
     await expect(current).toContainText(before, { timeout: 30_000 });
     expect(existsSync(join(target, "INDEX.md"))).toBe(true);
     expect(existsSync(join(target, "memory"))).toBe(false);
+  });
+
+  test("the notebook is cloned and pushed through the console only while it is shared", async ({ page, request }) => {
+    const url = "http://127.0.0.1:13000/notebook.git";
+    const copy = join(mkdtempSync(join(tmpdir(), "famulen-copy-")), "notebook");
+    const as = ["-c", "user.name=Bob", "-c", "user.email=bob@example.com", "-c", "commit.gpgsign=false"];
+    const git = (...args: string[]) => spawnSync("git", [...as, ...args], { encoding: "utf8", timeout: 30_000 });
+    expect(git("clone", "-q", url, copy).status).not.toBe(0);
+
+    await visit(page, "/settings", "設定 · 秘書");
+    const section = page.getByRole("region", { name: "手帳の共有" });
+    const share = section.getByRole("checkbox", { name: "ほかのマシンと共有する" });
+    await expect(share).not.toBeChecked();
+    await section.getByText("ほかのマシンと共有する").click();
+    await expect(section).toContainText(`famulen-notebook clone ${url}`);
+
+    const cloned = git("clone", "-q", url, copy);
+    expect(cloned.status, cloned.stderr).toBe(0);
+    const file = join(copy, "memory", "working", "shared.md");
+    writeFileSync(file, "# 共有した仕事\n");
+    git("-C", copy, "add", "-A");
+    git("-C", copy, "commit", "-qm", "from a copy");
+    const pushed = git("-C", copy, "push", "origin", "main");
+    expect(pushed.status, pushed.stderr).toBe(0);
+    const { path } = await call<{ path: string }>(request, "SettingsService", "GetNotebookPlace");
+    expect(existsSync(join(path, "memory", "working", "shared.md"))).toBe(true);
+
+    // More than Git sends in one piece.
+    const large = join(copy, "notes.md");
+    writeFileSync(large, `# x\n\n${randomBytes(3_000_000).toString("base64")}\n`);
+    git("-C", copy, "add", "-A");
+    git("-C", copy, "commit", "-qm", "a large one");
+    const pushedLarge = git("-C", copy, "push", "origin", "main");
+    expect(pushedLarge.status, pushedLarge.stderr).toBe(0);
+
+    const log = await openLog(page, "/settings", "設定 · 秘書", "秘書のログ");
+    await expect(log).toContainText("memory/working/shared.md");
+    await page.keyboard.press("Escape");
+    await section.getByText("ほかのマシンと共有する").click();
+    await expect(section).not.toContainText("famulen-notebook clone");
+    expect(git("-C", copy, "fetch", "origin").status).not.toBe(0);
+    await call(request, "MemoryService", "CloseWorking", { id: "shared" });
   });
 
   test("a place that cannot hold the notebook is refused", async ({ page }) => {

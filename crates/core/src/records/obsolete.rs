@@ -23,7 +23,7 @@ fn one_line(reason: &str) -> String {
 impl Records {
     /// Mark a record as doubtful and ask the owner in one task.
     pub fn doubt(&self, kind: &str, id: &str, reason: &str, on: &str) -> anyhow::Result<Record> {
-        self.hold().doubt(kind, id, reason, on)
+        self.hold()?.doubt(kind, id, reason, on)
     }
 
     /// Take the mark off: the record was checked. The tasks that asked about
@@ -31,7 +31,7 @@ impl Records {
     pub fn clear_obsolete(&self, writer: Writer, kind: &str, id: &str) -> anyhow::Result<Record> {
         writer.may_write()?;
         let cleared = {
-            let _writing = self.writing();
+            let _writing = self.writing()?;
             let mut record = self.need(kind, id)?;
             self.may_change(writer, &record)?;
             if record.obsolete().is_some() {

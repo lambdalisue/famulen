@@ -127,6 +127,19 @@ message MoveNotebookRequest {
   string path = 1;
 }
 
+// Whether the notebook is shared, over Git, with copies on the owner's other
+// machines.
+message NotebookSharing {
+  bool on = 1;
+  // Where to clone it from; empty when Famulen does not know the address the
+  // owner opens the console at.
+  string url = 2;
+}
+
+message SetNotebookSharingRequest {
+  bool on = 1;
+}
+
 service SettingsService {
   rpc GetPersona(Empty) returns (Persona) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -154,6 +167,13 @@ service SettingsService {
   }
   // Famulen starts again to move it, once the work in progress ends.
   rpc MoveNotebook(MoveNotebookRequest) returns (NotebookPlace) {
+    option (console_only) = true;
+  }
+  rpc GetNotebookSharing(Empty) returns (NotebookSharing) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Only the owner lets others reach the notebook.
+  rpc SetNotebookSharing(SetNotebookSharingRequest) returns (NotebookSharing) {
     option (console_only) = true;
   }
   rpc GetFolder(GetFolderRequest) returns (Folder) {

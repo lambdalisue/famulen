@@ -5,12 +5,15 @@ pub mod check;
 mod doc;
 mod entry;
 mod git;
+mod hold;
 pub mod index;
 mod link;
 pub mod memory;
 mod page;
 pub mod records;
 pub mod search;
+pub mod share;
+pub mod sync;
 #[cfg(test)]
 pub(crate) mod testing;
 pub mod workgroups;
@@ -18,6 +21,7 @@ pub mod workgroups;
 pub use doc::*;
 pub use entry::*;
 pub use git::*;
+pub use hold::*;
 pub use link::link_target;
 pub use page::*;
 
@@ -146,6 +150,7 @@ impl Notebook {
         subject: &str,
         paths: &[impl AsRef<str>],
     ) -> anyhow::Result<Option<String>> {
+        let _hold = self.hold()?;
         git::commit_paths(
             &self.root,
             &signature.author,

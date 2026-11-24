@@ -10,7 +10,6 @@ pub use obsolete::CONFIRM_SOURCE;
 pub use parties::*;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Context as _;
 
@@ -20,7 +19,7 @@ pub use famulen_notebook::records::{
 };
 use famulen_notebook::records::{Records as NotebookRecords, record_of};
 
-use crate::notebook::{Notebook, Writer, link_target};
+use crate::notebook::{Hold, Notebook, Writer, link_target};
 
 pub const TASKS: &str = "tasks";
 pub const ROUTINES: &str = "routines";
@@ -256,29 +255,27 @@ pub fn linked(record: &Record) -> Vec<(String, String)> {
 #[derive(Clone)]
 pub struct Records {
     notebook: NotebookRecords,
-    /// Held while a record is read, changed and written.
-    writing: Arc<Mutex<()>>,
 }
 
 impl Records {
     pub fn new(notebook: Notebook) -> Self {
         Self {
             notebook: NotebookRecords::new(notebook),
-            writing: Arc::default(),
         }
     }
 
-    fn writing(&self) -> MutexGuard<'_, ()> {
-        self.writing.lock().unwrap_or_else(|p| p.into_inner())
+    /// Held while a record is read, changed and written.
+    fn writing(&self) -> anyhow::Result<Hold> {
+        self.notebook().hold()
     }
 
     /// Keep the records from other writers while more than one of them is
     /// read, checked and written.
-    pub(crate) fn hold(&self) -> Held<'_> {
-        Held {
+    pub(crate) fn hold(&self) -> anyhow::Result<Held<'_>> {
+        Ok(Held {
             records: self,
-            _writing: self.writing(),
-        }
+            _writing: self.writing()?,
+        })
     }
 
     pub fn notebook(&self) -> &Notebook {
@@ -335,7 +332,7 @@ impl Records {
 
     /// Add a record.
     pub fn add(&self, writer: Writer, kind: &str, patch: Patch) -> anyhow::Result<Record> {
-        self.hold().add(writer, kind, patch)
+        self.hold()?.add(writer, kind, patch)
     }
 
     /// Refuse what [`Self::add`] would refuse, writing nothing.
@@ -373,12 +370,12 @@ impl Records {
         id: &str,
         patch: Patch,
     ) -> anyhow::Result<Record> {
-        self.hold().change(writer, kind, id, patch)
+        self.hold()?.change(writer, kind, id, patch)
     }
 
     /// Say that a record was made into a task.
     pub fn moved_to_task(&self, kind: &str, id: &str, task: &Record) -> anyhow::Result<Record> {
-        self.hold().moved_to_task(kind, id, task)
+        self.hold()?.moved_to_task(kind, id, task)
     }
 
     /// A task not over of the same title in the same workgroups. What is put
@@ -401,7 +398,7 @@ impl Records {
 
     /// Remove a record for good.
     pub fn remove(&self, writer: Writer, kind: &str, id: &str) -> anyhow::Result<()> {
-        self.hold().remove(writer, kind, id)
+        self.hold()?.remove(writer, kind, id)
     }
 
     /// What the owner decided about a routine is the owner's to change.
@@ -533,7 +530,7 @@ impl Records {
         lines: &[String],
         skips: &[String],
     ) -> anyhow::Result<()> {
-        let _writing = self.writing();
+        let _writing = self.writing()?;
         let mut record = self.need(ROUTINES, id)?;
         let at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
         for line in lines {
@@ -549,7 +546,7 @@ impl Records {
     /// it stands unless the task is over or taken back. Writing the same line again does
     /// nothing.
     pub(crate) fn note_task(&self, id: &str, note: &TaskNote) -> anyhow::Result<()> {
-        let _writing = self.writing();
+        let _writing = self.writing()?;
         let mut record = self.need(TASKS, id)?;
         if log_lines(&record).iter().any(|l| l.text == note.line) {
             return Ok(());
@@ -581,7 +578,7 @@ impl Records {
     /// Take a workgroup out of every record. The records stay.
     pub fn forget_workgroup(&self, writer: Writer, workgroup: &str) -> anyhow::Result<()> {
         writer.may_write()?;
-        let _writing = self.writing();
+        let _writing = self.writing()?;
         for kind in self.notebook.kind_names()? {
             for mut record in self.notebook.list(&kind)? {
                 let workgroups = record.workgroups();
@@ -613,7 +610,7 @@ impl Records {
 /// The records kept from other writers.
 pub(crate) struct Held<'a> {
     records: &'a Records,
-    _writing: MutexGuard<'a, ()>,
+    _writing: Hold,
 }
 
 impl Held<'_> {

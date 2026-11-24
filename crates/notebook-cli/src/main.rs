@@ -5,6 +5,7 @@ mod args;
 
 use std::path::{Component, Path};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::Parser as _;
@@ -14,6 +15,7 @@ use famulen_notebook::index::Index;
 use famulen_notebook::memory::{self, Layer, LongGroup};
 use famulen_notebook::records::{METADATA, Names, Record, Records, record_of};
 use famulen_notebook::search::Query;
+use famulen_notebook::sync::{self, Sync, Trouble};
 use famulen_notebook::{Author, Doc, Entry, EpisodeState, MEMORY, Notebook, Signature};
 use serde_json::json;
 
@@ -117,14 +119,108 @@ fn main() -> ExitCode {
     }
 }
 
+/// How long what was read from the shared notebook is taken as new.
+const FRESH: Duration = Duration::from_secs(60);
+
 fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+    if let Command::Clone { url, directory } = &cli.command {
+        sync::clone(url, directory)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let notebook = Notebook::new(&cli.notebook).with_tool(NAME, VERSION);
+    let Some(sync) = Sync::of(&notebook) else {
+        anyhow::ensure!(
+            !matches!(cli.command, Command::Sync),
+            "not a copy made by `famulen-notebook clone`"
+        );
+        return here(cli, notebook);
+    };
+    match touches(&cli.command) {
+        Touches::Nothing => here(cli, notebook),
+        Touches::Reading => {
+            warn(sync.refresh(FRESH));
+            here(cli, notebook)
+        }
+        Touches::Shared => {
+            sync.sync()?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Touches::Writing => {
+            let away = warn(sync.pull());
+            let code = here(cli, notebook)?;
+            if !away {
+                let sent = sync
+                    .push()
+                    .context("it is written and committed here, but not sent");
+                // Tried again by whoever reads a failure, it would be written twice.
+                if is_away(&sent) {
+                    warn(sent);
+                } else {
+                    sent?;
+                }
+            }
+            Ok(code)
+        }
+    }
+}
+
+/// Say what went wrong with a copy, which is used as it is. Whether the
+/// shared notebook is away.
+fn warn(synced: anyhow::Result<()>) -> bool {
+    if let Err(error) = &synced {
+        eprintln!("famulen-notebook: warning: {error:#}");
+    }
+    is_away(&synced)
+}
+
+fn is_away(synced: &anyhow::Result<()>) -> bool {
+    synced
+        .as_ref()
+        .is_err_and(|error| error.downcast_ref::<Trouble>().is_some_and(Trouble::passes))
+}
+
+/// What a command has to do with the shared notebook.
+enum Touches {
+    Nothing,
+    Reading,
+    Writing,
+    Shared,
+}
+
+fn touches(command: &Command) -> Touches {
+    match command {
+        Command::Clone { .. } | Command::Index | Command::Use { .. } => Touches::Nothing,
+        Command::Sync => Touches::Shared,
+        Command::Check { fix: false, .. }
+        | Command::Search(_)
+        | Command::Get { .. }
+        | Command::List { .. }
+        | Command::Links { .. } => Touches::Reading,
+        Command::Init
+        | Command::Check { fix: true, .. }
+        | Command::Add { .. }
+        | Command::Set { .. }
+        | Command::Rm { .. }
+        | Command::Log { .. }
+        | Command::Remember { .. }
+        | Command::Keep { .. }
+        | Command::Commit { .. } => Touches::Writing,
+    }
+}
+
+/// Do a command on the notebook as it is here.
+fn here(cli: Cli, notebook: Notebook) -> anyhow::Result<ExitCode> {
+    let _hold = match touches(&cli.command) {
+        Touches::Writing => Some(notebook.hold()?),
+        _ => None,
+    };
     let app = App {
         records: Records::new(notebook.clone()),
         notebook,
         sign: cli.sign,
     };
     match cli.command {
+        Command::Clone { .. } | Command::Sync => {}
         Command::Init => app.notebook.ensure(&app.signature()?)?,
         Command::Check { paths, fix, json } => return app.check(&paths, fix, json),
         Command::Search(args) => app.search(args)?,

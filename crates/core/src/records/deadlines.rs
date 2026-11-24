@@ -55,7 +55,7 @@ impl Records {
                         .with("Assignee", OWNER)
                         .with("Related", titled_link(kind, &record.id, &record.title())),
                     )?;
-                    let _writing = self.writing();
+                    let _writing = self.writing()?;
                     let mut record = self.need(kind, &record.id)?;
                     record
                         .body

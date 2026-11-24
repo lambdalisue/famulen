@@ -328,3 +328,133 @@ fn records_are_linked_by_code_or_title_and_the_links_are_listed_both_ways() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains(&code));
     assert_eq!(ok(&dir, &["check"]), "");
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A shared notebook and two copies of it.
+fn copies(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let dir = temp(name);
+    let made = dir.join("made");
+    ok(&made, &["init"]);
+    git(&dir, &["clone", "-q", "--bare", "made", "shared.git"]);
+    let shared = dir.join("shared.git");
+    let copy = |name: &str| {
+        let to = dir.join(name);
+        ok(
+            &dir,
+            &["clone", shared.to_str().unwrap(), to.to_str().unwrap()],
+        );
+        to
+    };
+    let (one, two) = (copy("one"), copy("two"));
+    (shared, one, two)
+}
+
+#[test]
+fn what_is_written_in_a_copy_is_sent_and_found_in_another() {
+    let (_, one, two) = copies("sync");
+    let id = ok(&one, &["add", "tasks", "--title", "見積もり"]);
+
+    let found = ok(&two, &["search", "見積もり"]);
+    assert!(found.contains(id.trim()), "{found}");
+
+    ok(&one, &["remember", "episodic", "一"]);
+    ok(&two, &["remember", "episodic", "二"]);
+    ok(&one, &["sync"]);
+    let found = ok(&one, &["search", "--in", "memory/episodic"]);
+    assert!(found.contains("一") && found.contains("二"), "{found}");
+}
+
+#[test]
+fn a_copy_is_read_and_written_while_the_shared_notebook_is_away() {
+    let (shared, one, two) = copies("sync-away");
+    let gone = shared.with_extension("gone");
+    std::fs::rename(&shared, &gone).unwrap();
+    let out = run(&one, &["add", "tasks", "--title", "見積もり"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("warning"));
+    ok(&one, &["search", "見積もり"]);
+    std::fs::rename(&gone, &shared).unwrap();
+
+    ok(&one, &["add", "tasks", "--title", "請求"]);
+    let found = ok(&two, &["list", "tasks"]);
+    assert!(
+        found.contains("見積もり") && found.contains("請求"),
+        "{found}"
+    );
+}
+
+#[test]
+fn what_cannot_be_put_together_stays_in_the_copy_and_fails() {
+    let (_, one, two) = copies("sync-conflict");
+    let id = ok(&one, &["add", "tasks", "--title", "見積もり"]);
+    let id = id.trim();
+    ok(&two, &["sync"]);
+    ok(&one, &["set", "tasks", id, "--title", "見積もり一"]);
+    // Written by hand, so that it is not brought in first.
+    let path = two.join(format!("records/tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("# 見積もり", "# 見積もり二")).unwrap();
+
+    let out = run(&two, &["commit"]);
+
+    assert!(!out.status.success());
+    let told = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        told.contains("committed here") && told.contains(id),
+        "{told}"
+    );
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("見積もり二")
+    );
+    assert!(last_commit(&two).contains("手で書き換えた"));
+}
+
+#[test]
+fn a_notebook_not_cloned_is_not_synced() {
+    let dir = temp("sync-none");
+    ok(&dir, &["init"]);
+    git(&dir, &["remote", "add", "origin", "https://127.0.0.1:1/x"]);
+    ok(&dir, &["add", "tasks", "--title", "x"]);
+    assert!(!run(&dir, &["sync"]).status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_write_the_shared_notebook_goes_away_from_is_no_failure() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (shared, one, _) = copies("sync-gone");
+    let hook = shared.join("hooks/update");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    let gone = shared.with_extension("gone");
+    let script = format!(
+        "#!/bin/sh\nmv '{}' '{}'\nexit 1\n",
+        shared.display(),
+        gone.display()
+    );
+    std::fs::write(&hook, script).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    git(&shared, &["config", "core.hooksPath", "hooks"]);
+
+    let out = run(&one, &["add", "tasks", "--title", "見積もり"]);
+
+    let told = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{told}");
+    assert!(
+        told.contains("warning") && told.contains("not sent"),
+        "{told}"
+    );
+}

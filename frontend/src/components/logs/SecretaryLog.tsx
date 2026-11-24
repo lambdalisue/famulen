@@ -23,6 +23,7 @@ const FILTERS: [string, string][] = [
 const EVENTS: Record<string, string> = {
   dream: "夢",
   setting: "設定",
+  notebook: "手帳の共有",
   lookout: "見張り",
   schedule: "定期の仕事",
   wake: "起床予約",

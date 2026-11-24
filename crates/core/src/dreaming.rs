@@ -533,7 +533,7 @@ where
         Ok(answer) => {
             // What was written while the model thought is the day's, not the
             // dream's: a refused dream must not take it back.
-
+            let _hold = records.notebook().hold()?;
             commit_day(dir)?;
             apply_answer(records, dir, &usage, today, &read, answer)?
         }
@@ -698,7 +698,7 @@ impl Moving {
 /// it are taken away, as their memories come back. Nobody else writes
 /// records meanwhile.
 fn write_all(records: &Records, moving: Vec<Moving>) -> anyhow::Result<()> {
-    let held = records.hold();
+    let held = records.hold()?;
     let mut added: Vec<Record> = Vec::new();
     for moved in moving {
         match moved.write(&held) {

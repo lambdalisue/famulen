@@ -1,5 +1,7 @@
 //! A memory file: its items, and the rest of it kept as it was.
 
+pub(crate) mod merge;
+
 use std::path::Path;
 
 use anyhow::Context as _;
