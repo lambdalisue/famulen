@@ -34,6 +34,7 @@ pub enum Source {
         user: String,
         /// Taken without a mention, only because the channel is attended:
         /// it may not be for the secretary at all.
+        #[serde(default)]
         unmentioned: bool,
     },
     /// The owner answered an approval request.
@@ -56,6 +57,7 @@ pub enum Source {
         /// Tells the same thing told again from another.
         id: String,
         /// What it is about, such as a session.
+        #[serde(default)]
         about: String,
     },
     /// The lookout passed something on.
