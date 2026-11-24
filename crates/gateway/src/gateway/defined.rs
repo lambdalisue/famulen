@@ -163,6 +163,7 @@ impl Gateway {
             .filter_map(|k| k.strip_prefix("account."));
         Ok(values
             .keys()
+            .chain(connection.secret.account.keys())
             .map(String::as_str)
             .chain(sealed)
             .map(str::to_owned)

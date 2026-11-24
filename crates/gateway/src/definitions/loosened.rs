@@ -93,7 +93,17 @@ pub fn loosened(current: Option<&Definition>, proposed: &Definition) -> Vec<Stri
             .tools
             .iter()
             .any(|t| t.name == name && t.method == Method::Get);
+        let written = |d: &Definition| d.tools.iter().find(|t| t.name == name).cloned();
+        let spends = written(proposed).is_some_and(|t| proposed.spends(&t));
+        let same = current.is_some_and(|c| {
+            written(c) == written(proposed) && written(c).is_some_and(|t| c.spends(&t))
+        });
         match (before, after) {
+            (_, Some(after)) if spends && !same && after < Freedom::Asked => {
+                reasons.push(format!(
+                    "{name} would carry a token traded for at each use without asking: give it \"confirm\" under [permissions]"
+                ));
+            }
             (Some(before), Some(after)) if after < before => {
                 reasons.push(format!(
                     "{name} would go from {} to {}",

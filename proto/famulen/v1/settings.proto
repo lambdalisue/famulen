@@ -26,6 +26,9 @@ message Persona {
   string own_tone = 4;
   // The icons on the console and on Slack follow it; male until chosen.
   PersonaGender gender = 5;
+  // What could not follow the change just made, such as the Slack app's
+  // icon; only in the answer to UpdatePersona, whose change is kept.
+  repeated string troubles = 6;
 }
 
 message UpdatePersonaRequest {

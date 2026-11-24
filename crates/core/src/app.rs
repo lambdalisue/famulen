@@ -66,6 +66,8 @@ pub struct App {
             Option<Arc<crate::slack::clients::SlackClients<crate::slack::web::GatewaySlack>>>,
         >,
     >,
+    /// Held while the Slack apps' own icons are set.
+    pub slack_app_icons: crate::slack::app_icon::AppIcons,
     /// What stands beside the secretary's posts on Slack.
     pub slack_icons: crate::slack::icons::Icons,
     /// Where the gateway's receivers are reached from outside, if the owner

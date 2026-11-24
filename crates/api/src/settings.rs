@@ -195,7 +195,14 @@ impl SettingsService for Api {
         self.app.journal.record("setting", "persona changed");
         self.app.changed.notify_one();
         changed(self);
-        Response::ok(self.persona().or_fail()?)
+        let troubles = match gender {
+            Some(_) => self.app.set_slack_app_icons().await,
+            None => Vec::new(),
+        };
+        Response::ok(Persona {
+            troubles,
+            ..self.persona().or_fail()?
+        })
     }
 
     async fn get_home(
