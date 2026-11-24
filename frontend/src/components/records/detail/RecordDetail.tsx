@@ -1,6 +1,6 @@
 import { createAsync, revalidate, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, Show, Suspense } from "solid-js";
-import { Button, EmptyState, ErrorState, Keyed, Loading, whenConfirmed } from "~/components/ui";
+import { Button, Disclosure, EmptyState, ErrorState, Keyed, Loading, whenConfirmed } from "~/components/ui";
 import type { RecordKind, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -39,6 +39,8 @@ type Extra = {
   back: string;
   /** What this kind shows above the rest. */
   top?: (r: Rec) => JSX.Element;
+  /** What its fields are folded under, where what is above says them already. */
+  fold?: string;
   /** What this kind shows below its fields. */
   extra?: (r: Rec) => JSX.Element;
 };
@@ -144,17 +146,24 @@ function Content(props: { record: Rec } & Extra) {
           <div class="rec-columns">
             <div class="rec-body">
               <Show when={!free() && kind()}>
-                {(k) => (
-                  <section class="rec-section rec-glance" aria-label="項目">
-                    <Fields
-                      types={k().fields}
-                      fields={r().fields}
-                      aide={owner.aide()}
-                      skip={[RELATED]}
-                      onSave={(name, v) => void save({ fields: [{ name, ...v }] })}
-                    />
-                  </section>
-                )}
+                {(k) => {
+                  const fields = () => (
+                    <section class="rec-section rec-glance" aria-label="項目">
+                      <Fields
+                        types={k().fields}
+                        fields={r().fields}
+                        aide={owner.aide()}
+                        skip={[RELATED]}
+                        onSave={(name, v) => void save({ fields: [{ name, ...v }] })}
+                      />
+                    </section>
+                  );
+                  return (
+                    <Show when={props.fold} fallback={fields()}>
+                      {(title) => <Disclosure title={title()}>{fields()}</Disclosure>}
+                    </Show>
+                  );
+                }}
               </Show>
               <Notes
                 text={r().notes}
@@ -221,7 +230,7 @@ export default function RecordDetail(props: { kind: string; id: string } & Extra
     >
       <Suspense fallback={<Loading />}>
         <Show when={record() !== null} fallback={<EmptyState>この記録はもうない</EmptyState>}>
-          <Show when={there()}>{(r) => <Content record={r()} back={props.back} top={props.top} extra={props.extra} />}</Show>
+          <Show when={there()}>{(r) => <Content record={r()} back={props.back} top={props.top} fold={props.fold} extra={props.extra} />}</Show>
         </Show>
       </Suspense>
     </ErrorBoundary>

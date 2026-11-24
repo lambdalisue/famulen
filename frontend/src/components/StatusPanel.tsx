@@ -1,3 +1,4 @@
+import { useAsked } from "~/components/ApprovalCard";
 import { shortTime } from "~/lib/dates";
 import { toJsonString } from "@bufbuild/protobuf";
 import { createAsync, query } from "@solidjs/router";
@@ -107,6 +108,7 @@ export default function StatusPanel() {
       .sort((a, b) => Number(a.at - b.at))
       .slice(0, 8);
   const { approvals, held, count: waiting } = useWaiting();
+  const asked = useAsked();
   const [busy, setBusy] = createSignal(false);
 
   return (
@@ -179,7 +181,9 @@ export default function StatusPanel() {
               <div role="listitem" class="item">
                 <span class="mono sub when">{shortTime(a.createdAt, tz())}</span>
                 <Tag tone="warn">確かめる</Tag>
-                <span class="grow mono">{a.tool}</span>
+                <span class="grow">
+                  {asked(a.tool).does} <span class="sub">{asked(a.tool).where}</span>
+                </span>
               </div>
             )}
           </For>

@@ -9,7 +9,7 @@ export function ask(text: string) {
   say.setSelectionRange(text.length, text.length);
 }
 
-/** Pull the conversation up as a half sheet in the narrow layout. */
+/** Pull the conversation up in the narrow layout. */
 export function openSheet() {
   const peek = document.querySelector(".m-peek");
   if (peek instanceof HTMLButtonElement && getComputedStyle(peek).display !== "none") peek.click();

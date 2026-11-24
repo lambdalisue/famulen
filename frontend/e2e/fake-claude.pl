@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # A stand-in for Claude Code in the browser tests: each message the owner
 # sends becomes one short turn that ends without calling a tool, except that a
-# message holding `e2e-bash` first asks to run Bash, and one holding `e2e-plan`
+# message holding `e2e-bash` first asks to run Bash, one holding
+# `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
 # tells of a plan and writes for some seconds.
 #
 # Asked once for a dream plan (--json-schema with the dream's prompt), it
@@ -46,6 +47,8 @@ while (my $line = <STDIN>) {
     print qq({"type":"system","subtype":"init","session_id":"e2e","tools":["Bash","Read"]}\n) unless $started++;
     print qq({"type":"control_request","request_id":"e2e-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}\n)
       if $line =~ /e2e-bash/;
+    print qq({"type":"control_request","request_id":"e2e-long-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"), "ls\\n" x 60, qq(rm e2e-last"}}}\n)
+      if $line =~ /e2e-long-bash/;
     if ($line =~ /e2e-plan/) {
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"まず読む"}]}}\n);
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"},{"content":"書く","status":"in_progress"}]}}]}}\n);

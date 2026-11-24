@@ -21,26 +21,51 @@ const TILE_KINDS: [(&str, &str); 6] = [
     ("due", "期限の近い物と契約"),
 ];
 
-#[derive(Serialize, Deserialize)]
+/// How many cells wide the grid of tiles is.
+const COLUMNS: u32 = 12;
+const LEAST_CELLS: u32 = 3;
+const MOST_ROWS: u32 = 24;
+/// As far down as a tile can start.
+const LAST_ROW: u32 = 200;
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct TileDef {
     kind: String,
-    wide: bool,
-    tall: bool,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl TileDef {
+    /// The tile kept within the grid.
+    fn within(self) -> Self {
+        let width = self.width.clamp(LEAST_CELLS, COLUMNS);
+        Self {
+            x: self.x.min(COLUMNS - width),
+            y: self.y.min(LAST_ROW),
+            width,
+            height: self.height.clamp(LEAST_CELLS, MOST_ROWS),
+            ..self
+        }
+    }
 }
 
 fn default_tiles() -> Vec<TileDef> {
     [
-        ("today", true, true),
-        ("approvals", false, false),
-        ("aide", false, false),
-        ("task", true, true),
-        ("memos", true, false),
+        ("today", 0, 0, 6, 7),
+        ("approvals", 6, 0, 6, 3),
+        ("aide", 6, 3, 6, 4),
+        ("task", 0, 7, 6, 7),
+        ("memos", 6, 7, 6, 7),
     ]
     .into_iter()
-    .map(|(kind, wide, tall)| TileDef {
+    .map(|(kind, x, y, width, height)| TileDef {
         kind: kind.into(),
-        wide,
-        tall,
+        x,
+        y,
+        width,
+        height,
     })
     .collect()
 }
@@ -98,8 +123,10 @@ impl Api {
                 .into_iter()
                 .map(|t| Tile {
                     kind: t.kind,
-                    wide: t.wide,
-                    tall: t.tall,
+                    x: t.x,
+                    y: t.y,
+                    width: t.width,
+                    height: t.height,
                     ..Default::default()
                 })
                 .collect(),
@@ -223,10 +250,15 @@ impl SettingsService for Api {
             .tiles
             .into_iter()
             .filter(|t| TILE_KINDS.iter().any(|(k, _)| *k == t.kind))
-            .map(|t| TileDef {
-                kind: t.kind,
-                wide: t.wide,
-                tall: t.tall,
+            .map(|t| {
+                TileDef {
+                    kind: t.kind,
+                    x: t.x,
+                    y: t.y,
+                    width: t.width,
+                    height: t.height,
+                }
+                .within()
             })
             .collect();
         self.app
@@ -416,5 +448,46 @@ fn places(paths: Vec<std::path::PathBuf>) -> WritablePlaces {
     WritablePlaces {
         paths: paths.iter().map(|p| p.display().to_string()).collect(),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tile(x: u32, y: u32, width: u32, height: u32) -> TileDef {
+        TileDef {
+            kind: "today".into(),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn a_tile_stays_where_it_is_put_within_the_grid() {
+        assert_eq!(tile(3, 5, 6, 4).within(), tile(3, 5, 6, 4));
+    }
+
+    #[test]
+    fn a_tile_past_the_grid_is_kept_within_it() {
+        assert_eq!(tile(10, 999, 40, 0).within(), tile(0, 200, 12, 3));
+        assert_eq!(tile(11, 0, 4, 99).within(), tile(8, 0, 4, 24));
+    }
+
+    #[test]
+    fn the_first_tiles_are_within_the_grid_and_do_not_overlap() {
+        let tiles = default_tiles();
+        for (i, a) in tiles.iter().enumerate() {
+            assert!(a.x + a.width <= COLUMNS);
+            for b in &tiles[i + 1..] {
+                let apart = a.x + a.width <= b.x
+                    || b.x + b.width <= a.x
+                    || a.y + a.height <= b.y
+                    || b.y + b.height <= a.y;
+                assert!(apart, "{a:?} {b:?}");
+            }
+        }
     }
 }

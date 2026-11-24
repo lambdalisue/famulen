@@ -15,3 +15,21 @@ span.markdown-body::before, span.markdown-body::after { display: none !important
 .md-inline .markdown-body > :first-child { margin-top: 0; }
 .md-inline .markdown-body > :last-child { margin-bottom: 0; }
 .md .attrs { font-size: var(--t-xs); color: var(--muted); margin-left: 6px; }
+/* Said in the conversation: in the type of its bubble, drawn as a chat draws it. */
+.msg .md :is(.markdown-viewer, .markdown-body, .md-plain) { font: inherit; color: inherit; line-height: inherit; background: transparent; }
+.msg .markdown-body > :first-child { margin-top: 0; }
+.msg .markdown-body > :last-child { margin-bottom: 0; }
+.msg .markdown-body :is(p, ul, ol, blockquote, pre, table) { margin-block: 0 8px; }
+.msg .markdown-body :is(ul, ol) { padding-left: 1.5em; }
+.msg .markdown-body li > :is(ul, ol) { margin-bottom: 0; }
+.msg .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-size: 1.05em; margin: 10px 0 4px; padding: 0; border: 0; }
+.msg .markdown-body hr { height: 1px; margin: 10px 0; border: 0; background: var(--line); }
+.msg .markdown-body :is(pre, table) { max-width: 100%; overflow-x: auto; }
+.msg .markdown-body table { border-collapse: collapse; border-spacing: 0; }
+.msg .markdown-body :is(th, td) { padding: 4px 10px; }
+.msg .markdown-body blockquote { margin-inline: 0; padding: 0 0 0 10px; }
+.msg .markdown-body pre { padding: 8px 10px; line-height: 1.55; }
+.msg.owner .markdown-body :is(a, .md-link, blockquote) { color: inherit; }
+.msg.owner .markdown-body a { text-decoration: underline; }
+.msg.owner .markdown-body :is(code, pre, tr, th, td) { background: rgba(255, 255, 255, .14); color: inherit; border-color: rgba(255, 255, 255, .3); }
+.msg.owner .markdown-body pre code { background: transparent; }
