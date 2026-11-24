@@ -77,3 +77,4 @@ export { default as userCheck } from "@tabler/icons/outline/user-check.svg?raw";
 export { default as circle } from "@tabler/icons/outline/circle.svg?raw";
 export { default as circleCheck } from "@tabler/icons/outline/circle-check.svg?raw";
 export { default as progress } from "@tabler/icons/outline/progress.svg?raw";
+export { default as gripVertical } from "@tabler/icons/outline/grip-vertical.svg?raw";

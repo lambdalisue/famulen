@@ -1,7 +1,15 @@
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 176px; gap: 14px; }
-.tile { min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: var(--s1); overflow: hidden; }
-.tile.w2 { grid-column: span 2; }
-.tile.h2 { grid-row: span 2; }
+.tiles { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: var(--row); gap: var(--gap); min-height: calc(var(--rows) * (var(--row) + var(--gap)) - var(--gap)); align-content: start; }
+.tile { position: relative; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: var(--s1); overflow: hidden; }
+.tiles.arranging { border-radius: var(--r-lg); background-image: linear-gradient(var(--line-strong) 1px, transparent 1px), linear-gradient(90deg, var(--line-strong) 1px, transparent 1px); background-size: calc((100% + var(--gap)) / 12) calc(var(--row) + var(--gap)); background-position: calc(var(--gap) / -2) calc(var(--gap) / -2); }
+.arranging > .tile { border-color: var(--control); user-select: none; }
+.arranging > .tile > header { cursor: grab; touch-action: none; }
+.arranging > .tile .tile-body { pointer-events: none; opacity: .6; }
+.tiles.dragging, .dragging > .tile > header { cursor: grabbing; }
+.tile.held { z-index: 2; border-color: var(--workgroup); box-shadow: var(--shadow-lg), 0 0 0 1px var(--workgroup); }
+.tile-order { display: none; }
+.tile-corner { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; padding: 0; border: 0; background: linear-gradient(135deg, transparent 55%, var(--control) 55% 62%, transparent 62% 72%, var(--control) 72% 79%, transparent 79%); cursor: nwse-resize; touch-action: none; }
+.tile-grip { cursor: grab; }
+.tile > header > .icon { color: var(--muted); }
 .tile > header { flex: none; display: flex; align-items: center; gap: var(--s1); min-height: 32px; }
 .tile > header h2 { flex: 1; min-width: 0; font-size: var(--t-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile-more { display: inline-flex; padding: 6px; border-radius: var(--r-sm); color: var(--muted); }
@@ -9,13 +17,13 @@
 .tile-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
 .tile-body > .empty { padding: var(--s2) 0; }
 .tile-body > [role=list] > .item { padding: 6px 4px; min-height: 48px; }
-@container main (max-width: 999px) {
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@container main (max-width: 559px) {
-  .tiles { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
-  .tile.w2, .tile.h2 { grid-column: auto; grid-row: auto; }
+@container main (max-width: 719px) {
+  .tiles { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; min-height: 0; background: none !important; }
+  .tiles > .tile { grid-column: auto !important; grid-row: auto !important; }
   .tile-body { max-height: 440px; }
+  .tile-order { display: inline-flex; }
+  .tile-grip, .tile-corner { display: none; }
+  .arranging > .tile > header { cursor: auto; touch-action: auto; }
 }
 .home-setup { border-color: var(--workgroup); }
 .home-ev { position: relative; display: flex; gap: 10px; align-items: flex-start; margin: 2px 0; padding: 6px 8px 6px 13px; border-radius: var(--r); }
@@ -34,3 +42,8 @@
 .home-title { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .home-sub { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .home-more { display: block; padding: 8px 6px; font-size: var(--t-sm); }
+.home-group + .home-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line2); }
+.home-group > h3 { display: flex; align-items: center; gap: 6px; padding: 2px 6px; font-size: var(--t-sm); }
+.home-group .dot { background: var(--line-strong); }
+.home-group[data-tone=now] .dot { background: var(--busy); }
+.home-group[data-tone=wait] .dot { background: var(--warn); }

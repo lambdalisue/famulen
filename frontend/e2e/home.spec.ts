@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { call, dayFromToday, record, visit } from "./support";
 
 function tile(page: Page, heading: string | RegExp) {
@@ -9,14 +9,17 @@ const headings = (page: Page) => page.locator("section.tile h2");
 
 test.describe.configure({ mode: "serial" });
 
-test("home opens with the default tiles in order", async ({ page, request }) => {
+type Tile = { kind: string; x?: number; y?: number; width?: number; height?: number };
+const savedTiles = (request: APIRequestContext) => call<{ tiles: Tile[] }>(request, "SettingsService", "GetHome").then((h) => h.tiles);
+
+test("home opens with the tiles in the order they are read", async ({ page, request }) => {
   await call(request, "SettingsService", "SetTiles", {
     tiles: [
-      { kind: "today", wide: true, tall: true },
-      { kind: "approvals" },
-      { kind: "aide" },
-      { kind: "task", wide: true, tall: true },
-      { kind: "memos", wide: true },
+      { kind: "today", x: 0, y: 0, width: 6, height: 7 },
+      { kind: "approvals", x: 6, y: 0, width: 6, height: 3 },
+      { kind: "aide", x: 6, y: 3, width: 6, height: 4 },
+      { kind: "task", x: 0, y: 7, width: 6, height: 7 },
+      { kind: "memos", x: 6, y: 7, width: 6, height: 7 },
     ],
   });
   await visit(page, "/", /^ホーム · /);
@@ -27,65 +30,110 @@ test("the arrange controls show only while arranging, and the choice survives a 
   await visit(page, "/", /^ホーム · /);
   await expect(page.getByRole("button", { name: "タイルを足す" })).toBeHidden();
 
-  await page.getByRole("button", { name: "並べ替える" }).click();
+  await page.getByRole("button", { name: "配置を変える" }).click();
   await expect(page.getByRole("button", { name: "タイルを足す" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "タイルを足す" })).toBeVisible();
 
-  await page.getByRole("button", { name: "並べ替える" }).click();
+  await page.getByRole("button", { name: "配置を変える" }).click();
   await expect(page.getByRole("button", { name: "タイルを足す" })).toBeHidden();
 });
 
-test("moving, resizing, adding and removing tiles is kept across a reload", async ({ page }) => {
+async function drag(page: Page, from: { x: number; y: number }, by: { x: number; y: number }) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + by.x / 2, from.y + by.y / 2);
+  await page.mouse.move(from.x + by.x, from.y + by.y);
+  await page.mouse.up();
+}
+
+test("a tile dragged by its head stays where it is let go, and what it lies over goes below it", async ({ page, request }) => {
+  await call(request, "SettingsService", "SetTiles", {
+    tiles: [
+      { kind: "today", x: 0, y: 0, width: 4, height: 4 },
+      { kind: "approvals", x: 8, y: 0, width: 4, height: 4 },
+    ],
+  });
   await visit(page, "/", /^ホーム · /);
-  await page.getByRole("button", { name: "並べ替える" }).click();
+  await page.getByRole("button", { name: "配置を変える" }).click();
+  const grid = await page.locator(".tiles").boundingBox();
+  const head = await tile(page, "今日").getByRole("heading").boundingBox();
+  if (!grid || !head) throw new Error("no grid");
+  const column = (grid.width + 12) / 12;
+  await drag(page, { x: head.x + 10, y: head.y + 10 }, { x: 8 * column, y: 0 });
+  await expect.poll(() => savedTiles(request)).toEqual([
+    { kind: "today", x: 8, width: 4, height: 4 },
+    { kind: "approvals", x: 8, y: 4, width: 4, height: 4 },
+  ]);
 
-  await tile(page, "今日").getByRole("button", { name: "後ろへ" }).click();
-  await expect(headings(page).nth(0)).toHaveText("確認待ち");
-  await expect(headings(page).nth(1)).toHaveText("今日");
+  // Nothing is pulled up: the room it leaves stays.
+  const moved = await tile(page, "今日").getByRole("heading").boundingBox();
+  if (!moved) throw new Error("no tile");
+  await drag(page, { x: moved.x + 10, y: moved.y + 10 }, { x: -8 * column, y: 6 * 56 });
+  await expect.poll(() => savedTiles(request)).toEqual([
+    { kind: "approvals", x: 8, y: 4, width: 4, height: 4 },
+    { kind: "today", y: 6, width: 4, height: 4 },
+  ]);
 
-  await tile(page, "今日").getByRole("button", { name: "前へ" }).click();
-  await expect(headings(page).nth(0)).toHaveText("今日");
+  // Dragged to where there is room for it on screen.
+  await page.locator("#pane").evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const corner = await tile(page, "今日").getByRole("button", { name: "今日の大きさを変える" }).boundingBox();
+  if (!corner) throw new Error("no corner");
+  await drag(page, { x: corner.x + 12, y: corner.y + 12 }, { x: 2 * column, y: 2 * 56 });
+  await expect.poll(() => savedTiles(request)).toContainEqual({ kind: "today", y: 6, width: 6, height: 6 });
+  await page.getByRole("button", { name: "配置を変える" }).click();
+});
 
-  await expect(tile(page, "確認待ち")).not.toHaveClass(/w2/);
-  await tile(page, "確認待ち").getByRole("button", { name: "大きさを変える" }).click();
-  await expect(tile(page, "確認待ち")).toHaveClass(/w2/);
+test("the arrow keys move and size a tile, and tiles are added and taken off", async ({ page, request }) => {
+  await call(request, "SettingsService", "SetTiles", { tiles: [{ kind: "approvals", x: 0, y: 0, width: 4, height: 4 }] });
+  await visit(page, "/", /^ホーム · /);
+  await page.getByRole("button", { name: "配置を変える" }).click();
+
+  const grip = tile(page, "確認待ち").getByRole("button", { name: "確認待ちを動かす" });
+  await grip.press("ArrowRight");
+  await expect.poll(() => savedTiles(request)).toEqual([{ kind: "approvals", x: 1, width: 4, height: 4 }]);
+  await tile(page, "確認待ち").getByRole("button", { name: "確認待ちの大きさを変える" }).press("ArrowDown");
+  await expect.poll(() => savedTiles(request)).toEqual([{ kind: "approvals", x: 1, width: 4, height: 5 }]);
 
   await page.getByLabel("足すタイル").selectOption({ label: "期限の近い物と契約" });
   await page.getByRole("button", { name: "タイルを足す" }).click();
   await expect(headings(page).last()).toHaveText("期限の近い物と契約");
-
   await page.reload();
-  await expect(tile(page, "確認待ち")).toHaveClass(/w2/);
   await expect(headings(page).last()).toHaveText("期限の近い物と契約");
-
   await tile(page, "期限の近い物と契約").getByRole("button", { name: "外す" }).click();
   await expect(tile(page, "期限の近い物と契約")).toHaveCount(0);
-  await tile(page, "確認待ち").getByRole("button", { name: "大きさを変える" }).click();
-  await tile(page, "確認待ち").getByRole("button", { name: "大きさを変える" }).click();
-  await expect(tile(page, "確認待ち")).not.toHaveClass(/w2/);
-  await page.getByRole("button", { name: "並べ替える" }).click();
+  await page.getByRole("button", { name: "配置を変える" }).click();
 });
 
 test("a press goes on from the last one, however slowly that is saved and read again", async ({ page, request }) => {
-  await call(request, "SettingsService", "SetTiles", { tiles: [{ kind: "today" }, { kind: "approvals" }] });
+  await call(request, "SettingsService", "SetTiles", { tiles: [{ kind: "approvals", x: 0, y: 0, width: 4, height: 4 }] });
   await page.route(/SettingsService\/(SetTiles|GetHome)/, async (route) => {
     await new Promise((done) => setTimeout(done, 500));
     await route.continue();
   });
   await visit(page, "/", /^ホーム · /);
-  await page.getByRole("button", { name: "並べ替える" }).click();
+  await page.getByRole("button", { name: "配置を変える" }).click();
+  const grip = tile(page, "確認待ち").getByRole("button", { name: "確認待ちを動かす" });
+  for (let i = 0; i < 3; i++) await grip.press("ArrowRight");
+  await expect.poll(() => savedTiles(request)).toEqual([{ kind: "approvals", x: 3, width: 4, height: 4 }]);
+  await page.getByRole("button", { name: "配置を変える" }).click();
+});
 
-  const size = tile(page, "確認待ち").getByRole("button", { name: "大きさを変える" });
-  await size.click();
-  await size.click();
-  await tile(page, "確認待ち").getByRole("button", { name: "前へ" }).click();
-
-  await expect(headings(page)).toHaveText(["確認待ち", "今日"]);
-  await expect(tile(page, "確認待ち")).toHaveClass(/w2 h2/);
-  const home = () => call<{ tiles: unknown[] }>(request, "SettingsService", "GetHome").then((h) => h.tiles);
-  await expect.poll(home).toEqual([{ kind: "approvals", wide: true, tall: true }, { kind: "today" }]);
-  await page.getByRole("button", { name: "並べ替える" }).click();
+test("the secretary's tasks show as going on only while they are, and its working memory does not show", async ({ page, request }) => {
+  await call(request, "MemoryService", "SetWorking", { name: "e2e-waits", done: "頼んだ", next: "届いたら見る", waiting: "返事を待つ" });
+  await record(request, "tasks", "動いている仕事", { fields: { Assignee: "secretary", Status: "in_progress" } });
+  await record(request, "tasks", "待っている仕事", { fields: { Assignee: "secretary", Status: "waiting", "Waiting for": "先方の返事" } });
+  await call(request, "SettingsService", "SetTiles", { tiles: [{ kind: "aide", x: 0, y: 0, width: 6, height: 10 }] });
+  try {
+    await visit(page, "/", /^ホーム · /);
+    const part = (name: RegExp) => tile(page, /が進めている$/).locator(".home-group").filter({ has: page.getByRole("heading", { name }) });
+    await expect(part(/^動いている/)).toContainText("動いている仕事");
+    await expect(part(/^待っている/)).toContainText("待っている仕事");
+    await expect(part(/^動いている/)).not.toContainText("待っている仕事");
+    await expect(page.locator(".tiles")).not.toContainText("e2e-waits");
+  } finally {
+    await call(request, "MemoryService", "CloseWorking", { id: "e2e-waits" });
+  }
 });
 
 test("the tiles show today's holds, tasks, memos and close due dates", async ({ page, request }) => {
@@ -100,12 +148,12 @@ test("the tiles show today's holds, tasks, memos and close due dates", async ({ 
   });
   await call(request, "SettingsService", "SetTiles", {
     tiles: [
-      { kind: "today", wide: true, tall: true },
-      { kind: "approvals" },
-      { kind: "aide" },
-      { kind: "task", wide: true, tall: true },
-      { kind: "memos", wide: true },
-      { kind: "due", wide: true },
+      { kind: "today", x: 0, y: 0, width: 6, height: 7 },
+      { kind: "approvals", x: 6, y: 0, width: 6, height: 3 },
+      { kind: "aide", x: 6, y: 3, width: 6, height: 4 },
+      { kind: "task", x: 0, y: 7, width: 6, height: 7 },
+      { kind: "memos", x: 6, y: 7, width: 6, height: 4 },
+      { kind: "due", x: 6, y: 11, width: 6, height: 4 },
     ],
   });
   await visit(page, "/", /^ホーム · /);
