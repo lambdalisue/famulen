@@ -91,7 +91,7 @@ test("a press goes on from the last one, however slowly that is saved and read a
 test("the tiles show today's holds, tasks, memos and close due dates", async ({ page, request }) => {
   const today = dayFromToday(0);
   await record(request, "events", "ホームの仮押さえ", {
-    fields: { Status: "hold", Start: `${today} 23:00`, End: `${today} 23:30`, Meeting: "https://meet.example.com/home" },
+    fields: { Status: "hold", Start: `${today} 23:00`, End: `${dayFromToday(1)} 00:30`, Meeting: "https://meet.example.com/home" },
   });
   await record(request, "tasks", "ホームに出るタスク", { fields: { Due: today } });
   await record(request, "memos", "ホームに出るメモ");
