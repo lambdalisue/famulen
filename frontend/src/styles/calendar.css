@@ -7,10 +7,10 @@
 .week-date b { font-size: 18px; color: var(--ink); }
 .week .head.today .week-date, .week .head.today b { color: var(--workgroup-ink); }
 .week .head.today { box-shadow: inset 0 3px 0 var(--workgroup); }
-.week .col { position: relative; border-left: 1px solid var(--line2); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 47px, var(--line2) 47px, var(--line2) 48px); }
-.week .hours span { height: 48px; display: block; font-size: var(--t-xs); color: var(--muted); text-align: right; padding: 2px 8px 0 0; }
+.week .col { position: relative; border-left: 1px solid var(--line2); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hour) - 1px), var(--line2) calc(var(--hour) - 1px), var(--line2) var(--hour)); }
+.week .hours span { height: var(--hour); display: block; font-size: var(--t-xs); color: var(--muted); text-align: right; padding: 2px 8px 0 0; }
 .ev { --ev: var(--c, var(--accent)); position: absolute; border: 0; border-left: 3px solid var(--ev); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 2px 6px; box-shadow: 0 0 0 1px var(--card); overflow: hidden; font-size: var(--t-xs); line-height: 1.4; background: color-mix(in srgb, var(--ev) 9%, var(--card)); display: flex; flex-direction: column; text-align: left; cursor: pointer; color: var(--ink); }
-.ev b { font-size: var(--t-sm); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; flex-shrink: 0; }
+.ev b { font-size: var(--t-sm); overflow: hidden; display: -webkit-box; -webkit-line-clamp: var(--lines, 2); -webkit-box-orient: vertical; overflow-wrap: anywhere; flex-shrink: 0; }
 .ev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink2); }
 .ev.short { flex-direction: row; gap: 6px; align-items: center; padding-block: 0; }
 .ev.short b { display: block; flex: 0 0 auto; max-width: 100%; white-space: nowrap; text-overflow: ellipsis; }
@@ -22,6 +22,8 @@
 .ev-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--danger-strong); z-index: 1; pointer-events: none; }
 .ev-now::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger-strong); }
 .allday { --ev: var(--c, var(--accent)); display: block; width: 100%; min-width: 0; margin: 0; border: 0; border-left: 3px solid var(--ev); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 1px 5px; background: color-mix(in srgb, var(--ev) 9%, var(--card)); color: var(--ink); font-size: var(--t-xs); line-height: 1.5; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A whole day has room for a second line. */
+.week .head .allday > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
 .allday.due { border: 1px dashed var(--line-strong); border-radius: var(--r-sm); background: transparent; }
 .allday.due::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border: 1.2px solid var(--muted); border-radius: 2px; }
 .allday.hold { background: var(--card); border: 1.5px dashed var(--workgroup); border-radius: var(--r-sm); }
@@ -37,3 +39,11 @@
 .month-date span { color: var(--muted); }
 .month-day.today .month-date { background: var(--workgroup-ink); color: #fff; padding: 0 8px; }
 .month-day.today .month-date span { color: inherit; }
+
+/* The card an event grows into under the pointer. */
+.ev-card { --ev: var(--c, var(--accent)); position: fixed; z-index: 40; pointer-events: none; display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; max-height: 60vh; overflow: hidden; background: color-mix(in srgb, var(--ev) 6%, var(--card)); border: 1px solid color-mix(in srgb, var(--ev) 35%, var(--line)); border-left: 4px solid var(--ev); border-radius: var(--r); box-shadow: var(--shadow-lg); font-size: var(--t-sm); line-height: 1.5; animation: ev-card .1s ease-out; }
+@keyframes ev-card { from { opacity: 0; transform: scale(.97); } }
+.ev-card b { font-size: var(--t-md); overflow-wrap: anywhere; }
+.ev-card-line { display: flex; gap: 6px; overflow-wrap: anywhere; color: var(--ink2); }
+.ev-card-line > :first-child { margin-top: 2px; }
+.ev-card-notes { padding-top: 5px; border-top: 1px solid var(--line2); color: var(--muted); overflow-wrap: anywhere; }

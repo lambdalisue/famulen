@@ -9,7 +9,7 @@
 .split-pane.open > .split-left { flex: 0 0 var(--left); padding-inline: 18px; }
 .split-back { display: none; }
 /* The detail lies over the right of what it is about, such as a week, rather than squeezing it. */
-.split-pane.floats { --detail: 400px; }
+.split-pane.floats { --detail: 440px; }
 .split-pane.floats.open > .split-left { flex: 1; padding-inline: 26px; }
 .split-pane.floats > .split-detail { flex: 0 0 var(--detail); }
 .main { container: main / inline-size; }
@@ -97,7 +97,7 @@
 /* One record. */
 .rec { display: flex; flex-direction: column; gap: var(--s4); padding: 18px 24px 32px; min-width: 0; }
 .event + .rec { border-top: 8px solid var(--bg); }
-.event-title { font-size: var(--t-xl); overflow-wrap: anywhere; }
+.event-title { padding-left: 12px; border-left: 4px solid var(--c, var(--accent)); font-size: var(--t-xl); line-height: 1.4; overflow-wrap: anywhere; }
 .rec-title { display: flex; flex-direction: column; gap: var(--s2); }
 .rec-name { display: block; width: calc(100% + 9px); margin: 0 0 0 -9px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--r); background: transparent; font-size: var(--t-xl); line-height: 1.4; font-weight: 700; resize: none; overflow: hidden; }
 .rec-name:hover { border-color: var(--line); }
@@ -162,3 +162,12 @@ textarea.input.rec-notes { min-height: 300px; font-family: var(--mono); line-hei
 .ev-answer { flex: none; width: 56px; font-size: var(--t-xs); text-align: center; border-radius: var(--r-full); padding: 1px 0; background: var(--soft); color: var(--muted); }
 .ev-answer[data-answer=accepted] { background: var(--accent-soft); color: var(--accent-ink); }
 .ev-answer[data-answer=declined] { background: var(--danger-soft); color: var(--danger); }
+.ev-join { align-self: stretch; min-height: 44px; font-size: var(--t-md); }
+.ev-facts { margin: 0; display: flex; flex-direction: column; }
+.ev-fact { display: flex; align-items: flex-start; gap: 12px; padding: 10px 2px; min-width: 0; }
+.ev-fact + .ev-fact { border-top: 1px solid var(--line2); }
+.ev-fact > svg, .ev-fact > .icon { margin-top: 2px; color: var(--muted); }
+.ev-fact > dd { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.ev-fact > dd > b { display: block; font-size: 15px; }
+.ev-fact .ev-answer { display: inline-block; padding: 2px 0; }
+.ev-people li { padding: 3px 0; }

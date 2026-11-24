@@ -1,6 +1,7 @@
 import { createAsync, useLocation, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import AddEvent from "~/components/records/AddEvent";
+import EventPeek, { createPeek, type Peek } from "~/components/records/EventPeek";
 import EventPanel, { whenOf } from "~/components/records/EventPanel";
 import { Button, Callout, IconButton, Legend, LinkButton, Loading, PageHeader, SegmentedLinks, SplitPane } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
@@ -23,7 +24,8 @@ const UNITS: [Unit, string][] = [
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 /** Where the day and week grids open when today is not shown: the working hours. */
 const HOUR_SHOWN = 7;
-const HOUR_PX = 48;
+const HOUR_PX = 56;
+const LINE_PX = 17;
 const MIN_MINUTES = 20;
 /** Below this an event has one line. */
 const SHORT_PX = 34;
@@ -48,7 +50,7 @@ function Due(props: { task: { id: string; title: string } }) {
 }
 
 /** An event as one line of a day. */
-function Line(props: { event: CalendarEvent; day: string; time?: boolean; picked: boolean; onOpen: (e: CalendarEvent) => void }) {
+function Line(props: { event: CalendarEvent; day: string; time?: boolean; picked: boolean; peek: Peek; onOpen: (e: CalendarEvent) => void }) {
   const e = () => props.event;
   return (
     <button
@@ -56,7 +58,7 @@ function Line(props: { event: CalendarEvent; day: string; time?: boolean; picked
       class="allday"
       classList={{ ...looks(e()), picked: props.picked }}
       style={color(e())}
-      title={label(e())}
+      {...props.peek.of(e())}
       aria-pressed={props.picked}
       disabled={faint(e())}
       onClick={() => props.onOpen(e())}
@@ -113,8 +115,10 @@ export default function Calendar() {
 
   const [adding, setAdding] = createSignal("");
   const here = () => href(unit(), data()?.at ?? at());
+  const peek = createPeek();
   const open = (e: CalendarEvent) => {
     if (faint(e)) return;
+    peek.hide();
     setSelection(`予定：${whenOf(e)} ${label(e)}`);
     navigate(`${here()}&event=${encodeURIComponent(e.uid)}`, { scroll: false });
   };
@@ -128,7 +132,7 @@ export default function Calendar() {
         const units = (): [string, string, boolean][] => UNITS.map(([u, l]) => [href(u, d().at), l, u === unit()]);
         const add = () => setAdding(d().range.days.includes(d().today) && unit() !== "day" ? d().today : d().at);
         const line = (e: CalendarEvent, day: string, time = false) => (
-          <Line event={e} day={day} time={time} picked={e.uid === uid()} onOpen={open} />
+          <Line event={e} day={day} time={time} picked={e.uid === uid()} peek={peek} onOpen={open} />
         );
         return (
           <>
@@ -208,7 +212,7 @@ export default function Calendar() {
                 }
               >
                 <div class="hours-scroll" ref={scroller}>
-                  <div class="week" style={{ "--days": d().range.days.length }}>
+                  <div class="week" style={{ "--days": d().range.days.length, "--hour": `${HOUR_PX}px` }}>
                     <span class="week-corner" />
                     <For each={d().range.days}>
                       {(day) => (
@@ -230,6 +234,7 @@ export default function Calendar() {
                           day={day}
                           events={on(day).filter((e) => !e.allDay)}
                           picked={uid()}
+                          peek={peek}
                           onOpen={open}
                           now={day === d().today ? d().tz : ""}
                         />
@@ -253,6 +258,7 @@ export default function Calendar() {
                 <IconButton plain class="m-fab" size={28} icon={icons.plus} label="予定を足す" onClick={add} />
               </div>
             </Show>
+            <EventPeek peek={peek} />
             <AddEvent day={adding()} open={!!adding()} onOpenChange={(o) => !o && setAdding("")} />
           </>
         );
@@ -273,7 +279,7 @@ function Now(props: { tz: string }) {
 }
 
 /** The part of each event that falls on one day, side by side where they overlap. */
-function DayColumn(props: { day: string; events: CalendarEvent[]; picked: string; onOpen: (e: CalendarEvent) => void; now: string }) {
+function DayColumn(props: { day: string; events: CalendarEvent[]; picked: string; peek: Peek; onOpen: (e: CalendarEvent) => void; now: string }) {
   const spans = () =>
     props.events.map((e): [number, number] => {
       const [from, to] = minutesOn(e, props.day);
@@ -293,11 +299,12 @@ function DayColumn(props: { day: string; events: CalendarEvent[]; picked: string
               type="button"
               class="ev"
               classList={{ ...looks(e), short: height() < SHORT_PX, picked: picked() }}
-              title={`${timeOn(e, props.day)} ${label(e)}`}
+              {...props.peek.of(e)}
               aria-pressed={picked()}
               disabled={faint(e)}
               style={{
                 ...color(e),
+                "--lines": Math.max(1, Math.floor((height() - 4) / LINE_PX) - 1),
                 top: `${top()}px`,
                 height: `${height()}px`,
                 left: `calc(${lane()[0]} * 100% / ${lane()[1]} + 2px)`,
@@ -307,7 +314,7 @@ function DayColumn(props: { day: string; events: CalendarEvent[]; picked: string
             >
               <b>{label(e)}</b>
               <span>
-                {timeOn(e, props.day)}
+                {height() < SHORT_PX || lane()[1] > 1 ? timeOn(e, props.day).split("–")[0] : timeOn(e, props.day)}
                 {e.location ? ` · ${e.location}` : ""}
               </span>
             </button>
