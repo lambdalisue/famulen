@@ -3,6 +3,8 @@
 mod agent_cli;
 mod codex;
 mod discovery;
+#[cfg(test)]
+mod fake_cli;
 mod openai;
 mod registry;
 mod spec;

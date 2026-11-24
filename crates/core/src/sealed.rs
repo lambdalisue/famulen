@@ -7,6 +7,8 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::paths;
+
 /// The places, and the directory relative paths are read against.
 #[derive(Debug, Clone, Default)]
 pub struct Sealed {
@@ -40,36 +42,46 @@ impl Sealed {
             return None;
         }
         let field = |name: &str| input.get(name).and_then(Value::as_str);
-        let reached = match tool {
-            "Read" | "Write" | "Edit" | "MultiEdit" => {
-                field("file_path").and_then(|p| self.inside(p))
-            }
-            "NotebookEdit" => field("notebook_path").and_then(|p| self.inside(p)),
-            "LS" => field("path").and_then(|p| self.inside(p)),
-            "Grep" => self.searched(field("path").unwrap_or(".")),
+        let readings = |p: &str| read_from(&self.workdir, p);
+        let refused = |place: PathBuf| {
+            format!(
+                "{tool} would reach {}, where no tool may look: the gateway alone keeps secrets. Do not try another way.",
+                place.display()
+            )
+        };
+        let (paths, searches) = match tool {
+            "Read" | "Write" | "Edit" | "MultiEdit" => (readings(field("file_path")?), false),
+            "NotebookEdit" => (readings(field("notebook_path")?), false),
+            "LS" => (readings(field("path")?), false),
+            "Grep" => (readings(field("path").unwrap_or(".")), true),
             "Glob" => {
-                let base = field("path").unwrap_or(".");
                 let pattern = field("pattern").map(literal_prefix).unwrap_or_default();
-                let root = self.resolve(base).join(pattern);
-                self.searched(&root.to_string_lossy())
+                let roots = readings(field("path").unwrap_or("."))
+                    .and_then(|bases| bases.iter().map(|base| read_from(base, &pattern)).collect())
+                    .map(|roots: Vec<Vec<PathBuf>>| roots.concat());
+                (roots, true)
             }
-            "Bash" => field("command").and_then(|c| self.mentioned(c)),
-            _ => None,
-        }?;
-        Some(format!(
-            "{tool} would reach {}, where no tool may look: the gateway alone keeps secrets. Do not try another way.",
-            reached.display()
-        ))
+            "Bash" | "PowerShell" => {
+                return self.mentioned(field("command")?).map(refused);
+            }
+            _ => return None,
+        };
+        let Some(paths) = paths else {
+            return Some(format!(
+                "{tool} names a path whose place cannot be told: write the whole path, from a drive's letter."
+            ));
+        };
+        let reached = if searches {
+            self.searched(&paths)
+        } else {
+            self.inside(&paths)
+        };
+        reached.map(refused)
     }
 
-    fn resolve(&self, path: &str) -> PathBuf {
-        normal(&self.workdir, Path::new(path))
-    }
-
-    /// The sealed place `path` is in.
-    fn inside(&self, path: &str) -> Option<PathBuf> {
-        let path = self.resolve(path);
-        let written = forms(&path);
+    /// The sealed place one of `paths` is in.
+    fn inside(&self, paths: &[PathBuf]) -> Option<PathBuf> {
+        let written = forms_of(paths);
         self.places
             .iter()
             .find(|place| {
@@ -80,20 +92,19 @@ impl Sealed {
             .cloned()
     }
 
-    /// The sealed place a search from `path` would reach: it is inside one,
-    /// or one is inside it.
-    fn searched(&self, path: &str) -> Option<PathBuf> {
-        if let Some(place) = self.inside(path) {
+    /// The sealed place a search from one of `paths` would reach: it is
+    /// inside one, or one is inside it.
+    fn searched(&self, paths: &[PathBuf]) -> Option<PathBuf> {
+        if let Some(place) = self.inside(paths) {
             return Some(place);
         }
-        let path = self.resolve(path);
-        let forms_of_path = forms(&path);
+        let written = forms_of(paths);
         self.places
             .iter()
             .find(|place| {
                 forms(place)
                     .iter()
-                    .any(|p| forms_of_path.iter().any(|f| p.starts_with(f)))
+                    .any(|p| written.iter().any(|f| p.starts_with(f)))
             })
             .cloned()
     }
@@ -102,28 +113,62 @@ impl Sealed {
     /// from the working directory. Only a quick first refusal: a command
     /// that gets there another way is stopped by the sandbox it runs in.
     fn mentioned(&self, command: &str) -> Option<PathBuf> {
+        let command = in_shell(command);
         for place in &self.places {
             let mut spellings: Vec<String> = forms(place)
                 .iter()
-                .map(|p| p.display().to_string())
+                .flat_map(|p| shell_spellings(p))
                 .collect();
             if let Some(relative) = relative(&self.workdir, place) {
-                spellings.push(relative.display().to_string());
+                spellings.push(in_shell(&relative.display().to_string()));
             }
             if let Some(name) = place.file_name().and_then(|n| n.to_str())
                 && name.starts_with('.')
             {
-                spellings.push(name.to_owned());
+                spellings.push(in_shell(name));
             }
-            if spellings.iter().any(|s| names_path(command, s)) {
+            if spellings.iter().any(|s| names_path(&command, s)) {
                 return Some(place.clone());
             }
         }
         NAMES
             .iter()
-            .find(|name| command.contains(**name))
+            .find(|name| command.contains(&in_shell(name)))
             .map(|name| PathBuf::from(format!("${name}…")))
     }
+}
+
+/// A shell command's text as places are looked for in it.
+fn in_shell(text: &str) -> String {
+    if cfg!(windows) {
+        paths::windows::command(text)
+    } else {
+        text.to_owned()
+    }
+}
+
+fn shell_spellings(form: &Path) -> Vec<String> {
+    let form = form.display().to_string();
+    if cfg!(windows) {
+        paths::windows::spellings(&form)
+    } else {
+        vec![form]
+    }
+}
+
+/// Every place `path` may mean when read from `base`, or `None` when that
+/// cannot be told.
+fn read_from(base: &Path, path: &str) -> Option<Vec<PathBuf>> {
+    if cfg!(windows) {
+        let readings = paths::windows::readings(&base.to_string_lossy(), path)?;
+        Some(readings.into_iter().map(PathBuf::from).collect())
+    } else {
+        Some(vec![normal(base, Path::new(path))])
+    }
+}
+
+fn forms_of(paths: &[PathBuf]) -> Vec<PathBuf> {
+    paths.iter().flat_map(|p| forms(p)).collect()
 }
 
 /// Whether `command` names `path` as a whole word: not as the start of a
@@ -158,7 +203,8 @@ fn normal(base: &Path, path: &Path) -> PathBuf {
 }
 
 /// `path` as written, and with the part that exists on disk resolved, so a
-/// link does not lead around a sealed place.
+/// link does not lead around a sealed place; each in the spelling places are
+/// compared by.
 fn forms(path: &Path) -> Vec<PathBuf> {
     let mut forms = vec![path.to_path_buf()];
     let mut existing = path;
@@ -179,7 +225,7 @@ fn forms(path: &Path) -> Vec<PathBuf> {
             _ => break,
         }
     }
-    forms
+    forms.iter().map(|f| paths::key(f)).collect()
 }
 
 /// The part of a glob pattern before its first wildcard.
@@ -187,7 +233,10 @@ fn literal_prefix(pattern: &str) -> String {
     let wild = |s: &str| s.contains(['*', '?', '[', '{']);
     Path::new(pattern)
         .components()
-        .take_while(|c| !wild(&c.as_os_str().to_string_lossy()))
+        // The `?` of a Windows `\\?\` prefix is no wildcard.
+        .take_while(|c| {
+            matches!(c, Component::Prefix(_)) || !wild(&c.as_os_str().to_string_lossy())
+        })
         .collect::<PathBuf>()
         .display()
         .to_string()

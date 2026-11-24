@@ -46,11 +46,28 @@ pub struct FileStat {
     pub removed: Option<usize>,
 }
 
-/// Make `dir` a repository when it is not one.
+/// Keeps every file's bytes as written: Git for Windows otherwise checks text
+/// out with CRLF.
+const AS_WRITTEN: [(&str, &str); 2] = [("core.autocrlf", "false"), ("core.eol", "lf")];
+
+/// Make `dir` a repository when it is not one, and one that keeps files as
+/// they are written.
 pub(crate) fn init(dir: &Path) -> anyhow::Result<()> {
-    if dir.join(".git").exists() {
-        return Ok(());
+    if !dir.join(".git").exists() {
+        create(dir)?;
     }
+    for (key, value) in AS_WRITTEN {
+        let set = command(dir, &["config", "--local", "--get", key])
+            .output()
+            .context("running git config")?;
+        if String::from_utf8_lossy(&set.stdout).trim() != value {
+            git(dir, &["config", "--local", key, value])?;
+        }
+    }
+    Ok(())
+}
+
+fn create(dir: &Path) -> anyhow::Result<()> {
     // An empty template keeps the user's global hook templates out of the
     // notebook.
     git(dir, &["init", "-q", "--template=", "-b", "main"])?;
@@ -297,6 +314,23 @@ mod tests {
         assert_eq!(Some(&log[0].id), id.as_ref());
         assert_eq!(log[0].author, me());
         assert_eq!(log[0].message, "set up");
+    }
+
+    #[test]
+    fn files_come_back_with_the_line_endings_they_were_written_with() {
+        let dir = repo("git-line-endings");
+        git(dir.path(), &["config", "core.autocrlf", "true"]).unwrap();
+        init(dir.path()).unwrap();
+        for text in ["a\n", "a\r\n"] {
+            let path = dir.path().join("core.md");
+            std::fs::write(&path, text).unwrap();
+            commit_all(dir.path(), &me(), "write").unwrap();
+            std::fs::write(&path, "changed\n").unwrap();
+
+            revert_to(dir.path(), "HEAD").unwrap();
+
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        }
     }
 
     #[test]

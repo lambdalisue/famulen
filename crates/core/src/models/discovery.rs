@@ -220,8 +220,10 @@ async fn output(bin: &str, args: &[&str], input: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
-    use crate::models::agent_cli::tests::fake_cli;
+    use crate::models::fake_cli::FakeCli;
 
     fn listed(found: &[ModelSpec]) -> Vec<(&str, &str, &str)> {
         found
@@ -232,18 +234,19 @@ mod tests {
 
     #[tokio::test]
     async fn claudes_models_are_the_ones_it_answers_to_initialize_with() {
-        let cli = fake_cli(
-            "models-claude",
-            r#"my $asked = decode_json($stdin);
-            die "not asked" unless $asked->{request}{subtype} eq "initialize";
-            print qq({"type":"system"}\n);
-            $out = { type => "control_response", response => { response => { models => [
-                { value => "default", displayName => "Default" },
-                { value => "opus", displayName => "Opus 5.5" },
-                { value => "claude-opus-5", displayName => "Opus 5" } ] } } };"#,
-        );
+        let cli = FakeCli::new("models-claude").prints(&[
+            json!({ "type": "system" }),
+            json!({ "type": "control_response", "response": { "response": { "models": [
+                { "value": "default", "displayName": "Default" },
+                { "value": "opus", "displayName": "Opus 5.5" },
+                { "value": "claude-opus-5", "displayName": "Opus 5" },
+            ] } } }),
+        ]);
 
-        let found = claude_models(cli.to_str().unwrap()).await.unwrap();
+        let found = claude_models(cli.program()).await.unwrap();
+
+        let asked: Value = serde_json::from_str(&cli.stdin()).unwrap();
+        assert_eq!(asked["request"]["subtype"], "initialize");
 
         assert_eq!(
             listed(&found),
@@ -257,15 +260,14 @@ mod tests {
 
     #[tokio::test]
     async fn codexs_models_are_the_ones_its_catalog_lists() {
-        let cli = fake_cli(
-            "models-codex",
-            r#"die "@ARGV" unless "@ARGV" eq "debug models";
-            $out = { models => [
-                { slug => "gpt-6-sol", display_name => "GPT-6-Sol", visibility => "list" },
-                { slug => "codex-auto-review", display_name => "Review", visibility => "hide" } ] };"#,
-        );
+        let cli = FakeCli::new("models-codex").prints(&[json!({ "models": [
+            { "slug": "gpt-6-sol", "display_name": "GPT-6-Sol", "visibility": "list" },
+            { "slug": "codex-auto-review", "display_name": "Review", "visibility": "hide" },
+        ] })]);
 
-        let found = codex_models(cli.to_str().unwrap()).await.unwrap();
+        let found = codex_models(cli.program()).await.unwrap();
+
+        assert_eq!(cli.args(), ["debug", "models"]);
 
         assert_eq!(
             listed(&found),
@@ -279,9 +281,9 @@ mod tests {
     async fn a_program_that_is_missing_or_lists_nothing_is_an_error() {
         assert!(claude_models("/nonexistent/claude").await.is_err());
         assert!(codex_models("/nonexistent/codex").await.is_err());
-        let empty = fake_cli("models-empty", r#"$out = { models => [] };"#);
-        assert!(claude_models(empty.to_str().unwrap()).await.is_err());
-        assert!(codex_models(empty.to_str().unwrap()).await.is_err());
+        let empty = FakeCli::new("models-empty").prints(&[json!({ "models": [] })]);
+        assert!(claude_models(empty.program()).await.is_err());
+        assert!(codex_models(empty.program()).await.is_err());
     }
 
     #[tokio::test]

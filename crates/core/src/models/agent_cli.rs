@@ -161,144 +161,100 @@ async fn run(
 }
 
 #[cfg(test)]
-pub(super) mod tests {
-    use std::path::{Path, PathBuf};
-
+mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::models::fake_cli::FakeCli;
     use crate::models::{ModelKind, Price, Usage};
 
-    /// Writes a perl script standing in for `claude`: it prints what `body`
-    /// leaves in `$out` as JSON, with `@ARGV` and `$stdin` at hand.
-    pub(in crate::models) fn fake_cli(name: &str, body: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("famulen-models-cli-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("claude");
-        let script = format!(
-            "#!/usr/bin/env perl\nuse strict;\nuse JSON::PP;\nmy $stdin = do {{ local $/; <STDIN> }};\nmy $out;\n{body}\nprint encode_json($out);\n"
-        );
-        // Writing the script from this process and running it at once fails
-        // now and then with ETXTBSY: a child forked by another test thread
-        // inherits the open write handle until it execs. `install` writes the
-        // executable in a process of its own, so no handle leaks here.
-        let source = dir.join("claude.pl");
-        std::fs::write(&source, script).unwrap();
-        let installed = std::process::Command::new("install")
-            .args(["-m", "755"])
-            .arg(&source)
-            .arg(&path)
-            .status()
-            .unwrap();
-        assert!(installed.success(), "install {}", path.display());
-        path
-    }
-
-    fn spec(executable: &Path) -> ModelSpec {
+    fn spec(cli: &FakeCli) -> ModelSpec {
         ModelSpec {
             id: "m1".into(),
             name: "claude code".into(),
             kind: ModelKind::AgentCli,
-            endpoint: Some(executable.display().to_string()),
+            endpoint: Some(cli.program().into()),
             model: "haiku".into(),
             cli: Default::default(),
             price: Price::default(),
         }
     }
 
-    const ECHO: &str = r#"$out = { type => "result", is_error => JSON::PP::false,
-        result => encode_json({ args => \@ARGV, stdin => $stdin }),
-        usage => { input_tokens => 2, cache_creation_input_tokens => 100,
-                   cache_read_input_tokens => 10, output_tokens => 7 } };"#;
-
-    fn value_after<'a>(args: &'a [Value], flag: &str) -> Option<&'a str> {
-        let at = args.iter().position(|arg| arg == flag)?;
-        args.get(at + 1).and_then(Value::as_str)
+    fn answering(name: &str) -> FakeCli {
+        FakeCli::new(name).prints(&[json!({
+            "type": "result", "is_error": false, "result": "hi",
+            "usage": { "input_tokens": 2, "cache_creation_input_tokens": 100,
+                       "cache_read_input_tokens": 10, "output_tokens": 7 },
+        })])
     }
 
     #[tokio::test]
     async fn runs_one_turn_without_tools_or_the_users_settings() {
-        let cli = fake_cli("flags", ECHO);
+        let cli = answering("flags");
 
         let completion = complete(&spec(&cli), None, "be brief", "hello", None)
             .await
             .unwrap();
 
-        let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-        let args = echoed["args"].as_array().unwrap();
-        assert!(args.contains(&json!("--print")));
-        assert!(args.contains(&json!("--strict-mcp-config")));
-        assert_eq!(value_after(args, "--output-format"), Some("json"));
-        assert_eq!(value_after(args, "--tools"), Some(""));
-        assert_eq!(value_after(args, "--setting-sources"), Some(""));
-        assert_eq!(value_after(args, "--model"), Some("haiku"));
-        assert_eq!(
-            value_after(args, "--append-system-prompt"),
-            Some("be brief")
-        );
-        assert_eq!(value_after(args, "--json-schema"), None);
-        assert_eq!(echoed["stdin"], "hello");
+        let args = cli.args();
+        assert!(args.contains(&"--print".into()));
+        assert!(args.contains(&"--strict-mcp-config".into()));
+        let after = |flag| cli.value_after(flag);
+        assert_eq!(after("--output-format").as_deref(), Some("json"));
+        assert_eq!(after("--tools").as_deref(), Some(""));
+        assert_eq!(after("--setting-sources").as_deref(), Some(""));
+        assert_eq!(after("--model").as_deref(), Some("haiku"));
+        assert_eq!(after("--append-system-prompt").as_deref(), Some("be brief"));
+        assert_eq!(after("--json-schema"), None);
+        assert_eq!(cli.stdin(), "hello");
+        assert_eq!(completion.text, "hi");
         assert_eq!(completion.json, None);
     }
 
     #[tokio::test]
     async fn passes_the_roles_effort_only_when_one_is_chosen() {
-        let cli = fake_cli("effort", ECHO);
-        let args_of = async |effort| {
-            let completion = complete(&spec(&cli), effort, "", "hello", None)
+        let cli = answering("effort");
+        for (effort, expected) in [(Some("xhigh"), Some("xhigh")), (None, None)] {
+            complete(&spec(&cli), effort, "", "hello", None)
                 .await
                 .unwrap();
-            let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-            echoed["args"].as_array().unwrap().clone()
-        };
-
-        let chosen = args_of(Some("xhigh")).await;
-        let default = args_of(None).await;
-
-        assert_eq!(value_after(&chosen, "--effort"), Some("xhigh"));
-        assert!(!default.contains(&json!("--effort")), "{default:?}");
+            assert_eq!(cli.value_after("--effort").as_deref(), expected);
+        }
+        assert!(!cli.args().contains(&"--effort".into()));
     }
 
     #[tokio::test]
     async fn a_brief_call_takes_the_roles_effort_over_its_own() {
-        let cli = fake_cli("brief-effort", ECHO);
+        let cli = answering("brief-effort");
 
-        let completion = complete_brief(&spec(&cli), Some("high"), "judge it", "hello", None)
+        complete_brief(&spec(&cli), Some("high"), "judge it", "hello", None)
             .await
             .unwrap();
 
-        let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-        let args = echoed["args"].as_array().unwrap();
-        assert_eq!(value_after(args, "--effort"), Some("high"));
-        assert_eq!(args.iter().filter(|a| *a == "--effort").count(), 1);
+        assert_eq!(cli.value_after("--effort").as_deref(), Some("high"));
+        assert_eq!(cli.args().iter().filter(|a| *a == "--effort").count(), 1);
     }
 
     #[tokio::test]
     async fn a_brief_call_replaces_the_system_prompt_and_does_not_think() {
-        let cli = fake_cli(
-            "brief",
-            r#"$out = { type => "result", is_error => JSON::PP::false,
-                result => encode_json({ args => \@ARGV, thinking => $ENV{MAX_THINKING_TOKENS} }) };"#,
-        );
+        let cli = answering("brief");
 
-        let completion = complete_brief(&spec(&cli), None, "judge it", "hello", None)
+        complete_brief(&spec(&cli), None, "judge it", "hello", None)
             .await
             .unwrap();
 
-        let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-        let args = echoed["args"].as_array().unwrap();
-        assert_eq!(value_after(args, "--system-prompt"), Some("judge it"));
-        assert_eq!(value_after(args, "--append-system-prompt"), None);
-        assert_eq!(value_after(args, "--effort"), Some("low"));
-        assert_eq!(value_after(args, "--tools"), Some(""));
-        assert!(args.contains(&json!("--strict-mcp-config")));
-        assert_eq!(echoed["thinking"], "0");
+        let after = |flag| cli.value_after(flag);
+        assert_eq!(after("--system-prompt").as_deref(), Some("judge it"));
+        assert_eq!(after("--append-system-prompt"), None);
+        assert_eq!(after("--effort").as_deref(), Some("low"));
+        assert_eq!(after("--tools").as_deref(), Some(""));
+        assert!(cli.args().contains(&"--strict-mcp-config".into()));
+        assert_eq!(cli.thinking(), "0");
     }
 
     #[tokio::test]
     async fn counts_cached_input_as_input_tokens() {
-        let cli = fake_cli("usage", ECHO);
+        let cli = answering("usage");
 
         let completion = complete(&spec(&cli), None, "", "hello", None)
             .await
@@ -316,18 +272,16 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn passes_the_schema_and_reads_the_structured_output() {
-        let cli = fake_cli(
-            "schema",
-            r#"my ($at) = grep { $ARGV[$_] eq "--json-schema" } 0..$#ARGV;
-                $out = { type => "result", is_error => JSON::PP::false,
-                result => "", structured_output => decode_json($ARGV[$at + 1]) };"#,
-        );
         let schema = json!({ "label": "a" });
+        let cli = FakeCli::new("schema").prints(&[json!({
+            "type": "result", "is_error": false, "result": "", "structured_output": schema,
+        })]);
 
         let completion = complete(&spec(&cli), None, "", "hello", Some(&schema))
             .await
             .unwrap();
 
+        assert_eq!(cli.value_after("--json-schema"), Some(schema.to_string()));
         assert_eq!(completion.json, Some(schema));
         assert_eq!(
             completion.usage,
@@ -341,10 +295,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reads_json_from_the_result_without_structured_output() {
-        let cli = fake_cli(
-            "text-json",
-            r#"$out = { type => "result", is_error => JSON::PP::false, result => "{\"label\":\"b\"}" };"#,
-        );
+        let cli = FakeCli::new("text-json").prints(&[json!({
+            "type": "result", "is_error": false, "result": r#"{"label":"b"}"#,
+        })]);
 
         let completion = complete(&spec(&cli), None, "", "hello", Some(&json!({})))
             .await
@@ -355,10 +308,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reports_an_error_result() {
-        let cli = fake_cli(
-            "is-error",
-            r#"$out = { type => "result", is_error => JSON::PP::true, result => "rate limited" };"#,
-        );
+        let cli = FakeCli::new("is-error").prints(&[json!({
+            "type": "result", "is_error": true, "result": "rate limited",
+        })]);
 
         let error = complete(&spec(&cli), None, "", "hello", None)
             .await
@@ -370,10 +322,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reports_stderr_of_a_program_that_ends_without_reading_its_prompt() {
-        let cli = fake_cli(
-            "claude-unread",
-            "BEGIN { print STDERR 'not logged in'; exit 1 }",
-        );
+        let cli = FakeCli::new("claude-unread")
+            .without_reading()
+            .fails("not logged in");
         let prompt = "x".repeat(1 << 20);
         let error = complete(&spec(&cli), None, "", &prompt, None)
             .await
@@ -383,7 +334,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn reports_stderr_when_the_output_is_not_json() {
-        let cli = fake_cli("crash", r#"print STDERR "not logged in"; exit 1;"#);
+        let cli = FakeCli::new("crash").fails("not logged in");
 
         let error = complete(&spec(&cli), None, "", "hello", None)
             .await

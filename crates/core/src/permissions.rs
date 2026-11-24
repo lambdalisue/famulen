@@ -17,6 +17,7 @@ use famulen_gateway::permissions::{BUILTINS, Permissions as GatewayPermissions};
 use famulen_gateway::{Call, Gateway, Verdict};
 
 use crate::hub;
+use crate::paths;
 use crate::sealed::Sealed;
 use crate::store::{Store, now};
 
@@ -75,8 +76,9 @@ const JUDGED_ON_ARRIVAL: &[&str] = &[
 ];
 
 /// Built-in tools the auto permission always asks about: a shell command
-/// reaches whatever the shell can, which its input does not show.
-const ASKED_BUILTINS: &[&str] = &["Bash"];
+/// reaches whatever the shell can, which its input does not show. Claude Code
+/// offers `PowerShell` on Windows.
+const ASKED_BUILTINS: &[&str] = &["Bash", "PowerShell"];
 
 /// What a built-in tool says of itself, as the auto permission weighs it.
 pub fn builtin_marks(tool_name: &str) -> Marks {
@@ -378,17 +380,24 @@ fn writes_inside(dir: Option<&Path>, tool_name: &str, input: &Value) -> bool {
     let Some((_, field)) = FILE_WRITERS.iter().find(|(name, _)| *name == tool_name) else {
         return false;
     };
-    let Some(path) = input.get(*field).and_then(Value::as_str).map(Path::new) else {
+    let Some(path) = input.get(*field).and_then(Value::as_str) else {
         return false;
     };
+    // A Windows `\\?\` path can hide its `..` in one component, so the text is
+    // looked at too.
+    let (path, dir) = (paths::plain(path.into()), paths::plain(dir.into()));
     let escapes = path
         .components()
-        .any(|c| matches!(c, Component::ParentDir | Component::CurDir));
+        .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+        || path
+            .to_string_lossy()
+            .split(std::path::is_separator)
+            .any(|name| name == "..");
     path.is_absolute()
         && !escapes
-        && path.starts_with(dir)
-        && real(path)
-            .zip(real(dir))
+        && paths::may_be_within(&path, &dir)
+        && real(&path)
+            .zip(real(&dir))
             .is_some_and(|(path, dir)| path.starts_with(dir))
 }
 
@@ -430,6 +439,15 @@ mod tests {
             Store::open_in_memory().unwrap(),
             test_gateway(famulen_gateway::store::Store::open_in_memory().unwrap()),
         )
+    }
+
+    /// `path` as a whole path of this system, as Claude Code writes it.
+    fn at(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{}", path.replace('/', "\\"))
+        } else {
+            path.to_owned()
+        }
     }
 
     fn held(d: &Decision) -> bool {
@@ -509,11 +527,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_held_or_refused_call_is_in_the_gateways_log() {
-        let p = permissions().with_notebook_dir("/data/notebook");
+        let p = permissions().with_notebook_dir(at("/data/notebook"));
         p.set_scoped("owner", BUILTINS, "Bash", Some(Permission::Forbid))
             .unwrap();
         let held_call = p
-            .decide("Write", &json!({ "file_path": "/data/notebook/a.md" }))
+            .decide("Write", &json!({ "file_path": at("/data/notebook/a.md") }))
             .await
             .unwrap();
         p.decide("Bash", &json!({ "command": "ls" })).await.unwrap();
@@ -571,7 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reading_builtin_runs_and_a_writing_one_runs_when_the_assessor_lets_it() {
-        let p = permissions().with_notebook_dir("/data/notebook");
+        let p = permissions().with_notebook_dir(at("/data/notebook"));
         assert_eq!(
             p.decide("WebSearch", &json!({ "query": "x" }))
                 .await
@@ -581,7 +599,7 @@ mod tests {
         assert!(held(
             &p.decide(
                 "Write",
-                &json!({ "file_path": "/data/notebook/records/a.md" })
+                &json!({ "file_path": at("/data/notebook/records/a.md") })
             )
             .await
             .unwrap()
@@ -590,7 +608,7 @@ mod tests {
         assert_eq!(
             p.decide(
                 "Write",
-                &json!({ "file_path": "/data/notebook/records/b.md" })
+                &json!({ "file_path": at("/data/notebook/records/b.md") })
             )
             .await
             .unwrap(),
@@ -613,19 +631,22 @@ mod tests {
     async fn the_secretarys_own_write_outside_the_notebook_is_asked_about_even_when_the_assessor_would_let_it_run()
      {
         let p = permissions()
-            .with_memory_dir("/data/notebook/memory")
-            .with_notebook_dir("/data/notebook");
+            .with_memory_dir(at("/data/notebook/memory"))
+            .with_notebook_dir(at("/data/notebook"));
         p.gateway().set_assessor(std::sync::Arc::new(LetsRun));
         for (tool, input) in [
-            ("Write", json!({ "file_path": "/srv/code/main.rs" })),
-            ("Edit", json!({ "file_path": "/srv/code/main.rs" })),
-            ("MultiEdit", json!({ "file_path": "/srv/code/main.rs" })),
+            ("Write", json!({ "file_path": at("/srv/code/main.rs") })),
+            ("Edit", json!({ "file_path": at("/srv/code/main.rs") })),
+            ("MultiEdit", json!({ "file_path": at("/srv/code/main.rs") })),
             (
                 "NotebookEdit",
-                json!({ "notebook_path": "/srv/code/a.ipynb" }),
+                json!({ "notebook_path": at("/srv/code/a.ipynb") }),
             ),
-            ("Write", json!({ "file_path": "/data/notebook/../code/x" })),
-            ("Write", json!({ "file_path": "/data/notebook-evil/x" })),
+            (
+                "Write",
+                json!({ "file_path": at("/data/notebook/../code/x") }),
+            ),
+            ("Write", json!({ "file_path": at("/data/notebook-evil/x") })),
             ("Write", json!({ "file_path": "main.rs" })),
             ("Write", json!({})),
         ] {
@@ -635,6 +656,7 @@ mod tests {
             );
         }
         for path in ["/data/notebook/records/a.md", "/data/notebook/memory/a.md"] {
+            let path = at(path);
             assert_eq!(
                 p.decide("Edit", &json!({ "file_path": path }))
                     .await
@@ -679,8 +701,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_subagents_write_outside_the_notebook_is_left_to_the_assessor() {
-        let p = permissions().with_notebook_dir("/data/notebook");
-        let input = json!({ "file_path": "/srv/code/main.rs" });
+        let p = permissions().with_notebook_dir(at("/data/notebook"));
+        let input = json!({ "file_path": at("/srv/code/main.rs") });
         assert!(held(
             &p.decide_for(Caller::Subagent, "Edit", &input)
                 .await
@@ -702,11 +724,11 @@ mod tests {
 
     #[tokio::test]
     async fn the_owner_allowing_a_writing_builtin_covers_files_outside_the_notebook() {
-        let p = permissions().with_notebook_dir("/data/notebook");
+        let p = permissions().with_notebook_dir(at("/data/notebook"));
         p.set_scoped("owner", BUILTINS, "Edit", Some(Permission::Allow))
             .unwrap();
         assert_eq!(
-            p.decide("Edit", &json!({ "file_path": "/srv/code/main.rs" }))
+            p.decide("Edit", &json!({ "file_path": at("/srv/code/main.rs") }))
                 .await
                 .unwrap(),
             Decision::Allow
@@ -741,20 +763,20 @@ mod tests {
 
     #[tokio::test]
     async fn writing_inside_the_memory_directory_needs_no_approval() {
-        let p = permissions().with_memory_dir("/data/memory");
-        let inside = json!({ "file_path": "/data/memory/owner.md", "content": "x" });
+        let p = permissions().with_memory_dir(at("/data/memory"));
+        let inside = json!({ "file_path": at("/data/memory/owner.md"), "content": "x" });
         assert_eq!(p.decide("Write", &inside).await.unwrap(), Decision::Allow);
         assert_eq!(p.decide("Edit", &inside).await.unwrap(), Decision::Allow);
     }
 
     #[tokio::test]
     async fn writing_outside_the_memory_directory_still_asks() {
-        let p = permissions().with_memory_dir("/data/memory");
+        let p = permissions().with_memory_dir(at("/data/memory"));
         for path in [
-            "/data/memory/../famulen.sqlite3",
-            "/data/memory-evil/x.md",
-            "memory/x.md",
-            "/data/workspace/x",
+            at("/data/memory/../famulen.sqlite3"),
+            at("/data/memory-evil/x.md"),
+            "memory/x.md".into(),
+            at("/data/workspace/x"),
         ] {
             assert!(
                 held(
@@ -769,10 +791,10 @@ mod tests {
 
     #[tokio::test]
     async fn the_owner_forbidding_a_tool_also_covers_the_memory_directory() {
-        let p = permissions().with_memory_dir("/data/memory");
+        let p = permissions().with_memory_dir(at("/data/memory"));
         p.set_scoped("owner", BUILTINS, "Write", Some(Permission::Forbid))
             .unwrap();
-        let inside = json!({ "file_path": "/data/memory/owner.md" });
+        let inside = json!({ "file_path": at("/data/memory/owner.md") });
         assert!(matches!(
             p.decide("Write", &inside).await.unwrap(),
             Decision::Forbid(_)
@@ -781,8 +803,11 @@ mod tests {
 
     fn sealed() -> Permissions {
         permissions()
-            .with_memory_dir("/data/memory")
-            .with_sealed(["/data/gateway", "/srv/famulen/.env"], "/data/workspace")
+            .with_memory_dir(at("/data/memory"))
+            .with_sealed(
+                [at("/data/gateway"), at("/srv/famulen/.env")],
+                at("/data/workspace"),
+            )
     }
 
     fn forbidden(decision: &Decision) -> bool {
@@ -808,50 +833,56 @@ mod tests {
         for (tool, input) in [
             (
                 "Read",
-                json!({ "file_path": "/data/gateway/vault/bank.age" }),
+                json!({ "file_path": at("/data/gateway/vault/bank.age") }),
             ),
             (
                 "Read",
-                json!({ "file_path": "/data/gateway/gateway.sqlite3" }),
+                json!({ "file_path": at("/data/gateway/gateway.sqlite3") }),
             ),
             (
                 "Read",
-                json!({ "file_path": "/data/memory/../gateway/vault/x.age" }),
+                json!({ "file_path": at("/data/memory/../gateway/vault/x.age") }),
             ),
-            ("Read", json!({ "file_path": "/srv/famulen/.env" })),
+            ("Read", json!({ "file_path": at("/srv/famulen/.env") })),
             (
                 "Write",
-                json!({ "file_path": "/data/gateway/services/x.toml", "content": "" }),
+                json!({ "file_path": at("/data/gateway/services/x.toml"), "content": "" }),
             ),
-            ("Edit", json!({ "file_path": "/srv/famulen/.env" })),
-            ("MultiEdit", json!({ "file_path": "/data/gateway/x" })),
+            ("Edit", json!({ "file_path": at("/srv/famulen/.env") })),
+            ("MultiEdit", json!({ "file_path": at("/data/gateway/x") })),
             (
                 "NotebookEdit",
-                json!({ "notebook_path": "/data/gateway/x.ipynb" }),
+                json!({ "notebook_path": at("/data/gateway/x.ipynb") }),
             ),
             (
                 "Glob",
-                json!({ "pattern": "**/*.age", "path": "/data/gateway" }),
+                json!({ "pattern": "**/*.age", "path": at("/data/gateway") }),
             ),
-            ("Glob", json!({ "pattern": "/data/gateway/**/*" })),
-            ("Glob", json!({ "pattern": "**/*.age", "path": "/data" })),
+            ("Glob", json!({ "pattern": at("/data/gateway/**/*") })),
+            (
+                "Glob",
+                json!({ "pattern": "**/*.age", "path": at("/data") }),
+            ),
             ("Glob", json!({ "pattern": "../gateway/**" })),
             (
                 "Grep",
-                json!({ "pattern": "token", "path": "/data/gateway/gateway.sqlite3" }),
+                json!({ "pattern": "token", "path": at("/data/gateway/gateway.sqlite3") }),
             ),
-            ("Grep", json!({ "pattern": "token", "path": "/data" })),
+            ("Grep", json!({ "pattern": "token", "path": at("/data") })),
             ("Grep", json!({ "pattern": "token", "path": ".." })),
-            ("LS", json!({ "path": "/data/gateway" })),
+            ("LS", json!({ "path": at("/data/gateway") })),
             (
                 "Bash",
-                json!({ "command": "cat /data/gateway/vault/bank.age" }),
+                json!({ "command": format!("cat {}", at("/data/gateway/vault/bank.age")) }),
             ),
             (
                 "Bash",
                 json!({ "command": "sqlite3 ../gateway/gateway.sqlite3 .dump" }),
             ),
-            ("Bash", json!({ "command": "cat /srv/famulen/.env" })),
+            (
+                "Bash",
+                json!({ "command": format!("cat {}", at("/srv/famulen/.env")) }),
+            ),
             ("Bash", json!({ "command": "printenv FAMULEN_VAULT_KEY" })),
         ] {
             assert!(
@@ -859,6 +890,123 @@ mod tests {
                 "{tool} {input}"
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_sealed_place_is_sealed_in_every_spelling_windows_has_for_it() {
+        let p = sealed();
+        for tool in ["Read", "Glob", "Grep", "LS", "Bash", "PowerShell"] {
+            p.set_scoped("owner", BUILTINS, tool, Some(Permission::Allow))
+                .unwrap();
+        }
+        for path in [
+            "c:/data/gateway/x",
+            r"C:\DATA\Gateway\x",
+            r"\data\gateway\x",
+            "/data/gateway/x",
+            "/c/data/gateway/x",
+            r"C:..\gateway\x",
+            r"\\?\C:\data\gateway\x",
+            r"\\?\c:\data\GATEWAY\x",
+            r"\\.\C:\data\gateway\x",
+            r"\\localhost\c$\data\gateway\x",
+            r"C:\data\gateway.\x",
+            r"D:gateway\x",
+            r"\\?\Volume{4c1b02c1-d990-11dc-99ae-806e6f6e6963}\data\gateway\x",
+            r"\\server\c$\data\gateway\x",
+            r"C:\data\gateway::$INDEX_ALLOCATION\x",
+            r"..\Gateway\x",
+        ] {
+            for (tool, input) in [
+                ("Read", json!({ "file_path": path })),
+                ("LS", json!({ "path": path })),
+                ("Grep", json!({ "pattern": "x", "path": path })),
+                ("Glob", json!({ "pattern": format!("{path}/**") })),
+            ] {
+                assert!(
+                    forbidden(&p.decide(tool, &input).await.unwrap()),
+                    "{tool} {input}"
+                );
+            }
+        }
+        for path in ["c:/", r"C:\Data", "/c/data", r"\\?\C:\data"] {
+            assert!(
+                forbidden(
+                    &p.decide("Grep", &json!({ "pattern": "x", "path": path }))
+                        .await
+                        .unwrap()
+                ),
+                "{path}"
+            );
+        }
+        for command in [
+            "cat /c/data/gateway/x",
+            "cat c:/Data/gateway/x",
+            r"type C:\data\gateway\x",
+            r"type ..\gateway\x",
+            r"type \srv\famulen\.ENV",
+            "echo $famulen_vault_key",
+        ] {
+            for tool in ["Bash", "PowerShell"] {
+                assert!(
+                    forbidden(
+                        &p.decide(tool, &json!({ "command": command }))
+                            .await
+                            .unwrap()
+                    ),
+                    "{tool} {command}"
+                );
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_windows_spelling_does_not_carry_a_write_out_of_the_memory_directory() {
+        let p = permissions().with_memory_dir(r"\\?\C:\data\memory");
+        for path in [r"C:\data\memory\a.md", "C:/data/memory/a.md"] {
+            assert_eq!(
+                p.decide("Write", &json!({ "file_path": path }))
+                    .await
+                    .unwrap(),
+                Decision::Allow,
+                "{path}"
+            );
+        }
+        for path in [
+            r"C:\data\memory\..\x",
+            "C:/data/memory/../x",
+            r"\\?\C:\data\memory\..\x",
+            r"\\?\C:\data\memory\a/../../x",
+            r"C:\data\memory.\a.md",
+            r"D:\data\memory\a.md",
+            r"\data\memory\a.md",
+            "C:a.md",
+        ] {
+            assert!(
+                held(
+                    &p.decide("Write", &json!({ "file_path": path }))
+                        .await
+                        .unwrap()
+                ),
+                "{path}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_write_into_the_memory_directory_may_spell_it_in_another_case() {
+        let dir = std::env::temp_dir().join(format!("famulen-case-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = permissions().with_memory_dir(&dir);
+        let path = dir.join("a.md").display().to_string().to_uppercase();
+
+        let decision = p.decide("Write", &json!({ "file_path": path })).await;
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(decision.unwrap(), Decision::Allow);
     }
 
     #[tokio::test]
@@ -869,17 +1017,20 @@ mod tests {
                 .unwrap();
         }
         for (tool, input) in [
-            ("Read", json!({ "file_path": "/data/memory/owner.md" })),
-            ("Read", json!({ "file_path": "/data/gateway-notes.md" })),
-            ("Bash", json!({ "command": "cat /data/gateway-notes.md" })),
+            ("Read", json!({ "file_path": at("/data/memory/owner.md") })),
+            ("Read", json!({ "file_path": at("/data/gateway-notes.md") })),
+            (
+                "Bash",
+                json!({ "command": format!("cat {}", at("/data/gateway-notes.md")) }),
+            ),
             ("Bash", json!({ "command": "cp .env.sample example" })),
             ("Bash", json!({ "command": "grep envelope notes.md" })),
             (
                 "Glob",
-                json!({ "pattern": "**/*.md", "path": "/data/memory" }),
+                json!({ "pattern": "**/*.md", "path": at("/data/memory") }),
             ),
             ("Grep", json!({ "pattern": "x" })),
-            ("LS", json!({ "path": "/data" })),
+            ("LS", json!({ "path": at("/data") })),
         ] {
             assert_eq!(
                 p.decide(tool, &input).await.unwrap(),
@@ -888,9 +1039,12 @@ mod tests {
             );
         }
         assert_eq!(
-            p.decide("Write", &json!({ "file_path": "/data/memory/owner.md" }))
-                .await
-                .unwrap(),
+            p.decide(
+                "Write",
+                &json!({ "file_path": at("/data/memory/owner.md") })
+            )
+            .await
+            .unwrap(),
             Decision::Allow
         );
     }
@@ -901,7 +1055,7 @@ mod tests {
         let Decision::Forbid(why) = p
             .decide(
                 "Read",
-                &json!({ "file_path": "/data/gateway/vault/bank.age" }),
+                &json!({ "file_path": at("/data/gateway/vault/bank.age") }),
             )
             .await
             .unwrap()
@@ -918,7 +1072,7 @@ mod tests {
 
     #[tokio::test]
     async fn bash_is_not_a_file_writer() {
-        let p = permissions().with_memory_dir("/data/memory");
+        let p = permissions().with_memory_dir(at("/data/memory"));
         assert!(held(
             &p.decide("Bash", &json!({ "command": "echo > /data/memory/x" }))
                 .await

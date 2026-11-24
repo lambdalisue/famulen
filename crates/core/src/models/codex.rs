@@ -144,33 +144,35 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::models::agent_cli::tests::fake_cli;
+    use crate::models::fake_cli::FakeCli;
     use crate::models::{Cli, ModelKind};
 
-    fn spec(executable: &std::path::Path) -> ModelSpec {
+    fn spec(cli: &FakeCli) -> ModelSpec {
         ModelSpec {
             id: "m1".into(),
             name: "codex".into(),
             kind: ModelKind::AgentCli,
-            endpoint: Some(executable.display().to_string()),
+            endpoint: Some(cli.program().into()),
             model: "gpt-6-luna".into(),
             cli: Cli::Codex,
             price: Default::default(),
         }
     }
 
-    /// Answers with its own arguments and input, as Codex streams a turn.
-    const ECHO: &str = r#"
-        print encode_json({ type => "turn.started" }), "\n";
-        print encode_json({ type => "item.completed", item => { type => "agent_message",
-            text => encode_json({ args => \@ARGV, stdin => $stdin }) } }), "\n";
-        $out = { type => "turn.completed", usage => { input_tokens => 112, cached_input_tokens => 100, output_tokens => 7 } };"#;
+    /// Streams a turn whose message is `text`, as Codex does.
+    fn answering(name: &str, text: &str) -> FakeCli {
+        FakeCli::new(name).prints(&[
+            json!({ "type": "turn.started" }),
+            json!({ "type": "item.completed", "item": { "type": "agent_message", "text": text } }),
+            json!({ "type": "turn.completed", "usage": {
+                "input_tokens": 112, "cached_input_tokens": 100, "output_tokens": 7 } }),
+        ])
+    }
 
-    fn configs(echoed: &Value) -> toml::Table {
-        let args = echoed["args"].as_array().unwrap();
+    fn configs(cli: &FakeCli) -> toml::Table {
         let mut text = String::new();
-        for pair in args.windows(2).filter(|pair| pair[0] == "--config") {
-            text += pair[1].as_str().unwrap();
+        for pair in cli.args().windows(2).filter(|pair| pair[0] == "--config") {
+            text += &pair[1];
             text += "\n";
         }
         text.parse().unwrap()
@@ -178,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn runs_one_turn_without_tools_or_the_users_settings() {
-        let cli = fake_cli("codex-flags", ECHO);
+        let cli = answering("codex-flags", "hi");
 
         let completion = complete(
             &spec(&cli),
@@ -191,19 +193,17 @@ mod tests {
         .await
         .unwrap();
 
-        let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-        let args = echoed["args"].as_array().unwrap();
+        assert_eq!(completion.text, "hi");
+        let args = cli.args();
         assert_eq!(args[0], "exec");
         for flag in ["--ephemeral", "--ignore-user-config", "--ignore-rules"] {
-            assert!(args.contains(&json!(flag)), "{flag}");
+            assert!(args.contains(&flag.to_owned()), "{flag}");
         }
-        let sandbox = args.iter().position(|a| a == "--sandbox").unwrap();
-        assert_eq!(args[sandbox + 1], "read-only");
-        let model = args.iter().position(|a| a == "--model").unwrap();
-        assert_eq!(args[model + 1], "gpt-6-luna");
+        assert_eq!(cli.value_after("--sandbox").as_deref(), Some("read-only"));
+        assert_eq!(cli.value_after("--model").as_deref(), Some("gpt-6-luna"));
         assert_eq!(args.last().unwrap(), "-");
-        assert_eq!(echoed["stdin"], "hello");
-        let configs = configs(&echoed);
+        assert_eq!(cli.stdin(), "hello");
+        let configs = configs(&cli);
         for feature in FEATURES_OFF {
             assert_eq!(configs["features"][feature].as_bool(), Some(false));
         }
@@ -217,18 +217,17 @@ mod tests {
 
     #[tokio::test]
     async fn the_roles_effort_wins_and_a_brief_call_without_one_thinks_little() {
-        let cli = fake_cli("codex-effort", ECHO);
+        let cli = answering("codex-effort", "hi");
         for (effort, brief, expected) in [
             (Some("xhigh"), false, Some("xhigh")),
             (Some("high"), true, Some("high")),
             (None, true, Some("low")),
             (None, false, None),
         ] {
-            let completion = complete(&spec(&cli), effort, "", "hello", None, brief)
+            complete(&spec(&cli), effort, "", "hello", None, brief)
                 .await
                 .unwrap();
-            let echoed: Value = serde_json::from_str(&completion.text).unwrap();
-            let configs = configs(&echoed);
+            let configs = configs(&cli);
             assert_eq!(
                 configs
                     .get("model_reasoning_effort")
@@ -240,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn counts_the_tokens_of_the_turn() {
-        let cli = fake_cli("codex-usage", ECHO);
+        let cli = answering("codex-usage", "hi");
 
         let completion = complete(&spec(&cli), None, "", "hello", None, false)
             .await
@@ -258,15 +257,15 @@ mod tests {
 
     #[tokio::test]
     async fn tells_the_schema_and_reads_json_from_the_answer() {
-        let cli = fake_cli("codex-schema", ECHO);
+        let cli = answering("codex-schema", r#"{"label":"a"}"#);
         let schema = json!({ "type": "object", "title": "asked for" });
 
         let completion = complete(&spec(&cli), None, "judge", "hello", Some(&schema), true)
             .await
             .unwrap();
 
-        let echoed = completion.json.unwrap();
-        let instructions = configs(&echoed)["developer_instructions"]
+        assert_eq!(completion.json, Some(json!({ "label": "a" })));
+        let instructions = configs(&cli)["developer_instructions"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -276,10 +275,9 @@ mod tests {
 
     #[tokio::test]
     async fn reports_why_the_turn_failed() {
-        let cli = fake_cli(
-            "codex-failed",
-            r#"$out = { type => "turn.failed", error => { message => "usage limit reached" } };"#,
-        );
+        let cli = FakeCli::new("codex-failed").prints(&[
+            json!({ "type": "turn.failed", "error": { "message": "usage limit reached" } }),
+        ]);
 
         let error = complete(&spec(&cli), None, "", "hello", None, false)
             .await
@@ -291,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn reports_stderr_when_there_is_no_answer() {
-        let cli = fake_cli("codex-crash", r#"print STDERR "not logged in"; exit 1;"#);
+        let cli = FakeCli::new("codex-crash").fails("not logged in");
 
         let error = complete(&spec(&cli), None, "", "hello", None, false)
             .await

@@ -20,6 +20,7 @@ pub mod memory;
 pub mod models;
 pub mod notebook;
 pub mod notebook_place;
+mod paths;
 pub mod permissions;
 pub mod records;
 pub mod runtime;
