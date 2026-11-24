@@ -13,6 +13,9 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # What the console calls it.
+      FAMULEN_API_HOSTS: backend${FAMULEN_API_HOSTS:+,$FAMULEN_API_HOSTS}
     volumes:
       - data:/data
       - claude:/home/node/.claude

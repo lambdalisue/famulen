@@ -17,6 +17,8 @@ export default createMiddleware([
     if (!relayed(url.pathname)) return next();
     const headers = new Headers(event.req.headers);
     headers.delete("host");
+    // Checked here; the backend would take the console's site for another.
+    headers.delete("origin");
     // Node's fetch sends a streamed body only with `duplex: "half"`, which
     // the DOM's RequestInit does not name yet.
     const init: RequestInit & { duplex: "half" } = {

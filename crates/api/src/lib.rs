@@ -11,6 +11,7 @@ mod channels;
 mod connections;
 mod console;
 mod definitions;
+pub mod guard;
 mod logs;
 mod lookout;
 mod memory;

@@ -31,6 +31,9 @@ pub const EFFORT_ENV: &str = "FAMULEN_CLAUDE_EFFORT";
 pub const CONSOLE_URL_ENV: &str = "FAMULEN_CONSOLE_URL";
 /// Where the API listens, over the file's `[api] listen`.
 pub const LISTEN_ENV: &str = "FAMULEN_LISTEN";
+/// The other host names the API answers to, comma separated, over the file's
+/// `[api] hosts`.
+pub const API_HOSTS_ENV: &str = "FAMULEN_API_HOSTS";
 
 /// Where the gateway's HTTP receivers listen.
 pub const RECEIVE_LISTEN_ENV: &str = "FAMULEN_RECEIVE_LISTEN";
@@ -115,12 +118,15 @@ pub struct ApiConfig {
     /// Where the API listens. Only the console and the owner's own tools
     /// should reach it: it has no login of its own.
     pub listen: SocketAddr,
+    /// The host names it answers to besides this machine's own.
+    pub hosts: Vec<String>,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 7790)),
+            hosts: Vec::new(),
         }
     }
 }
@@ -205,6 +211,10 @@ impl Config {
                 .trim()
                 .parse()
                 .map_err(|e| anyhow::anyhow!("{LISTEN_ENV} must be an address and port: {e}"))?;
+        }
+        if let Some(hosts) = env(API_HOSTS_ENV) {
+            let names = hosts.split(',').map(str::trim);
+            api.hosts = names.filter(|h| !h.is_empty()).map(Into::into).collect();
         }
         Ok(Self {
             data_dir,
@@ -335,6 +345,15 @@ mod tests {
         .unwrap();
         assert_eq!(config.api.listen.to_string(), "0.0.0.0:7790");
         assert!(load(None, &[(LISTEN_ENV, "nowhere")]).is_err());
+    }
+
+    #[test]
+    fn the_environment_names_the_hosts_the_api_answers_to() {
+        let file = "[api]\nhosts = [\"a\"]\n";
+        assert_eq!(load(Some(file), &[]).unwrap().api.hosts, ["a"]);
+        let env = [(API_HOSTS_ENV, "backend, b.example,")];
+        let hosts = load(Some(file), &env).unwrap().api.hosts;
+        assert_eq!(hosts, ["backend", "b.example"]);
     }
 
     fn parse(text: &str) -> anyhow::Result<Config> {
