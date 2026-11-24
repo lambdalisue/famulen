@@ -3,7 +3,7 @@
 use chrono::{NaiveDate, Utc};
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::dream_settings::{self as ds, DreamSettings as Plan, Frequency};
-use famulen_core::memory::{self as m, Entry, EpisodeState, Layer as CoreLayer, Src};
+use famulen_core::memory::{self as m, Entry, EpisodeState, Src};
 use famulen_core::notebook;
 use famulen_core::workgroups::ALL;
 
@@ -59,6 +59,7 @@ pub(crate) fn dream(n: famulen_core::dreaming::Night) -> Dream {
         pending_added: c.pending_added as i32,
         task_made: c.task_made as i32,
         doubted: c.doubted as i32,
+        discarded: c.discarded as i32,
         changes: n
             .summary
             .changes
@@ -155,44 +156,6 @@ impl Api {
             count: self.layer_count(id)?,
             ..Default::default()
         })
-    }
-
-    /// Write an explicit rule or correction the owner gave straight into a
-    /// kept file, instead of waiting for the dream.
-    fn keep_now(
-        &self,
-        file: &str,
-        text: &str,
-        workgroup: &str,
-        today: NaiveDate,
-    ) -> anyhow::Result<()> {
-        let rel = std::path::PathBuf::from(file);
-        anyhow::ensure!(
-            CoreLayer::of(&rel).is_some_and(CoreLayer::is_kept),
-            "keep_in must be core.md, pending.md or long/<semantic|procedural|prospective>/<name>.md"
-        );
-        let edit = famulen_core::dreaming::Edit {
-            op: "add".into(),
-            id: None,
-            file: Some(file.into()),
-            text: Some(text.into()),
-            attrs: [
-                ("src".to_owned(), "said".to_owned()),
-                ("from".to_owned(), today.to_string()),
-            ]
-            .into_iter()
-            .chain((workgroup != ALL).then(|| ("workgroup".to_owned(), workgroup.to_owned())))
-            .collect(),
-            reason: None,
-            record: None,
-        };
-        let skipped = famulen_core::dreaming::apply(&self.app.memory_dir, &[edit], today)?;
-        anyhow::ensure!(
-            skipped.is_empty(),
-            "could not keep it: {}",
-            skipped.join("; ")
-        );
-        Ok(())
     }
 }
 
@@ -395,18 +358,8 @@ impl MemoryService for Api {
         let names = self.app.records.names();
         let text = names.canonical_text(text, "").or_fail()?;
         let text = text.as_str();
-        let kept = !r.keep_in.is_empty() && r.said;
-        if kept {
-            self.keep_now(&r.keep_in, text, &workgroup, at.date())
-                .or_fail()?;
-        }
-        let state = if kept {
-            EpisodeState::Applied
-        } else {
-            EpisodeState::Waiting
-        };
         let src = if r.said { Src::Said } else { Src::Inferred };
-        let entry = m::append_episode_from(dir, at, text, state, src).or_fail()?;
+        let entry = m::append_episode_from(dir, at, text, EpisodeState::Waiting, src).or_fail()?;
         let id = entry.id().unwrap_or_default().to_owned();
         if workgroup != ALL {
             m::tag_episode(dir, at.date(), &id, "workgroup", &workgroup).or_fail()?;

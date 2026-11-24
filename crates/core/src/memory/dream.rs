@@ -77,6 +77,8 @@ pub enum Op {
     TaskMade,
     /// A record marked as one that may no longer be true.
     Doubted,
+    /// An episodic note not kept. It stays where it was written.
+    Discarded,
 }
 
 /// One change, with the text a person reads in the console.
@@ -241,6 +243,7 @@ pub struct Counts {
     pub deleted: usize,
     pub task_made: usize,
     pub doubted: usize,
+    pub discarded: usize,
 }
 
 impl Counts {
@@ -256,6 +259,7 @@ impl Counts {
             Op::Deleted => &mut self.deleted,
             Op::TaskMade => &mut self.task_made,
             Op::Doubted => &mut self.doubted,
+            Op::Discarded => &mut self.discarded,
         }
     }
 }

@@ -239,5 +239,7 @@ fn every_tool_the_secretary_is_told_of_exists() {
         .filter(|name| !tools.iter().any(|t| t.name == *name))
         .collect();
     assert!(missing.is_empty(), "{missing:?}");
+    assert!(prompt.contains("freely, roughly and often"));
+    assert!(prompt.contains("Never write core, pending or long-term memory yourself"));
     assert!(prompt.contains("`remember`") && tools.iter().any(|t| t.name == "remember"));
 }
