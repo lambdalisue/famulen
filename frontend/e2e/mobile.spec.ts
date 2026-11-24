@@ -211,3 +211,16 @@ test("the console is an app over all its pages once put on the home screen", asy
     }
   }
 });
+
+test("a long call that came while the chat was folded is read to its end once it opens", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await call(request, "ConsoleService", "Send", { text: "e2e-long-bash", workgroup: "all" });
+  await expect(page.locator(".m-peek")).toContainText("確認 1");
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const card = page.getByTestId("approval");
+  await card.getByRole("button", { name: "すべて読む" }).click();
+  await expect(card.locator(".asked-text")).toContainText("rm e2e-last");
+  await expect(card.getByRole("button", { name: "畳む" })).toBeVisible();
+  await card.getByRole("button", { name: "却下" }).click();
+  await expect(card).toHaveCount(0);
+});

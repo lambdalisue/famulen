@@ -1,5 +1,5 @@
 import { createAsync } from "@solidjs/router";
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import AideIcon from "~/components/AideIcon";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Markdown from "~/components/Markdown";
@@ -49,7 +49,16 @@ function LongText(props: { text: string; code: boolean }) {
   const [open, setOpen] = createSignal(false);
   const [cut, setCut] = createSignal(false);
   let el: HTMLDivElement | undefined;
-  onMount(() => setCut(!!el && el.scrollHeight > el.clientHeight + 4));
+  // It can be put in while the conversation is folded away, where nothing has a height.
+  onMount(() => {
+    if (!el) return;
+    const text = el;
+    const sized = new ResizeObserver(() => {
+      if (!open() && text.clientHeight > 0) setCut(text.scrollHeight > text.clientHeight + 4);
+    });
+    sized.observe(text);
+    onCleanup(() => sized.disconnect());
+  });
   return (
     <>
       <div class="asked-text" classList={{ mono: props.code, open: open() }} ref={el}>

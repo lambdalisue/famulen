@@ -84,6 +84,9 @@ test("a thing says how it was got and several deadlines, and one let go is left 
   await detail(page).getByLabel("期限を足す").fill("保証");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await detail(page).getByLabel("期限を足す").fill("点検");
+  // What is typed while the one before is saved stays.
+  await expect(detail(page).locator(".rec-item")).toHaveText([/保証/]);
+  await expect(detail(page).getByLabel("期限を足す")).toHaveValue("点検");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await expect(detail(page).locator(".rec-item")).toHaveText([/保証/, /点検/]);
 

@@ -1,5 +1,5 @@
 import { createAsync, query } from "@solidjs/router";
-import { createEffect, createSignal, For, Index, type JSX, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, type JSX, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { useAsked } from "~/components/ApprovalCard";
 import { ProgressLine } from "~/components/records/RunProgress";
 import TaskRow from "~/components/records/TaskRow";
@@ -321,20 +321,27 @@ export default function Home() {
 
   createEffect(() => setView("ホーム", dateLabel(day())));
 
+  // The arrange controls show only while arranging, and the choice survives a reload.
+  const [arranging, setArranging] = createSignal(false);
   const [kind, setKind] = createSignal("");
   // What is changed is shown before it is saved. A change made while another
   // is being saved is saved after it, the last one of them.
   const [draft, setDraft] = createSignal<Placed[]>();
   const [saving, setSaving] = createSignal(false);
   let waiting: Placed[] | undefined;
-  const shown = () => draft() ?? settled(tiles().map(plain));
+  // While they are arranged the tiles keep their order in the list, so that the
+  // one held or focused stays the same element wherever it is put.
+  const shown = createMemo(() => {
+    const there = draft() ?? settled(tiles().map(plain));
+    return arranging() ? there : inOrder(there);
+  });
   const setTiles = async (next: Placed[]) => {
     setDraft(next);
     waiting = next;
     if (saving()) return;
     setSaving(true);
     while (waiting) {
-      const tiles = inOrder<Placed>(waiting);
+      const tiles: Placed[] = waiting;
       waiting = undefined;
       const saved = await act(() => api.settings.setTiles({ tiles }), "");
       if (!saved && !waiting && !held) setDraft(undefined);
@@ -347,18 +354,24 @@ export default function Home() {
     on([home, saving], ([read, busy]) => {
       const next = draft();
       if (!next || busy || held) return;
-      const same = JSON.stringify(inOrder(next)) === JSON.stringify((read?.tiles ?? []).map(plain));
+      const same = JSON.stringify(next) === JSON.stringify((read?.tiles ?? []).map(plain));
       if (same) setDraft(undefined);
     }),
   );
   const placed = (i: number, place: Place) => settled(shown().map((t, n) => (n === i ? { ...t, ...place } : t)), i);
   const remove = (i: number) => setTiles(shown().filter((_, n) => n !== i));
-  /** In one column, a tile and the one beside it change places. */
-  const swap = (i: number, with_: number) => {
+  /** Where each tile comes in the order they are read. */
+  const ranks = () => {
+    const order = inOrder(shown());
+    return shown().map((t) => order.indexOf(t));
+  };
+  /** In one column, a tile and the one before or after it change places. */
+  const swap = (i: number, by: -1 | 1) => {
     const all = shown();
-    const [a, b] = [all[i], all[with_]];
+    const other = ranks().indexOf(ranks()[i] + by);
+    const [a, b] = [all[i], all[other]];
     if (!a || !b) return;
-    void setTiles(all.map((t, n) => (n === i ? { ...b, kind: a.kind } : n === with_ ? { ...a, kind: b.kind } : t)));
+    void setTiles(all.map((t, n) => (n === i ? { ...b, kind: a.kind } : n === other ? { ...a, kind: b.kind } : t)));
   };
   const addTile = () => {
     const k = kind() || kinds()[0]?.kind;
@@ -422,8 +435,6 @@ export default function Home() {
     void setTiles(placed(i, at));
   };
 
-  // The arrange controls show only while arranging, and the choice survives a reload.
-  const [arranging, setArranging] = createSignal(false);
   onMount(() => setArranging(kept(ARRANGING) === "1"));
   const toggleArranging = () => {
     setArranging(!arranging());
@@ -483,7 +494,7 @@ export default function Home() {
             <section
               class="tile"
               classList={{ held: dragged() === i }}
-              style={{ "grid-column": `${t().x + 1} / span ${t().width}`, "grid-row": `${t().y + 1} / span ${t().height}` }}
+              style={{ "grid-column": `${t().x + 1} / span ${t().width}`, "grid-row": `${t().y + 1} / span ${t().height}`, "--rank": ranks()[i] }}
             >
               <header onPointerDown={hold(i, "move")}>
                 <Show when={arranging()} fallback={<Icon svg={ICONS[t().kind] ?? icons.layoutGrid} size={16} />}>
@@ -510,8 +521,8 @@ export default function Home() {
                   }
                 >
                   <span class="tile-order">
-                    <IconButton plain icon={icons.arrowUp} label={`${label(t().kind)}を前へ`} disabled={i === 0} onClick={() => swap(i, i - 1)} />
-                    <IconButton plain icon={icons.arrowDown} label={`${label(t().kind)}を後ろへ`} disabled={i === shown().length - 1} onClick={() => swap(i, i + 1)} />
+                    <IconButton plain icon={icons.arrowUp} label={`${label(t().kind)}を前へ`} disabled={ranks()[i] === 0} onClick={() => swap(i, -1)} />
+                    <IconButton plain icon={icons.arrowDown} label={`${label(t().kind)}を後ろへ`} disabled={ranks()[i] === shown().length - 1} onClick={() => swap(i, 1)} />
                   </span>
                   <IconButton plain icon={icons.x} label={`${label(t().kind)}を外す`} onClick={() => void remove(i)} />
                 </Show>

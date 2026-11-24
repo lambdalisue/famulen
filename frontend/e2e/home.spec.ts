@@ -71,9 +71,16 @@ test("a tile dragged by its head stays where it is let go, and what it lies over
   if (!moved) throw new Error("no tile");
   await drag(page, { x: moved.x + 10, y: moved.y + 10 }, { x: -8 * column, y: 6 * 56 });
   await expect.poll(() => savedTiles(request)).toEqual([
-    { kind: "approvals", x: 8, y: 4, width: 4, height: 4 },
     { kind: "today", y: 6, width: 4, height: 4 },
+    { kind: "approvals", x: 8, y: 4, width: 4, height: 4 },
   ]);
+
+  // The one that was moved, though it is read after the other now, is the same element.
+  const grip = tile(page, "今日").getByRole("button", { name: "今日を動かす" });
+  await grip.press("ArrowRight");
+  await expect(grip).toBeFocused();
+  await grip.press("ArrowLeft");
+  await expect.poll(() => savedTiles(request)).toContainEqual({ kind: "today", y: 6, width: 4, height: 4 });
 
   // Dragged to where there is room for it on screen.
   await page.locator("#pane").evaluate((el) => el.scrollTo(0, el.scrollHeight));

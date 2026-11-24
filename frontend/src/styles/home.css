@@ -19,7 +19,7 @@
 .tile-body > [role=list] > .item { padding: 6px 4px; min-height: 48px; }
 @container main (max-width: 719px) {
   .tiles { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; min-height: 0; background: none !important; }
-  .tiles > .tile { grid-column: auto !important; grid-row: auto !important; }
+  .tiles > .tile { grid-column: auto !important; grid-row: auto !important; order: var(--rank); }
   .tile-body { max-height: 440px; }
   .tile-order { display: inline-flex; }
   .tile-grip, .tile-corner { display: none; }
