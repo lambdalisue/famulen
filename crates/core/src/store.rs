@@ -587,6 +587,47 @@ mod tests {
     }
 
     #[test]
+    fn a_slack_input_kept_before_unmentioned_was_marked_reads_as_mentioned() {
+        let store = Store::open_in_memory().unwrap();
+        let id = store.enqueue(&input("1")).unwrap().unwrap();
+        store
+            .conn()
+            .execute(
+                "UPDATE inputs SET body = json_remove(body, '$.source.unmentioned')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(store.get(id).unwrap().unwrap().input, input("1"));
+        assert_eq!(store.recent_inputs(0, 10).unwrap()[0].0.input, input("1"));
+    }
+
+    #[test]
+    fn an_arrival_kept_before_it_said_what_it_is_about_reads_as_about_nothing() {
+        let store = Store::open_in_memory().unwrap();
+        let arrival = Input {
+            sender: Sender::Other,
+            source: Source::Arrival {
+                connection: "adroit".into(),
+                receiver: "asks".into(),
+                id: "1".into(),
+                about: String::new(),
+            },
+            text: "asks".into(),
+        };
+        store.enqueue(&arrival).unwrap();
+        store
+            .conn()
+            .execute(
+                "UPDATE inputs SET body = json_remove(body, '$.source.about')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(store.recent_inputs(0, 10).unwrap()[0].0.input, arrival);
+    }
+
+    #[test]
     fn only_one_turn_runs_and_it_carries_its_workgroup() {
         let store = Store::open_in_memory().unwrap();
         let a = store.enqueue(&input("a")).unwrap().unwrap();
