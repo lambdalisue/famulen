@@ -428,7 +428,7 @@ Google のカレンダーなら、メタデータの `google` に `<つなぎ先
 
 | 節 | 中身 |
 | --- | --- |
-| `Acquired` | 手に入れたこと。`On`（日）・`How`（`bought`・`gift`・`loan`・`made`・`other`）・`From`（買った所や、くれた人）・`Price`・`Reason` |
+| `Acquired` | 手に入れたこと。`On`（日）・`How`（`bought`・`gift`・`loan`・`made`・`other`）・`From`（買った所や、くれた人）・`Price`・`Reason`・`Order`（注文番号）・`Ordered as`（注文したときの品名） |
 | `Released` | 手放したこと。`On`・`How`（`sold`・`given`・`returned`・`discarded`・`lost`・`other`）・`To`・`Price`・`Reason` |
 | `Deadlines` | 期限の並び。項目の文は何の期限か、欄は `On`・`Reminded`（知らせたか） |
 

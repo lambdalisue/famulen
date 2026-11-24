@@ -96,12 +96,24 @@ pub fn mail_item(message: &Value) -> Item {
         } else {
             subject
         },
+        // Two mails of a shop may read the same; its id also names the one to
+        // open.
         body: format!(
-            "from: {}\n{}",
+            "{ID}{}\nfrom: {}\n{}",
+            message["id"].as_str().unwrap_or_default(),
             header("From"),
             message["snippet"].as_str().unwrap_or_default()
         ),
     }
+}
+
+/// What the line naming a mail in its item starts with.
+const ID: &str = "id: ";
+
+/// The id of the message an item is, when it is mail.
+pub fn message_of(item: &Item) -> Option<&str> {
+    let id = item.body.lines().next()?.strip_prefix(ID)?;
+    (!id.is_empty()).then_some(id)
 }
 
 /// The labels Gmail puts on inbox mail by itself that tell mail apart.
@@ -117,7 +129,12 @@ const SYSTEM_LABELS: &[(&str, &str)] = &[
 
 impl App {
     /// Call one of a connection's tools and read the answer as JSON.
-    async fn tool_json(&self, connection: &str, tool: &str, args: Value) -> anyhow::Result<Value> {
+    pub(crate) async fn tool_json(
+        &self,
+        connection: &str,
+        tool: &str,
+        args: Value,
+    ) -> anyhow::Result<Value> {
         let c = self
             .connections
             .get(connection)?
@@ -398,7 +415,7 @@ impl App {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -423,7 +440,7 @@ mod tests {
 
     /// Famulen whose Google definition reaches a local stand-in for Google,
     /// answering each path with the JSON given.
-    async fn with_google(
+    pub(crate) async fn with_google(
         dir: &std::path::Path,
         answers: Vec<(&'static str, Value)>,
     ) -> (App, String) {
@@ -653,6 +670,7 @@ mod tests {
     #[test]
     fn a_message_becomes_an_item_with_its_subject_sender_and_snippet() {
         let message = json!({
+            "id": "m1",
             "snippet": "明日の打ち合わせは",
             "payload": { "headers": [
                 { "name": "From", "value": "Sato <sato@example.com>" },
@@ -663,7 +681,8 @@ mod tests {
         assert_eq!(item.title, "打ち合わせ");
         assert_eq!(
             item.body,
-            "from: Sato <sato@example.com>\n明日の打ち合わせは"
+            "id: m1\nfrom: Sato <sato@example.com>\n明日の打ち合わせは"
         );
+        assert_eq!(message_of(&item), Some("m1"));
     }
 }

@@ -57,6 +57,14 @@ query = { format = "metadata" }
 input = { type = "object", properties = { id = { type = "string", title = "メールの ID", description = "読むメールの ID" } }, required = ["id"] }
 
 [[tools]]
+name = "read_message"
+description = "Read one whole message, with its text."
+method = "GET"
+path = "/gmail/v1/users/me/messages/{args.id}"
+query = { format = "full" }
+input = { type = "object", properties = { id = { type = "string", title = "メールの ID", description = "読むメールの ID" } }, required = ["id"] }
+
+[[tools]]
 name = "list_labels"
 description = "List the mailbox's labels."
 method = "GET"
@@ -171,6 +179,7 @@ verify = { token = { value = "{header.X-Goog-Channel-Token}", equals = "{account
 watch_mailbox = "allow"
 list_history = "allow"
 get_message = "allow"
+read_message = "allow"
 search_messages = "allow"
 list_calendars = "allow"
 list_events = "allow"

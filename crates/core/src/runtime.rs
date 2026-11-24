@@ -70,6 +70,7 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     let tools = surface.tools(&app);
     app.permissions.record_own_tools(&tools.list())?;
     tokio::spawn(chores::chores(app.clone()));
+    tokio::spawn(chores::read_purchases(app.clone()));
     tokio::spawn(chores::keep_finding_models(app.clone()));
     tokio::spawn(crate::workers::run(app.clone()));
     tokio::spawn(chores::rebuild_when_redefined(app.clone()));

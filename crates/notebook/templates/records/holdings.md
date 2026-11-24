@@ -8,7 +8,7 @@ fields:
   Serial: text
   Place: text
 sections:
-  Acquired: {On: date, How: [bought, gift, loan, made, other], From: text, Price: money, Reason: text}
+  Acquired: {On: date, How: [bought, gift, loan, made, other], From: text, Price: money, Reason: text, Order: text, Ordered as: text}
   Released: {On: date, How: [sold, given, returned, discarded, lost, other], To: text, Price: money, Reason: text}
   Deadlines: [{What: text, On: date, Reminded: flag}]
 ---

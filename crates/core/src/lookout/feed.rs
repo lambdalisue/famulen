@@ -103,6 +103,16 @@ pub fn page_text(html: &str) -> Option<String> {
     Some(cut(&plain(article), TEXT_CHARS)).filter(|text| !text.is_empty())
 }
 
+/// All that a mail in HTML shows. Unlike a page, its header and table rows
+/// are what it says.
+pub fn shown_text(html: &str, chars: usize) -> Option<String> {
+    let mut html = html.to_owned();
+    for name in ["script", "style", "head", "template", "svg"] {
+        html = without(&html, name);
+    }
+    Some(cut(&plain(&html), chars)).filter(|text| !text.is_empty())
+}
+
 /// `html` without any element called `name`.
 fn without(html: &str, name: &str) -> String {
     let mut out = String::new();
