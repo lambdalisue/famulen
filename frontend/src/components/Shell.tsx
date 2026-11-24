@@ -1,10 +1,14 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Title } from "@solidjs/meta";
-import { createAsync, revalidate, useLocation } from "@solidjs/router";
+import { createAsync, revalidate, useLocation, useNavigate } from "@solidjs/router";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
-import { useWaiting } from "~/lib/inbox";
+import { approvalId, useWaiting } from "~/lib/inbox";
+import { look, say } from "~/lib/act";
+import { api } from "~/lib/api";
+import { followNotices, lapsed } from "~/lib/notices";
+import { useParam, withParams } from "~/lib/params";
 import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
@@ -44,6 +48,8 @@ function Alive() {
 /** The console around one page: the bars, the workgroups and the chat. */
 export default function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const confirm = useParam("confirm");
   const workgroups = createAsync(() => workgroupsQuery());
   const owner = useOwner();
   followPortrait();
@@ -57,9 +63,42 @@ export default function Shell(props: { children?: JSX.Element }) {
   const more = () => !BOTTOM.includes(tab().key);
   const mobileTitle = () => pageTitle() || tab().label;
 
+  /** Bring a request a notice told of before the owner. */
+  const showRequest = async (id: string) => {
+    const inbox = await look(() => api.console.getInbox({}));
+    if (!inbox) return;
+    await revalidate("inbox");
+    if (!inbox.approvals.some((a) => a.status === "pending" && a.id.toString() === id)) {
+      return say(`確認 #${id} は、答えを待つものの中にない`);
+    }
+    workgroupSheet?.close();
+    if (isNarrow()) setChatOpen(true);
+    requestAnimationFrame(() => {
+      const card = document.getElementById(approvalId(id));
+      card?.scrollIntoView({ block: "nearest" });
+      card?.focus({ preventScroll: true });
+      // Something open over the conversation keeps it from being reached.
+      if (document.activeElement !== card) say(`確認 #${id} が会話で答えを待っている`);
+    });
+  };
+  // The address is put back, so that a reload does not bring it up again.
+  onMount(() =>
+    createEffect(() => {
+      const id = confirm();
+      if (!id) return;
+      navigate(withParams(`${location.pathname}${location.search}`, { confirm: "" }), { replace: true });
+      void showRequest(id);
+    }),
+  );
+
   onMount(() => {
     followEvents(workgroup);
     followKeyboard();
+    onCleanup(followNotices((id) => void showRequest(id)));
+    void lapsed().then(
+      (over) => over && say("この端末に通知が届かなくなった。設定の「通知」で受け取り直す", true),
+      () => {},
+    );
     // The narrow layout's rules read these from <body>: while typing, the
     // bottom bar gives way to the keyboard.
     const focusIn = (e: FocusEvent) => {

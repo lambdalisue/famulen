@@ -462,6 +462,16 @@ CREATE TABLE IF NOT EXISTS approval_places (
     channel   TEXT NOT NULL,
     thread    TEXT NOT NULL
 );
+-- The browsers notices are sent to.
+CREATE TABLE IF NOT EXISTS notice_devices (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh   TEXT NOT NULL,
+    auth     TEXT NOT NULL,
+    name     TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    failed   TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS wakeups (
     id    INTEGER PRIMARY KEY,
     at    INTEGER NOT NULL,

@@ -9,6 +9,7 @@ export const writableQuery = query(async () => (await api.settings.getWritablePl
 export const notebookPlaceQuery = query(() => api.settings.getNotebookPlace({}), "notebookPlace");
 export const notebookSharingQuery = query(() => api.settings.getNotebookSharing({}), "notebookSharing");
 export const slackNamesQuery = query(async () => (await api.channels.listSlackNames({})).names, "slackNames");
+export const noticesQuery = query((endpoint: string) => api.notices.getNotices({ endpoint }), "notices");
 export const messagesQuery = query(
   async (workgroup: string) => (await api.console.listMessages({ workgroup, limit: 120 })).messages,
   "messages",

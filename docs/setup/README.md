@@ -36,6 +36,10 @@ docker compose up -d --build
 
 コンソールは `http://127.0.0.1:3000/` で開く。ほかの端末から開くときは、Tailscale Serve などで https に包み、その URL を `FAMULEN_CONSOLE_URL` に入れる。そのほかのホスト名でも開くなら、`FAMULEN_CONSOLE_HOSTS` にカンマ区切りで書く。書いていないホスト名で届いた要求は、コンソールが断る。API も同じで、コンソールの `FAMULEN_API_URL` に localhost と待ち受け先の番地のほかの名前を使うなら、その名前を本体の `FAMULEN_API_HOSTS` に書く（`compose.yaml` では書いてある）。
 
+## 通知を受け取る
+
+コンソールを https で開けるようにしておくと、確認が出たことを端末の通知で受け取れる。受け取る端末ごとにコンソールを開き、設定の「通知」の頁で「この端末で受け取る」を押す。iPhone と iPad では、先に Safari の共有メニューの「ホーム画面に追加」で Famulen を足し、そのアプリの中で押す。通知には、ブラウザの配送サーバー（Apple なら `*.push.apple.com`）に Famulen のマシンから届く必要がある。
+
 ## ほかのマシンの AI と手帳を共有する
 
 コンソールの設定の「秘書」の頁で「手帳の共有」を有効にすると、コンソールを開ける端末から、手帳を Git で読み書きできる（[手帳の共有](../spec/notebook.md#手帳の共有)）。コンソールを Tailscale Serve で https に包んでいれば、新しい待ち受けは要らない。

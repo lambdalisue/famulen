@@ -27,6 +27,7 @@ export const NAV: [string, [string, string, string][]][] = [
   [
     "つながり",
     [
+      ["/settings/notices", "通知", icons.bell],
       ["/settings/channels", "チャネル", icons.devices],
       ["/settings/services", "サービス", icons.plugConnected],
       ["/settings/vault", "金庫", icons.vault],

@@ -8,3 +8,6 @@ export function useWaiting() {
   const held = () => inbox()?.held ?? [];
   return { approvals, held, count: () => approvals().length + held().length };
 }
+
+/** The element of a request in the conversation. */
+export const approvalId = (id: bigint | string) => `approval-${id}`;

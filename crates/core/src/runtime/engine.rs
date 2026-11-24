@@ -65,6 +65,7 @@ pub(super) fn start_engine(
     services.turn_ended = Some(app.inputs.clone());
     services.in_flight = links.in_flight.clone();
     services.gateway = Some(app.gateway.clone());
+    services.approvals = services.approvals.with_notices(app.notices.clone());
     let services = Arc::new(services);
     install_answerer(app, &services);
     let scheduler = Scheduler::new(store.clone(), app.records.clone(), tz);

@@ -8,6 +8,7 @@ import { type Approval, ApprovalAnswer } from "~/gen/famulen/v1/console_pb";
 import { askedOf, type Given, givenOf } from "~/lib/approvals";
 import { chatMarkdown } from "~/lib/chat";
 import { connectionsQuery } from "~/lib/connections";
+import { approvalId } from "~/lib/inbox";
 import { Button, Disclosure } from "~/components/ui";
 
 /** How the gateway names a held change to a service definition. */
@@ -109,7 +110,7 @@ export default function ApprovalCard(props: { approval: Approval; onAnswer: (ans
   const change = () => (r().tool === CHANGE_DEFINITION ? proposal(r().input) : undefined);
   const asks = () => r().questions.length > 0;
   return (
-    <div class="approval" data-testid="approval" data-kind={change() ? "definition" : undefined}>
+    <div id={approvalId(r().id)} tabindex="-1" class="approval" data-testid="approval" data-kind={change() ? "definition" : undefined}>
       <div class="asked-head">
         <AideIcon size={28} />
         <div class="grow">

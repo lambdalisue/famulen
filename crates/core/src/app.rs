@@ -43,6 +43,7 @@ pub struct App {
     pub workers: crate::workers::Workers,
     pub lookout: crate::lookout::Lookout,
     pub triage: crate::triage::Triage,
+    pub notices: crate::notices::Notices,
     pub journal: Journal,
     pub settings: Settings,
     pub memory_dir: PathBuf,

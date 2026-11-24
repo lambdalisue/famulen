@@ -6,6 +6,7 @@ export { default as arrowBackUp } from "@tabler/icons/outline/arrow-back-up.svg?
 export { default as arrowDown } from "@tabler/icons/outline/arrow-down.svg?raw";
 export { default as arrowUp } from "@tabler/icons/outline/arrow-up.svg?raw";
 export { default as arrowsSplit } from "@tabler/icons/outline/arrows-split.svg?raw";
+export { default as bell } from "@tabler/icons/outline/bell.svg?raw";
 export { default as brain } from "@tabler/icons/outline/brain.svg?raw";
 export { default as brandAsana } from "@tabler/icons/outline/brand-asana.svg?raw";
 export { default as brandBluesky } from "@tabler/icons/outline/brand-bluesky.svg?raw";
