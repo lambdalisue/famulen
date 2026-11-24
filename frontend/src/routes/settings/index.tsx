@@ -12,6 +12,7 @@ import { homeQuery, notebookPlaceQuery, slackNamesQuery, writableQuery } from "~
 import { coveringPlace, isUnder, wholePath } from "~/lib/places";
 import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
+import { iconFile, PORTRAITS, type Portrait } from "~/lib/portrait";
 import { setView } from "~/lib/view";
 import { Button, Callout, EmptyState, Icon, LinkButton, PageHeader, RadioCards, Section, Tag, TextArea, TextField } from "~/components/ui";
 
@@ -93,6 +94,31 @@ function NameSection(props: { name: string }) {
           </ul>
         </Show>
       </div>
+    </Section>
+  );
+}
+
+function PortraitSection(props: { portrait: Portrait }) {
+  const [chosen, setChosen] = createSignal<string>(props.portrait);
+  createEffect(() => setChosen(props.portrait));
+  return (
+    <Section
+      title="秘書の性別"
+      note="コンソールのアイコンと、Slack で秘書の発言に付くアイコンが替わる。ホーム画面に足したアイコンは端末が覚えているので、足し直すまで替わらないことがある。"
+    >
+      <RadioCards
+        label="秘書の性別"
+        items={PORTRAITS.map((p) => ({ id: p.id, label: p.label, note: p.note, picture: iconFile(p.id, "avatar.svg") }))}
+        value={chosen()}
+        onChoose={(id) => {
+          const gender = PORTRAITS.find((p) => p.id === id)?.gender;
+          if (gender === undefined) return;
+          setChosen(id);
+          void save({ gender }).then((saved) => {
+            if (!saved) setChosen(props.portrait);
+          });
+        }}
+      />
     </Section>
   );
 }
@@ -410,7 +436,7 @@ export default function Secretary() {
     <>
       <PageHeader
         title="秘書"
-        note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と口調、書ける場所、手帳の場所を決める。"
+        note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と性別と口調、書ける場所、手帳の場所を決める。"
       />
       <div class="prefs">
         <RoleModel role={Role.SECRETARY} cap="上限は目安で、超えても会話は止めない。値段のあるモデルは円で、ないモデルは回数で数える。" />
@@ -418,6 +444,7 @@ export default function Secretary() {
           {(p) => (
             <>
               <NameSection name={p().name} />
+              <PortraitSection portrait={owner.portrait()} />
               <ToneSection tone={p().tone} own={p().ownTone} />
             </>
           )}

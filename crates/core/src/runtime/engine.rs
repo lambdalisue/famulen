@@ -24,6 +24,7 @@ use crate::dream_settings::DreamSettings;
 use crate::gateway::Arrival;
 use crate::hub::OwnTools;
 use crate::models::{ModelKind, ModelSpec, Role};
+use crate::persona::Gender;
 use crate::schedule::Scheduler;
 use crate::settings::Effective;
 use crate::slack::web::GatewaySlack;
@@ -135,6 +136,7 @@ pub(super) fn start_engine(
         workdir: config.workdir(),
         system_prompt: system_prompt(
             &app.aide_name(),
+            Gender::load(store)?,
             &store.state("persona.tone")?.unwrap_or_default(),
             &config.memory_dir(),
             today,

@@ -221,6 +221,7 @@ fn every_tool_the_secretary_is_told_of_exists() {
     let tools = ApiTools::new(open(&temp())).unwrap().list();
     let prompt = famulen_core::runtime::system_prompt(
         "イオ",
+        Default::default(),
         "",
         std::path::Path::new("/memory"),
         Default::default(),

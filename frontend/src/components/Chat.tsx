@@ -1,5 +1,6 @@
 import { shortTime } from "~/lib/dates";
 import { A, createAsync, revalidate } from "@solidjs/router";
+import AideIcon from "~/components/AideIcon";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Questions from "~/components/Questions";
 import * as icons from "~/lib/icons";
@@ -50,9 +51,14 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
   return (
     <div class={owner() ? "msg owner" : "msg aide"} data-testid="message">
       <span class="meta">
-        {owner() ? "あなた" : props.aide} · {shortTime(props.m.at, props.tz)}
-        {props.m.origin ? ` · ${props.m.origin}` : ""}
-        {props.m.about ? ` · ${props.m.about}` : ""}
+        <Show when={!owner()}>
+          <AideIcon size={20} />
+        </Show>
+        <span>
+          {owner() ? "あなた" : props.aide} · {shortTime(props.m.at, props.tz)}
+          {props.m.origin ? ` · ${props.m.origin}` : ""}
+          {props.m.about ? ` · ${props.m.about}` : ""}
+        </span>
       </span>
       <div class="text">{props.m.text}</div>
       <Show when={open()}>
@@ -82,6 +88,7 @@ function Inbox(props: { aide: string }) {
         {(h) => (
           <div class="approval">
             <div class="row">
+              <AideIcon size={20} />
               <b class="approval-title">途中で切れた依頼</b>
             </div>
             <div class="said">{[...h.text].slice(0, 300).join("")}</div>
@@ -107,6 +114,7 @@ function Inbox(props: { aide: string }) {
             fallback={
               <div class="approval" data-testid="approval">
                 <div class="row">
+                  <AideIcon size={20} />
                   <b class="approval-title">確認 #{r.id.toString()}</b>
                   <span class="mono sub">{r.tool}</span>
                 </div>
@@ -140,6 +148,7 @@ function Inbox(props: { aide: string }) {
             {(p) => (
               <div class="approval" data-testid="approval" data-kind="definition">
                 <div class="row">
+                  <AideIcon size={20} />
                   <b class="approval-title">確認 #{r.id.toString()}</b>
                   <span>
                     サービス定義 <span class="mono">{p().definition}</span> を変える
@@ -238,6 +247,7 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
       <div class="m-sheetbar">
         <div class="sheet-grip" />
         <div class="row">
+          <AideIcon size={28} />
           <b class="grow">{aide()}との会話</b>
           <IconButton icon={icons.arrowUp} label="広げる" variant="ghost" onClick={() => props.sheet("full")} />
           <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.sheet("")} />
@@ -254,6 +264,7 @@ export default function Chat(props: { sheet: (s: "" | "half" | "full") => void }
       <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.sheet("half")}>
         <span class="sheet-grip" />
         <span class="peek-line">
+          <AideIcon size={28} />
           <span class="sub">
             {aide()}
             {last() ? ` · ${shortTime(last()!.at, tz())}` : ""}

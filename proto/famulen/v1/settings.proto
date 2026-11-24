@@ -7,6 +7,13 @@ import "famulen/v1/lookout.proto";
 import "famulen/v1/memory.proto";
 import "famulen/v1/options.proto";
 
+// Which of the two portraits the secretary goes by.
+enum PersonaGender {
+  PERSONA_GENDER_UNSPECIFIED = 0;
+  PERSONA_GENDER_MALE = 1;
+  PERSONA_GENDER_FEMALE = 2;
+}
+
 message Persona {
   // The secretary's name, which the owner gives it. Famulen is the service.
   string name = 1;
@@ -17,6 +24,8 @@ message Persona {
   // The way of speaking the owner wrote by hand, kept while a preset is
   // in use so that choosing it again brings it back.
   string own_tone = 4;
+  // The icons on the console and on Slack follow it; male until chosen.
+  PersonaGender gender = 5;
 }
 
 message UpdatePersonaRequest {
@@ -24,6 +33,7 @@ message UpdatePersonaRequest {
   optional string tone = 2;
   optional string timezone = 3;
   optional string own_tone = 4;
+  optional PersonaGender gender = 5;
 }
 
 // One tile on the home screen.

@@ -8,6 +8,8 @@ Google や Slack、GitHub のように、つなぐ側のアプリでしかログ
 
 ここの手順は、人が読んでも、AI に読ませて「登録して」と頼んでもそのまま進められるように書いてある。
 
+Slack のアプリに上げるアイコンは [brand/](../../brand/README.md) にある。
+
 | アプリ | 手順 | 渡す環境変数 |
 | --- | --- | --- |
 | GitHub | [github](../../crates/gateway/services/github/README.md) | `FAMULEN_GITHUB_CLIENT_ID`、`FAMULEN_GITHUB_CLIENT_SECRET` |

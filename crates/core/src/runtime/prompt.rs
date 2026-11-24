@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use crate::persona::Gender;
+
 // What the model is told about its place, on top of Claude Code's own prompt.
 const ROLE_PROMPT: &str = "\
 You are {name}, an aide in the manner of a butler, secretary or chief of staff, serving one owner. \
@@ -61,16 +63,25 @@ Carry a request through to the end instead of only describing what could be done
 approval, tell the owner in one short line what you want to do and why; an [approval] input will tell you the answer. \
 When a tool is refused, do not try to get around it. Write to the owner in the language they write to you in.";
 
-/// The whole appended system prompt: the role, the owner's tone, and memory
+/// The whole appended system prompt: the role, who the secretary is, the
+/// owner's tone, and memory
 /// as it stands.
 pub fn system_prompt(
     name: &str,
+    gender: Gender,
     tone: &str,
     memory_dir: &Path,
     today: chrono::NaiveDate,
     core_lines: usize,
 ) -> String {
     let mut prompt = ROLE_PROMPT.replace("{name}", name);
+    let who = match gender {
+        Gender::Male => "a man",
+        Gender::Female => "a woman",
+    };
+    prompt.push_str(&format!(
+        "\n\nYour portrait shows {who}; when you speak of yourself, speak as one, unless the way the owner wants you to speak says otherwise."
+    ));
     if !tone.trim().is_empty() {
         prompt.push_str(&format!(
             "\n\nHow the owner wants you to speak:\n{}",
@@ -90,18 +101,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_secretary_is_told_its_name_and_the_owners_tone() {
+    fn the_secretary_is_told_its_name_its_portrait_and_the_owners_tone() {
         let dir = crate::notebook::testing::TempDir::new("runtime-prompt");
         crate::memory::ensure(dir.path()).unwrap();
         let prompt = system_prompt(
             "イオ",
+            Gender::Female,
             "丁寧語で",
             dir.path(),
             chrono::NaiveDate::from_ymd_opt(2026, 11, 21).unwrap(),
             150,
         );
         assert!(prompt.starts_with("You are イオ"));
-        assert!(prompt.contains("丁寧語で"));
+        let portrait = prompt.find("shows a woman").unwrap();
+        let tone = prompt.find("丁寧語で").unwrap();
+        assert!(portrait < tone, "the owner's way of speaking comes last");
         assert!(prompt.contains("Core (core.md)"));
     }
 

@@ -177,7 +177,7 @@ impl App {
         if workspace.owner.is_empty() || self.store.state(&key)?.is_some() {
             return Ok(());
         }
-        let slack = GatewaySlack::new(self.gateway.clone(), self.connections.clone(), id);
+        let slack = self.slack_client(id);
         let channel = slack.open_dm(&workspace.owner).await?;
         let text = format!(
             "はじめまして、{}です。このワークスペースにつながりました。\nこの DM か、チャンネルでのメンションで、いつでもお声がけください。",
@@ -196,6 +196,15 @@ impl App {
         Ok(())
     }
 
+    fn slack_client(&self, id: &str) -> GatewaySlack {
+        GatewaySlack::new(
+            self.gateway.clone(),
+            self.connections.clone(),
+            id,
+            self.slack_icons.clone(),
+        )
+    }
+
     /// A client per workspace, posting through the gateway, with the main
     /// one named; none without a workspace.
     pub fn slack_clients(&self) -> anyhow::Result<Option<SlackClients<GatewaySlack>>> {
@@ -203,12 +212,9 @@ impl App {
         let Some(main) = list.iter().find(|w| w.main) else {
             return Ok(None);
         };
-        let clients = list.iter().map(|w| {
-            (
-                w.id.clone(),
-                GatewaySlack::new(self.gateway.clone(), self.connections.clone(), &w.id),
-            )
-        });
+        let clients = list
+            .iter()
+            .map(|w| (w.id.clone(), self.slack_client(&w.id)));
         Ok(Some(SlackClients::new(clients, main.id.clone())?))
     }
 }
@@ -321,6 +327,12 @@ pub(crate) mod tests {
         assert_eq!(seen[0].1["users"], "U1");
         assert_eq!(seen[1].1["channel"], "D1");
         assert!(seen[1].1["text"].as_str().unwrap().contains("ミナ"));
+        assert!(
+            seen[1].1["icon_url"]
+                .as_str()
+                .unwrap()
+                .ends_with("/male/avatar-512.png")
+        );
     }
 
     /// A definition of the owner's own whose receiver suggests the channel,

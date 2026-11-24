@@ -7,6 +7,7 @@ pub mod clients;
 pub mod events;
 #[cfg(test)]
 pub mod fake;
+pub mod icons;
 pub mod mrkdwn;
 pub mod presence;
 pub mod reply;

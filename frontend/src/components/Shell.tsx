@@ -11,7 +11,8 @@ import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { isNarrow } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
-import Mark from "./Mark";
+import AideIcon from "./AideIcon";
+import { followPortrait } from "./PageIcons";
 import { useOwner } from "~/lib/owner";
 import StatusPanel from "./StatusPanel";
 import { ConfirmHost, ErrorState, Icon, LinkButton, List, Loading, SideSheet, Toast } from "~/components/ui";
@@ -45,6 +46,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
   const workgroups = createAsync(() => workgroupsQuery());
   const owner = useOwner();
+  followPortrait();
   const [sheet, setSheet] = createSignal<"" | "half" | "full">("");
   let workgroupSheet: HTMLDialogElement | undefined;
 
@@ -97,7 +99,7 @@ export default function Shell(props: { children?: JSX.Element }) {
       </Title>
       <header class="topbar">
         <span class="logo">
-          <Mark size={24} />
+          <AideIcon size={32} />
         </span>
         <span class="brand">
           <b>{aide()}</b>

@@ -154,6 +154,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         gateway,
         answerer: Default::default(),
         slack: Default::default(),
+        slack_icons: crate::slack::icons::Icons::new(store.clone()),
         console_url: config.console_url.clone(),
         receive_url: config.receive_url.clone(),
     };
