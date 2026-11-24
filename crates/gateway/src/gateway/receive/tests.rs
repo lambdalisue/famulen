@@ -590,6 +590,121 @@ async fn a_socket_event_is_acknowledged_and_handed_over_untouched() {
     g.close_connections();
 }
 
+/// A chat gateway whose sockets open at `ws`, with everything quiet for
+/// long counted in milliseconds.
+async fn chat_on(ws: &tokio::net::TcpListener) -> (Gateway, Arc<Mutex<Vec<Arrival>>>) {
+    let ws_url = format!("ws://{}/", ws.local_addr().unwrap());
+    let open = axum::Router::new().route(
+        "/open",
+        axum::routing::post(move || {
+            let url = ws_url.clone();
+            async move { serde_json::json!({ "ok": true, "url": url }).to_string() }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let open_url = format!("http://{}/open", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, open).await.unwrap() });
+    let (g, got) = gateway(&[("chat.toml", CHAT)]);
+    let g = g.with_endpoints(Endpoints {
+        socket_open: open_url,
+        socket_quiet: std::time::Duration::from_millis(200),
+        socket_retry: std::time::Duration::from_millis(10),
+        ..Default::default()
+    });
+    add(&g, "chat-a", "chat", &[("team", "TA")]);
+    g.set_destination(super::super::OWNER, "chat-a", "events", Some("lookout"))
+        .unwrap();
+    (g, got)
+}
+
+fn chat_event(text: &str) -> tokio_tungstenite::tungstenite::Message {
+    serde_json::json!({
+        "envelope_id": "e-1",
+        "type": "events_api",
+        "payload": { "team_id": "TA", "event": { "type": "message", "text": text } }
+    })
+    .to_string()
+    .into()
+}
+
+#[tokio::test]
+async fn a_socket_that_went_dead_without_closing_is_opened_again() {
+    let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (g, got) = chat_on(&ws).await;
+    tokio::spawn(async move {
+        // Never read again, so it neither answers a ping nor closes.
+        let (stream, _) = ws.accept().await.unwrap();
+        let _dead = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let (stream, _) = ws.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        socket.send(chat_event("hi")).await.unwrap();
+        while let Some(Ok(_)) = socket.next().await {}
+    });
+
+    g.sync_connections().unwrap();
+    for _ in 0..250 {
+        if !got.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    let got = got.lock().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].payload["payload"]["event"]["text"], "hi");
+    g.close_connections();
+}
+
+#[tokio::test]
+async fn a_socket_that_never_finishes_opening_is_opened_again() {
+    let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (g, got) = chat_on(&ws).await;
+    tokio::spawn(async move {
+        let _stuck = ws.accept().await.unwrap();
+        let (stream, _) = ws.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        socket.send(chat_event("hi")).await.unwrap();
+        while let Some(Ok(_)) = socket.next().await {}
+    });
+
+    g.sync_connections().unwrap();
+    for _ in 0..250 {
+        if !got.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(got.lock().unwrap().len(), 1);
+    g.close_connections();
+}
+
+#[tokio::test]
+async fn a_quiet_socket_that_answers_stays_open() {
+    let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (g, got) = chat_on(&ws).await;
+    let opened: Arc<Mutex<usize>> = Arc::default();
+    let count = opened.clone();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = ws.accept().await.unwrap();
+            *count.lock().unwrap() += 1;
+            tokio::spawn(async move {
+                let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                // Reading answers the pings and says nothing else.
+                while let Some(Ok(_)) = socket.next().await {}
+            });
+        }
+    });
+
+    g.sync_connections().unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+    assert_eq!(*opened.lock().unwrap(), 1);
+    assert!(got.lock().unwrap().is_empty());
+    g.close_connections();
+}
+
 #[tokio::test]
 async fn each_line_of_a_command_kept_running_is_handed_over_and_it_goes_on_from_the_last() {
     let say = r#"

@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -18,6 +19,11 @@ use crate::template::Context;
 pub(in crate::gateway) struct Endpoints {
     pub(super) socket_open: String,
     pub(super) pubsub: String,
+    /// How long a socket may say nothing before it is asked whether it is
+    /// alive, and how long it has to answer.
+    pub(super) socket_quiet: Duration,
+    /// How long to wait before opening a socket again.
+    pub(super) socket_retry: Duration,
 }
 
 impl Default for Endpoints {
@@ -25,6 +31,8 @@ impl Default for Endpoints {
         Self {
             socket_open: "https://slack.com/api/apps.connections.open".into(),
             pubsub: "https://pubsub.googleapis.com/v1".into(),
+            socket_quiet: Duration::from_secs(30),
+            socket_retry: Duration::from_secs(5),
         }
     }
 }
@@ -218,29 +226,49 @@ impl Gateway {
     async fn socket_forever(&self, token: &str, members: &[(String, String)]) {
         loop {
             if let Err(error) = self.socket_once(token, members).await {
-                tracing::debug!(%error, "the socket connection failed; opening it again");
+                tracing::warn!(%error, "the socket connection failed; opening it again");
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(self.endpoints.socket_retry).await;
         }
     }
 
     async fn socket_once(&self, token: &str, members: &[(String, String)]) -> anyhow::Result<()> {
-        let opened: Value = self
-            .http
-            .post(&self.endpoints.socket_open)
-            .bearer_auth(token)
-            .send()
-            .await?
-            .json()
-            .await?;
-        let url = opened["url"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("the socket was not opened: {}", opened["error"]))?
-            .to_owned();
-        let (mut ws, _) = tokio_tungstenite::connect_async(url.as_str()).await?;
+        let quiet = self.endpoints.socket_quiet;
+        let opening = async {
+            let opened: Value = self
+                .http
+                .post(&self.endpoints.socket_open)
+                .bearer_auth(token)
+                .send()
+                .await?
+                .json()
+                .await?;
+            let url = opened["url"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("the socket was not opened: {}", opened["error"]))?;
+            let (ws, _) = tokio_tungstenite::connect_async(url).await?;
+            anyhow::Ok(ws)
+        };
+        let mut ws = tokio::time::timeout(quiet, opening)
+            .await
+            .map_err(|_| anyhow::anyhow!("the socket did not open in time"))??;
         use tokio_tungstenite::tungstenite::Message;
-        while let Some(frame) = ws.next().await {
-            let text = match frame? {
+        // A network that changed under the socket closes nothing: reading
+        // alone would wait on the dead connection forever.
+        let mut asked = false;
+        loop {
+            let frame = match tokio::time::timeout(quiet, ws.next()).await {
+                Ok(Some(frame)) => frame?,
+                Ok(None) => return Ok(()),
+                Err(_) if asked => anyhow::bail!("the socket went dead"),
+                Err(_) => {
+                    ws.send(Message::Ping(Default::default())).await?;
+                    asked = true;
+                    continue;
+                }
+            };
+            asked = false;
+            let text = match frame {
                 Message::Text(text) => text,
                 Message::Ping(payload) => {
                     ws.send(Message::Pong(payload)).await?;
@@ -263,17 +291,16 @@ impl Gateway {
                 self.deliver(Arrival::new(&connection, &receiver, event))?;
             }
         }
-        Ok(())
     }
 
     async fn pull_forever(&self, id: &str, receiver: &str) {
         loop {
             match self.pull_once(id, receiver).await {
-                Ok(0) => tokio::time::sleep(std::time::Duration::from_secs(5)).await,
+                Ok(0) => tokio::time::sleep(Duration::from_secs(5)).await,
                 Ok(_) => {}
                 Err(error) => {
                     tracing::debug!(connection = %id, %receiver, %error, "could not pull");
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    tokio::time::sleep(Duration::from_secs(30)).await;
                 }
             }
         }
