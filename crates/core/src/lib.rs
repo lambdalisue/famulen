@@ -23,6 +23,7 @@ pub mod notebook;
 pub mod notebook_place;
 mod paths;
 pub mod permissions;
+pub mod persona;
 pub mod records;
 pub mod runtime;
 pub mod schedule;

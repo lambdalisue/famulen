@@ -18,7 +18,7 @@ app_token = { env = "FAMULEN_SLACK_APP_TOKEN", secret = true }
 [login.oauth2]
 authorize = "https://slack.com/oauth/v2/authorize"
 token = "https://slack.com/api/oauth.v2.access"
-query = { scope = "app_mentions:read,channels:history,chat:write,groups:history,im:history,im:read,im:write,reactions:write", user_scope = "channels:history,channels:read,groups:history,groups:read,im:history,mpim:history,search:read,users:read" }
+query = { scope = "app_mentions:read,channels:history,chat:write,chat:write.customize,groups:history,im:history,im:read,im:write,reactions:write", user_scope = "channels:history,channels:read,groups:history,groups:read,im:history,mpim:history,search:read,users:read" }
 tokens = { bot = "{/access_token}", user = "{/authed_user/access_token}" }
 values = { team = "{/team/id}", team_name = "{/team/name}", user = "{/authed_user/id}", bot_user = "{/bot_user_id}", app = "{/app_id}" }
 same = ["team"]
@@ -28,11 +28,11 @@ http = { base = "https://slack.com/api", auth = "bot" }
 
 [[tools]]
 name = "post_message"
-description = "Post a message to a channel or a DM, in a thread when `thread` is given."
+description = "Post a message to a channel or a DM, in a thread when `thread` is given, beside the image at `icon` when one is."
 method = "POST"
 path = "/chat.postMessage"
-body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}" }
-input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" } }, required = ["channel", "text"] }
+body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}" }
+input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" } }, required = ["channel", "text"] }
 ok = "{/ok}"
 
 [[tools]]

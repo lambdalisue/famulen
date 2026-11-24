@@ -1,7 +1,8 @@
 //! The secretary's persona, the home screen, where the secretary may write
 //! and where the notebook is.
 
-use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc::{ConnectError, RequestContext, Response, ServiceRequest, ServiceResult};
+use famulen_core::persona::Gender;
 use famulen_core::settings::Key;
 use famulen_core::writable;
 use serde::{Deserialize, Serialize};
@@ -125,8 +126,21 @@ impl Api {
                 .state("persona.own_tone")?
                 .unwrap_or_default(),
             timezone: self.app.tz().name().to_owned(),
+            gender: match Gender::load(&self.app.store)? {
+                Gender::Male => PersonaGender::Male,
+                Gender::Female => PersonaGender::Female,
+            }
+            .into(),
             ..Default::default()
         })
+    }
+}
+
+fn gender_from(gender: buffa::EnumValue<PersonaGender>) -> Result<Gender, ConnectError> {
+    match gender.as_known() {
+        Some(PersonaGender::Male) => Ok(Gender::Male),
+        Some(PersonaGender::Female) => Ok(Gender::Female),
+        Some(PersonaGender::Unspecified) | None => Err(fail("the secretary is male or female")),
     }
 }
 
@@ -145,10 +159,19 @@ impl SettingsService for Api {
         request: ServiceRequest<'_, UpdatePersonaRequest>,
     ) -> ServiceResult<Persona> {
         let r = request.to_owned_message();
+        // Checked before anything is stored, so a refused change leaves nothing.
+        let gender = r.gender.map(gender_from).transpose()?;
+        if r.name.as_ref().is_some_and(|name| name.trim().is_empty()) {
+            return Err(fail("the secretary needs a name"));
+        }
+        // It checks itself as it is stored, so it goes first.
+        if let Some(tz) = &r.timezone {
+            self.app
+                .settings
+                .apply(&[(Key::Timezone, given(tz))])
+                .or_fail()?;
+        }
         if let Some(name) = &r.name {
-            if name.trim().is_empty() {
-                return Err(fail("the secretary needs a name"));
-            }
             self.app
                 .store
                 .set_state("persona.name", name.trim())
@@ -166,11 +189,8 @@ impl SettingsService for Api {
                 .set_state("persona.own_tone", own.trim())
                 .or_fail()?;
         }
-        if let Some(tz) = &r.timezone {
-            self.app
-                .settings
-                .apply(&[(Key::Timezone, given(tz))])
-                .or_fail()?;
+        if let Some(gender) = gender {
+            gender.save(&self.app.store).or_fail()?;
         }
         self.app.journal.record("setting", "persona changed");
         self.app.changed.notify_one();

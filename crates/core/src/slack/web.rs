@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::connections::Connections;
 use crate::gateway::Gateway;
+use crate::slack::icons::Icons;
 
 /// A message to post: plain text, and Block Kit blocks when it needs more.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -61,14 +62,39 @@ pub struct GatewaySlack {
     gateway: Gateway,
     connections: Connections,
     connection: String,
+    icons: Icons,
 }
 
+/// Slack answered a call by refusing it: it did nothing.
+#[derive(Debug)]
+struct Refused {
+    tool: String,
+    why: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} failed: {}", self.tool, self.why)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// The refusals a post meets for carrying an icon the bot may not set.
+const NO_ICON: [&str; 3] = ["missing_scope", "no_permission", "not_allowed_token_type"];
+
 impl GatewaySlack {
-    pub fn new(gateway: Gateway, connections: Connections, connection: impl Into<String>) -> Self {
+    pub fn new(
+        gateway: Gateway,
+        connections: Connections,
+        connection: impl Into<String>,
+        icons: Icons,
+    ) -> Self {
         Self {
             gateway,
             connections,
             connection: connection.into(),
+            icons,
         }
     }
 
@@ -82,13 +108,45 @@ impl GatewaySlack {
         let result = self.gateway.call_as_owner(&connection, tool, args).await?;
         let answer: Value = serde_json::from_str(&result.text).unwrap_or(Value::Null);
         if result.is_error {
-            let why = answer
-                .get("error")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or(result.text);
-            anyhow::bail!("{tool} failed: {why}");
+            let Some(why) = answer.get("error").and_then(Value::as_str) else {
+                anyhow::bail!("{tool} failed: {}", result.text);
+            };
+            return Err(Refused {
+                tool: tool.to_owned(),
+                why: why.to_owned(),
+            }
+            .into());
         }
+        Ok(answer)
+    }
+
+    /// Post with the secretary's icon, or without one where the bot may not
+    /// set it: a workspace the app was installed in before it asked to.
+    async fn post_with_icon(&self, mut args: Value) -> anyhow::Result<Value> {
+        let Some(icon) = self.icons.of(&self.connection) else {
+            return self.call("post_message", args).await;
+        };
+        let bare = args.clone();
+        args["icon"] = json!(icon);
+        let error = match self.call("post_message", args).await {
+            Ok(answer) => return Ok(answer),
+            Err(error) => error,
+        };
+        // Only a refusal says that nothing was posted; after any other
+        // failure a second post could double the first.
+        if !error
+            .downcast_ref::<Refused>()
+            .is_some_and(|r| NO_ICON.contains(&r.why.as_str()))
+        {
+            return Err(error);
+        }
+        let answer = self.call("post_message", bare).await?;
+        tracing::warn!(
+            connection = %self.connection,
+            %error,
+            "the workspace refuses the secretary's icon; posting without it until the app is installed again"
+        );
+        self.icons.refuse(&self.connection);
         Ok(answer)
     }
 }
@@ -106,9 +164,7 @@ fn message_args(channel: &str, message: Outgoing) -> Value {
 
 impl Slack for GatewaySlack {
     async fn post(&self, channel: &str, message: Outgoing) -> anyhow::Result<String> {
-        let answer = self
-            .call("post_message", message_args(channel, message))
-            .await?;
+        let answer = self.post_with_icon(message_args(channel, message)).await?;
         Ok(answer
             .get("ts")
             .and_then(Value::as_str)
@@ -157,28 +213,37 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::persona::Gender;
+    use crate::store::Store;
 
     const SLACK: &str = include_str!("../../../gateway/services/slack/slack.toml");
 
     type Seen = Arc<Mutex<Vec<(String, Value)>>>;
 
     async fn slack_api(answer: Value) -> (String, Seen) {
+        slack_api_with(move |_, _| answer.clone()).await
+    }
+
+    /// A Slack that answers each call as `answer` says, and what it was asked.
+    async fn slack_api_with(
+        answer: impl Fn(&str, &Value) -> Value + Clone + Send + Sync + 'static,
+    ) -> (String, Seen) {
         let seen: Seen = Arc::default();
         let app = axum::Router::new()
             .route(
                 "/api/{method}",
                 axum::routing::post(
-                    |axum::extract::State((seen, answer)): axum::extract::State<(Seen, Value)>,
+                    |axum::extract::State(seen): axum::extract::State<Seen>,
                      axum::extract::Path(method): axum::extract::Path<String>,
                      body: String| async move {
-                        seen.lock()
-                            .unwrap()
-                            .push((method, serde_json::from_str(&body).unwrap_or(Value::Null)));
+                        let body = serde_json::from_str(&body).unwrap_or(Value::Null);
+                        let answer = answer(&method, &body);
+                        seen.lock().unwrap().push((method, body));
                         answer.to_string()
                     },
                 ),
             )
-            .with_state((seen.clone(), answer));
+            .with_state(seen.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -186,6 +251,10 @@ mod tests {
     }
 
     fn slack(base: &str) -> GatewaySlack {
+        slack_with(base, Icons::new(Store::open_in_memory().unwrap()))
+    }
+
+    fn slack_with(base: &str, icons: Icons) -> GatewaySlack {
         let store = famulen_gateway::store::Store::open_in_memory().unwrap();
         let connections = Connections::new(store.clone());
         let gateway = Gateway::new(store, connections.clone(), reqwest::Client::new(), None)
@@ -197,8 +266,20 @@ mod tests {
                 )],
             );
         gateway.add_defined("slack", BTreeMap::new(), None).unwrap();
-        GatewaySlack::new(gateway, connections, "slack")
+        GatewaySlack::new(gateway, connections, "slack", icons)
     }
+
+    fn says(text: &str) -> Outgoing {
+        Outgoing {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
+
+    const MALE: &str =
+        "https://raw.githubusercontent.com/lambdalisue/famulen/main/brand/male/avatar-512.png";
+    const FEMALE: &str =
+        "https://raw.githubusercontent.com/lambdalisue/famulen/main/brand/female/avatar-512.png";
 
     #[tokio::test]
     async fn a_post_calls_the_connections_tool_and_returns_the_ts() {
@@ -221,8 +302,118 @@ mod tests {
         assert_eq!(seen[0].0, "chat.postMessage");
         assert_eq!(
             seen[0].1,
-            json!({ "channel": "D1", "text": "hi", "thread_ts": "1.0" })
+            json!({ "channel": "D1", "text": "hi", "thread_ts": "1.0", "icon_url": MALE })
         );
+    }
+
+    #[tokio::test]
+    async fn a_posts_icon_follows_the_gender_chosen_at_that_moment() {
+        let (base, seen) = slack_api(json!({ "ok": true, "ts": "1.5" })).await;
+        let store = Store::open_in_memory().unwrap();
+        let slack = slack_with(&base, Icons::new(store.clone()));
+
+        slack.post("D1", says("before")).await.unwrap();
+        Gender::Female.save(&store).unwrap();
+        slack.post("D1", says("after")).await.unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].1["icon_url"], MALE);
+        assert_eq!(seen[1].1["icon_url"], FEMALE);
+    }
+
+    #[test]
+    fn the_icons_posted_are_files_of_the_brand() {
+        let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (gender, url) in [(Gender::Male, MALE), (Gender::Female, FEMALE)] {
+            let store = Store::open_in_memory().unwrap();
+            gender.save(&store).unwrap();
+            assert_eq!(Icons::new(store).of("slack").as_deref(), Some(url));
+            let (_, path) = url.split_once("/main/").unwrap();
+            assert!(repository.join(path).is_file(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_update_carries_no_icon() {
+        let (base, seen) = slack_api(json!({ "ok": true })).await;
+
+        slack(&base).update("D1", "1.0", says("hi")).await.unwrap();
+
+        assert_eq!(seen.lock().unwrap()[0].1.get("icon_url"), None);
+    }
+
+    /// A workspace the app was installed in before it asked to set icons.
+    async fn without_the_scope() -> (String, Seen) {
+        slack_api_with(|_, body| match body.get("icon_url") {
+            Some(_) => {
+                json!({ "ok": false, "error": "missing_scope", "needed": "chat:write.customize" })
+            }
+            None => json!({ "ok": true, "ts": "1.5" }),
+        })
+        .await
+    }
+
+    fn icons_sent(seen: &Seen) -> Vec<bool> {
+        let seen = seen.lock().unwrap();
+        seen.iter()
+            .map(|(_, b)| b.get("icon_url").is_some())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_workspace_without_the_scope_gets_each_message_once_and_is_not_offered_the_icon_again()
+     {
+        let (base, seen) = without_the_scope().await;
+        let slack = slack(&base);
+
+        let first = slack.post("D1", says("one")).await.unwrap();
+        slack.clone().post("D1", says("two")).await.unwrap();
+
+        assert_eq!(first, "1.5");
+        assert_eq!(icons_sent(&seen), [true, false, false]);
+    }
+
+    #[tokio::test]
+    async fn a_workspace_installed_again_is_offered_the_icon_again() {
+        let (base, seen) = without_the_scope().await;
+        let icons = Icons::new(Store::open_in_memory().unwrap());
+        let slack = slack_with(&base, icons.clone());
+
+        slack.post("D1", says("one")).await.unwrap();
+        icons.installed("slack");
+        slack.post("D1", says("two")).await.unwrap();
+
+        assert_eq!(icons_sent(&seen), [true, false, true, false]);
+    }
+
+    #[tokio::test]
+    async fn a_refusal_that_is_not_about_the_icon_is_not_posted_again() {
+        let (base, seen) = slack_api(json!({ "ok": false, "error": "channel_not_found" })).await;
+
+        let error = slack(&base).post("D1", says("hi")).await.unwrap_err();
+
+        assert_eq!(error.to_string(), "post_message failed: channel_not_found");
+        assert_eq!(icons_sent(&seen), [true]);
+    }
+
+    #[tokio::test]
+    async fn a_failure_that_does_not_say_whether_it_posted_is_not_posted_again() {
+        let (base, seen) = slack_api(json!("gateway timeout missing_scope")).await;
+
+        slack(&base).post("D1", says("hi")).await.unwrap_err();
+
+        assert_eq!(icons_sent(&seen), [true]);
+    }
+
+    #[tokio::test]
+    async fn a_workspace_that_refuses_the_bare_message_too_keeps_its_icon() {
+        let (base, seen) = slack_api(json!({ "ok": false, "error": "missing_scope" })).await;
+        let slack = slack(&base);
+
+        slack.post("D1", says("one")).await.unwrap_err();
+        slack.post("D1", says("two")).await.unwrap_err();
+
+        assert_eq!(icons_sent(&seen), [true, false, true, false]);
     }
 
     #[tokio::test]

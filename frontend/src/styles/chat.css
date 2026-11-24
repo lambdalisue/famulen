@@ -1,7 +1,7 @@
 .chat { width: var(--chat); flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .messages { flex: 1; overflow-y: auto; padding: var(--s4) 18px; display: flex; flex-direction: column; gap: 14px; }
 .msg { display: flex; flex-direction: column; gap: var(--s1); max-width: 88%; align-items: flex-start; }
-.msg .meta { font-size: var(--t-xs); color: var(--muted); }
+.msg .meta { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--muted); }
 .msg .text { font-size: var(--t-md); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 14px; }
 .msg.owner { align-self: flex-end; align-items: flex-end; }
 .msg.owner .meta { text-align: right; }

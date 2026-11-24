@@ -159,12 +159,19 @@ test("the vault opens from the settings menu and takes a secret on the page, not
 test("the console is an app over all its pages once put on the home screen", async ({ page, request }) => {
   for (const path of ["/", "/tasks", "/settings/services"]) {
     await page.goto(path);
-    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/manifest.webmanifest");
+    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/icons/male/manifest.webmanifest");
   }
-  const answer = await request.get("/manifest.webmanifest");
-  expect(answer.ok()).toBe(true);
-  expect(await answer.json()).toMatchObject({ scope: "/", start_url: "/", display: "standalone" });
-  for (const icon of ["/apple-touch-icon.png", "/icon-512.png"]) {
-    expect((await request.get(icon)).headers()["content-type"]).toBe("image/png");
+  for (const portrait of ["male", "female"]) {
+    const answer = await request.get(`/icons/${portrait}/manifest.webmanifest`);
+    expect(answer.ok()).toBe(true);
+    expect(answer.headers()["content-type"]).toContain("application/manifest+json");
+    const manifest = (await answer.json()) as { icons: { src: string; type: string; purpose?: string }[] };
+    // The same app whichever portrait it was put on the home screen with.
+    expect(manifest).toMatchObject({ id: "/", scope: "/", start_url: "/", display: "standalone" });
+    expect(manifest.icons.some((i) => i.purpose === "maskable")).toBe(true);
+    for (const icon of manifest.icons) {
+      expect(icon.src).toContain(`/icons/${portrait}/`);
+      expect((await request.get(icon.src)).headers()["content-type"]).toBe(icon.type);
+    }
   }
 });

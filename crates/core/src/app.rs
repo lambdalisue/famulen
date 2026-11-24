@@ -66,6 +66,8 @@ pub struct App {
             Option<Arc<crate::slack::clients::SlackClients<crate::slack::web::GatewaySlack>>>,
         >,
     >,
+    /// What stands beside the secretary's posts on Slack.
+    pub slack_icons: crate::slack::icons::Icons,
     /// Where the gateway's receivers are reached from outside, if the owner
     /// made them reachable; calendar changes are asked to be sent there.
     pub receive_url: Option<String>,

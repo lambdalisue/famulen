@@ -53,7 +53,7 @@ holds one intent, with its spec and tests, and is merged once CI is green.
 | `Dockerfile`, `compose.yaml` | the containers the owner runs |
 | `contrib/` | files the owner copies when setting Famulen up: the Slack app manifest, an example config, a systemd unit |
 | `docs/` | concept, ADRs, specs, and how to register the apps (`setup/`) |
-| `brand/` | the logo: mark, lockups, app icon, PNG exports and how to use them |
+| `brand/` | the logo: the art of both secretaries, the files derived from it and how to use them |
 | `scripts/` | scripts the release and `just ci` run |
 
 ## Language

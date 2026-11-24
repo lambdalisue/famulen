@@ -524,6 +524,7 @@ impl ConnectionService for Api {
             self.app
                 .journal
                 .record("setting", format!("service {id} logged in"));
+            self.app.slack_icons.installed(&id);
             // The account is connected whether or not it could be greeted.
             if let Err(error) = self.app.greet(&id).await {
                 tracing::warn!(%error, connection = %id, "cannot greet the owner");
