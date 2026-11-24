@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::icons;
+use super::looks;
 use crate::app::App;
 use crate::channel::DEFINITION;
 use crate::connections::Connection;
@@ -52,7 +52,7 @@ impl App {
 
     async fn slack_app_icon_troubles(&self) -> anyhow::Result<Vec<String>> {
         let _one = self.slack_app_icons.lock().await;
-        let icon = icons::url(Gender::load(&self.store)?);
+        let icon = looks::url(Gender::load(&self.store)?);
         let mut set = BTreeSet::new();
         let mut failed = Vec::new();
         for c in self.connections.list()? {

@@ -13,7 +13,7 @@
 2. マニフェストに [contrib/slack-app-manifest.json](../../../../contrib/slack-app-manifest.json) の中身を貼る。`redirect_urls` の `https://CONSOLE_HOST/oauth/callback` を、`<コンソールの URL>/oauth/callback` に置き換える。
 3. 「Basic Information」の「App-Level Tokens」で、スコープ `connections:write` のトークンを作る（`xapp-` で始まる）。
 4. 「Basic Information」の「App Credentials」で、Client ID と Client Secret を控える。
-5. 「Basic Information」の「Display Information」で、アプリのアイコンに [brand/male/avatar-512.png](../../../../brand/male/avatar-512.png) か [brand/female/avatar-512.png](../../../../brand/female/avatar-512.png) を上げる。メンバーの一覧やアプリの頁に出る。秘書の発言には、コンソールで選んだ性別のアイコンが Famulen から付く。
+5. 「Basic Information」の「Display Information」で、アプリのアイコンに [brand/male/avatar-512.png](../../../../brand/male/avatar-512.png) か [brand/female/avatar-512.png](../../../../brand/female/avatar-512.png) を上げる。メンバーの一覧やアプリの頁に出る。秘書の発言には、コンソールで選んだ性別のアイコンと秘書の名前が Famulen から付く。メンションや DM の相手に出る名前は bot の表示名で、替えるにはマニフェストの `display_name` を書き換える。
 6. 「Manage Distribution」で、ほかのワークスペースにも入れられるよう配布を有効にする。Slack のアプリ一覧に載せる必要はない。
 
 ## Famulen に渡す
@@ -28,7 +28,7 @@ Famulen を起動し直し、コンソールの「設定 · サービス」の�
 
 マニフェストは、bot が受ける出来事のほかに、あなたの代わりに受ける出来事（`user_events`）も申し込む。bot がいないチャンネルであなたがメンションされた発言や、あなたへの DM は、これで届く。
 
-すでに入れたワークスペースで、あとからマニフェストの権限が増えたときは、マニフェストを貼り直し、コンソールからそのワークスペースにログインし直す。`chat:write.customize` がないあいだは、発言はアプリのアイコンで届く。
+すでに入れたワークスペースで、あとからマニフェストの権限が増えたときは、マニフェストを貼り直し、コンソールからそのワークスペースにログインし直す。`chat:write.customize` がないあいだは、発言はアプリのアイコンと bot の表示名で届く。
 
 ## 一覧のアイコンも性別に合わせる
 

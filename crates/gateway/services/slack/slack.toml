@@ -35,11 +35,11 @@ http = { base = "https://slack.com/api", auth = "bot" }
 
 [[tools]]
 name = "post_message"
-description = "Post a message to a channel or a DM, in a thread when `thread` is given, beside the image at `icon` when one is."
+description = "Post a message to a channel or a DM, in a thread when `thread` is given, beside the image at `icon` and under `name` when they are."
 method = "POST"
 path = "/chat.postMessage"
-body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}" }
-input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" } }, required = ["channel", "text"] }
+body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}", username = "{args.name}" }
+input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" }, name = { type = "string" } }, required = ["channel", "text"] }
 ok = "{/ok}"
 
 [[tools]]
