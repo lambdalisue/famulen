@@ -304,7 +304,11 @@ pub fn tag_episode(
     doc.save(&path)
 }
 
-/// An id no item in the directory has yet.
+/// How much of a ULID's random part a memory's id takes.
+const RANDOM_LENGTH: usize = 10;
+
+/// An id no item in the directory has yet, nor one written meanwhile in
+/// another copy of the notebook.
 pub fn fresh_id(dir: &Path) -> anyhow::Result<String> {
     let mut ids = BTreeSet::new();
     for file in entry_files(dir)? {
@@ -314,13 +318,14 @@ pub fn fresh_id(dir: &Path) -> anyhow::Result<String> {
             }
         }
     }
-    let mut n = ids.len() + 1;
     loop {
-        let id = format!("m{n}");
+        // Counting up would give two copies of a notebook, written apart, the
+        // same id for different memories.
+        let drawn = ulid::Ulid::generate().to_string().to_lowercase();
+        let id = format!("m{}", &drawn[drawn.len() - RANDOM_LENGTH..]);
         if !ids.contains(&id) {
             return Ok(id);
         }
-        n += 1;
     }
 }
 
@@ -510,13 +515,13 @@ mod tests {
     }
 
     #[test]
-    fn fresh_ids_are_unique_across_every_layer() {
+    fn copies_written_apart_give_their_memories_different_ids() {
         let tmp = TempDir::new("fresh-id");
         ensure(tmp.path()).unwrap();
-        write_file(tmp.path(), CORE, b"- a {id: m1}\n- b {id: m3}\n").unwrap();
-        write_file(tmp.path(), "forgotten/2026-10.md", b"- c {id: m2}\n").unwrap();
 
-        assert_eq!(fresh_id(tmp.path()).unwrap(), "m4");
+        let ids: BTreeSet<_> = (0..100).map(|_| fresh_id(tmp.path()).unwrap()).collect();
+
+        assert_eq!(ids.len(), 100);
     }
 
     #[test]

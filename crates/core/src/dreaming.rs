@@ -969,23 +969,26 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 11, 21).unwrap()
     }
 
-    fn note(dir: &Path, text: &str) {
+    fn note(dir: &Path, text: &str) -> String {
         memory::append_episode(
             dir,
             day().and_hms_opt(10, 0, 0).unwrap(),
             text,
             EpisodeState::Waiting,
         )
-        .unwrap();
+        .unwrap()
+        .id()
+        .unwrap()
+        .to_owned()
     }
 
     #[tokio::test]
     async fn a_dream_applies_the_edits_and_commits_them_once() {
         let (dir, store) = setup();
-        note(dir.path(), "会議は午前がいいと言った");
+        let noted = note(dir.path(), "会議は午前がいいと言った");
         let outcome = dream(&store, &dir.records, dir.path(), day(), |_, prompt| async move {
             assert!(prompt.contains("会議は午前がいい"));
-            Ok(json!({ "edits": [{ "op": "add", "file": "long/semantic/meetings.md", "text": "会議は午前に入れる", "attrs": { "src": "said" } }] , "settled": ["m1"] }))
+            Ok(json!({ "edits": [{ "op": "add", "file": "long/semantic/meetings.md", "text": "会議は午前に入れる", "attrs": { "src": "said" } }] , "settled": [noted] }))
         })
         .await
         .unwrap();
