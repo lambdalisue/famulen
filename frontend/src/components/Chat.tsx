@@ -157,6 +157,19 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     from: (e) => e.clientX - (column?.getBoundingClientRect().left ?? 0),
     toward: "ArrowRight",
   });
+  // What floats over the page on a phone stands on the composer, which grows with what goes along.
+  onMount(() => {
+    if (!column) return;
+    const grown = new ResizeObserver(() => {
+      const height = column?.offsetHeight;
+      if (height && !props.open) document.body.style.setProperty("--composer", `${height}px`);
+    });
+    grown.observe(column);
+    onCleanup(() => {
+      grown.disconnect();
+      document.body.style.removeProperty("--composer");
+    });
+  });
   const pull = createPull({
     sheet: () => column,
     open: () => props.open,
