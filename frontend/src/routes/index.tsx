@@ -1,5 +1,6 @@
 import { createAsync, query } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
+import { useAsked } from "~/components/ApprovalCard";
 import TaskRow from "~/components/records/TaskRow";
 import { Button, EmptyState, Icon, IconButton, Keyed, LinkButton, List, ListRow, Loading, PageHeader, Select, Tag } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
@@ -144,11 +145,12 @@ function ApprovalsHead() {
 
 function ApprovalsTile() {
   const pending = useWaiting().approvals;
+  const asked = useAsked();
   return (
     <For each={pending().slice(0, 3)} fallback={<EmptyState>いまはない</EmptyState>}>
       {(a) => (
-        <div class="sub mono home-approval">
-          #{a.id.toString()} {a.tool}
+        <div class="home-approval">
+          {asked(a.tool).does} <span class="sub">{asked(a.tool).where}</span>
         </div>
       )}
     </For>
