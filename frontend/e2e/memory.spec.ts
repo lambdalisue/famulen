@@ -80,7 +80,7 @@ test("an episodic note shows the time it was written apart from its text", async
 
   const row = page.locator(".list .item").filter({ hasText: "e2e: 朝の連絡はメールがいい" });
   await expect(row.locator(".mono")).toHaveText(/^\d{2}:\d{2}$/);
-  await expect(row.locator(".grow")).toHaveText("e2e: 朝の連絡はメールがいい");
+  await expect(row.locator(".item-title")).toHaveText("e2e: 朝の連絡はメールがいい");
   await expect(row.locator(".tag")).toHaveText("あなたが言った");
 });
 
@@ -97,7 +97,7 @@ test("a memory file written by the owner reads back and shows in its history", a
   await visit(page, "/memory/file?path=core.md&mode=write", "記憶 · core.md");
   const editor = page.getByLabel("core.md を書く");
   await editor.fill("# 心得\n\n- 返事は短く、結論から");
-  await editor.press("Tab");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(toast(page)).toHaveText("保存した");
   await page.reload();
   await expect(editor).toHaveValue("# 心得\n\n- 返事は短く、結論から");
@@ -120,8 +120,29 @@ test("what is being written stays when something else changes meanwhile", async 
   await record(request, "memos", "ほかで足した");
   await loaded;
   await expect(editor).toHaveValue("# 心得\n\n- 書きかけ");
-  await editor.press("Tab");
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(toast(page)).toHaveText("保存した");
+});
+
+test("what is being written over a memory file is kept, and said, when the file is written elsewhere", async ({ page, request }) => {
+  const path = "long/semantic/e2e-two-writers.md";
+  const write = (text: string) =>
+    call(request, "MemoryService", "WriteFile", { path, text: `---\nid: e2e-w1\nsummary: 二人で書く\nsrc: said\n---\n\n${text}\n` });
+  await write("はじめ");
+  await visit(page, `/memory/file?path=${path}&mode=write`, /^記憶/);
+  const editor = page.getByLabel(`${path} を書く`);
+  const again = page.getByRole("button", { name: "書きかけを捨てて読み直す" });
+
+  await write("ほかで直した");
+  await expect(editor).toHaveValue(/ほかで直した/);
+
+  await editor.fill("書きかけ");
+  await write("もう一度直した");
+  await expect(again).toBeVisible();
+  await expect(editor).toHaveValue("書きかけ");
+  await again.click();
+  await expect(editor).toHaveValue(/もう一度直した/);
+  await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });
 
 test.describe("memory drawn as Markdown", () => {
@@ -164,8 +185,8 @@ test.describe("memory drawn as Markdown", () => {
     await expect(body.getByText("e2e-md3")).toBeVisible();
 
     await visit(page, "/memory/long", "記憶 · 長期記憶");
-    const card = page.locator(".card").filter({ hasText: "朝は お茶" }).first();
-    await expect(card.locator("b code")).toHaveText("お茶");
+    const card = page.locator("section.pref").filter({ hasText: "朝は お茶" }).first();
+    await expect(card.locator("h2 code")).toHaveText("お茶");
     await expect(card.locator(".item code")).toHaveText("お茶");
   });
 
@@ -216,7 +237,8 @@ test.describe("memory drawn as Markdown", () => {
   });
 
   test("a one-line item sits on one line and runs nothing", async ({ page, request }) => {
-    const line = '- **太字** と <script>document.title = "x"</script> <img src=x onerror="document.title=1">';
+    // Short enough for one line whatever the fonts.
+    const line = "- **太字** と <script>x()</script> <img src=x onerror=x()>";
     await call(request, "MemoryService", "WriteFile", {
       path: "core.md",
       text: `# 心得\n\n- ふつうの行 {id: e2e-md5, src: said}\n${line} {id: e2e-md6, src: said}\n`,
@@ -249,7 +271,7 @@ test.describe("memory drawn as Markdown", () => {
     await expect(page.locator(".item strong")).toHaveText("話した");
     await visit(page, "/memory/forgotten?at=2026-01", "記憶 · 忘却");
     await expect(page.locator(".item strong")).toHaveText("癖");
-    await expect(page.locator(".item .sub code")).toHaveText("新しい");
+    await expect(page.locator(".item .item-sub code")).toHaveText("新しい");
     await visit(page, "/memory/working", "記憶 · 作業記憶");
     const card = page.locator("article.card").filter({ has: page.getByRole("heading", { name: "宿の 下調べ" }) });
     await expect(card.locator("h2 code")).toHaveText("下調べ");

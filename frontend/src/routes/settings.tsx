@@ -1,7 +1,7 @@
-import { A, useLocation } from "@solidjs/router";
+import { useLocation } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
-import Icon from "~/components/Icon";
 import * as icons from "~/lib/icons";
+import { Icon } from "~/components/ui";
 
 /** Every settings page, by group: path, label and icon. */
 export const NAV: [string, [string, string, string][]][] = [
@@ -37,23 +37,22 @@ export const NAV: [string, [string, string, string][]][] = [
 /** The settings pages share one frame: the list of pages beside the page. */
 export default function Settings(props: { children?: JSX.Element }) {
   const location = useLocation();
-  const on = (href: string) =>
-    href === "/settings" ? location.pathname === "/settings" : location.pathname.startsWith(href);
+  const on = (href: string) => (href === "/settings" ? location.pathname === "/settings" : location.pathname.startsWith(href));
   return (
-    <div class="pane split" style={{ margin: "-22px -26px", flex: 1 }}>
+    <div class="framed">
       <nav class="side settings-nav" aria-label="設定">
         <For each={NAV}>
           {([group, items]) => (
             <>
               <Show when={group}>
-                <h3 style={{ padding: "8px 8px 2px" }}>{group}</h3>
+                <h3>{group}</h3>
               </Show>
               <For each={items}>
                 {([href, label, icon]) => (
-                  <A class={`nav-item${on(href) ? " on" : ""}`} href={href} end>
+                  <a class="nav-item" classList={{ on: on(href) }} href={href} aria-current={on(href) ? "page" : undefined}>
                     <Icon svg={icon} size={16} />
                     <span>{label}</span>
-                  </A>
+                  </a>
                 )}
               </For>
             </>
@@ -61,7 +60,7 @@ export default function Settings(props: { children?: JSX.Element }) {
         </For>
       </nav>
       <div class="detail">
-        <div class="settings-page">{props.children}</div>
+        <div class="page settings-page">{props.children}</div>
       </div>
     </div>
   );

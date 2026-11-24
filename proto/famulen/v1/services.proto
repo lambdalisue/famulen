@@ -20,6 +20,27 @@ enum Permission {
 }
 
 // A service and account Famulen is connected to.
+// How a connection stands.
+enum ConnectionState {
+  CONNECTION_STATE_UNSPECIFIED = 0;
+  CONNECTION_STATE_CONNECTED = 1;
+  // Added, with its login never finished.
+  CONNECTION_STATE_LOGIN_PENDING = 2;
+  // Anything else its status says: an expired login, a server that does not
+  // answer.
+  CONNECTION_STATE_TROUBLED = 3;
+}
+
+// How a connection is reached.
+enum TransportKind {
+  TRANSPORT_KIND_UNSPECIFIED = 0;
+  TRANSPORT_KIND_MCP_REMOTE = 1;
+  TRANSPORT_KIND_MCP_LOCAL = 2;
+  TRANSPORT_KIND_API = 3;
+  // Set up from a service definition.
+  TRANSPORT_KIND_DEFINITION = 4;
+}
+
 message Connection {
   string id = 1;
   string name = 2;
@@ -36,6 +57,8 @@ message Connection {
   // What Famulen does with it on its own: reading the calendar and inbox,
   // watching mentions.
   string watching = 8;
+  ConnectionState state = 9;
+  TransportKind transport_kind = 10;
 }
 
 message ToolSetting {
@@ -455,6 +478,7 @@ message Channel {
   // How its connection stands: つながっている, ログインし直す, …
   string status = 6;
   bool enabled = 7;
+  ConnectionState state = 8;
 }
 
 message ListChannelsResponse {

@@ -1,42 +1,24 @@
-import { A, createAsync } from "@solidjs/router";
-import { For, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import { personaQuery } from "~/lib/data";
+import { createAsync } from "@solidjs/router";
+import { For } from "solid-js";
+import { IndexRow } from "~/components/IndexRow";
+import { List } from "~/components/ui";
 import * as icons from "~/lib/icons";
 import { layerHref, layersQuery } from "~/lib/memory";
 import { setView } from "~/lib/view";
+import { AboutMemory } from "../memory";
 
 /** The memory layers as a list of pages, for the narrow layout. */
 export default function MemoryMenu() {
   setView("記憶");
   const layers = createAsync(() => layersQuery());
-  const persona = createAsync(() => personaQuery());
   return (
     <>
-      <div class="list">
+      <List>
         <For each={layers()}>
-          {(l) => (
-            <A class="item index-row" href={layerHref(l.id)}>
-              <span class="index-icon">
-                <Icon svg={icons.brain} size={20} />
-              </span>
-              <span class="grow">
-                <b style={{ "font-size": "16px" }}>{l.label}</b>
-                <br />
-                <span class="sub">{l.help}</span>
-              </span>
-              <Show when={l.count}>
-                <span class="mono sub">{l.count}</span>
-              </Show>
-              <Icon svg={icons.chevronRight} size={18} />
-            </A>
-          )}
+          {(l) => <IndexRow href={layerHref(l.id)} icon={icons.brain} name={l.label} detail={l.help} count={l.count} />}
         </For>
-      </div>
-      <p class="sub">
-        記憶は {persona()?.name || "秘書"}{" "}
-        がやりとりから覚えたこと。予定・タスク・相手・物・契約は記録なので、ここには入らない。変更はすべて Git に残る。
-      </p>
+      </List>
+      <AboutMemory />
     </>
   );
 }

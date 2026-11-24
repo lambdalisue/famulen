@@ -41,5 +41,20 @@ export function standingText(t: DelegatedTask): string {
 
 export const runnerText = (runner: string) => ({ adroit: "Adroit", agent: "手代" })[runner] ?? "委託先なし";
 
-export const isBad = (t: DelegatedTask) =>
-  t.state === "unfit" || (t.state === "still" && ["failed", "refused"].includes(t.run?.outcome ?? ""));
+export const isBadOutcome = (outcome: string) => outcome === "failed" || outcome === "refused";
+
+export const isBad = (t: DelegatedTask) => t.state === "unfit" || t.state === "unreachable" || (t.state === "still" && isBadOutcome(t.run?.outcome ?? ""));
+
+type Stage = "owner" | "running" | "next";
+
+/** What a delegated task waits for, in the order the queue shows it: the owner, its end, or its turn. */
+export const STAGES: [Stage, string][] = [
+  ["owner", "あなたを待っている"],
+  ["running", "動いている"],
+  ["next", "順番を待っている"],
+];
+
+export function stageOf(t: DelegatedTask): Stage {
+  if (t.state === "running") return "running";
+  return ["asking", "waiting", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "next";
+}

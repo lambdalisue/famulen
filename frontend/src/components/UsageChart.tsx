@@ -2,6 +2,7 @@ import { Tooltip } from "@ark-ui/solid/tooltip";
 import { For, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { type Series, ticks } from "~/lib/usage";
+import { Legend } from "~/components/ui";
 
 export interface Column {
   key: string;
@@ -38,16 +39,7 @@ export default function UsageChart(props: {
     <section class="card usage-chart" aria-label={props.title}>
       <div class="usage-chart-head">
         <h2>{props.title}</h2>
-        <ul class="usage-legend">
-          <For each={props.series}>
-            {(s) => (
-              <li>
-                <i class="usage-swatch" style={{ background: s.color }} />
-                {s.label}
-              </li>
-            )}
-          </For>
-        </ul>
+        <Legend items={props.series.map((s) => ({ text: s.label, style: { background: s.color } }))} />
       </div>
       <div class="usage-plot">
         <div class="usage-axis" aria-hidden="true">
@@ -56,10 +48,7 @@ export default function UsageChart(props: {
         <div class="usage-grid" aria-hidden="true">
           <For each={scale()}>{(v) => <span style={{ bottom: percent(v) }} />}</For>
         </div>
-        <div
-          class="usage-columns"
-          style={{ "grid-template-columns": `repeat(${props.columns.length},minmax(0,1fr))` }}
-        >
+        <div class="usage-columns" style={{ "grid-template-columns": `repeat(${props.columns.length},minmax(0,1fr))` }}>
           <For each={props.columns}>
             {(column) => (
               <Tooltip.Root lazyMount unmountOnExit openDelay={80} closeDelay={0} closeOnClick={false} positioning={{ placement: "top" }}>

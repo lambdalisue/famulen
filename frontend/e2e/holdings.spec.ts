@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { acceptDialogs, dayFromToday, detail, field, record, row, toast, visit } from "./support";
+import { agree, dayFromToday, detail, field, record, row, toast, visit } from "./support";
 
 const deadline = (what: string, days: number) => [{ name: "Deadlines", items: [{ text: what, fields: [{ name: "On", value: dayFromToday(days) }] }] }];
 
@@ -43,9 +43,9 @@ for (const [kind, path, view, add] of [
 
     test("one is removed after asking", async ({ page, request }) => {
       const r = await record(request, kind, `${view}の不要品`);
-      acceptDialogs(page);
       await visit(page, `${path}?id=${r.id}`, `${view} · ${view}の不要品`);
       await page.getByRole("button", { name: `${view}の不要品を消す` }).click();
+      await agree(page, "消す");
       await expect(toast(page)).toHaveText("消した");
       await expect(row(page, `${view}の不要品`)).toHaveCount(0);
     });

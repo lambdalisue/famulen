@@ -1,12 +1,11 @@
 import { createAsync } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import Modal from "~/components/Modal";
-import Segs from "~/components/Segs";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { calendarsQuery } from "~/lib/calendar";
 import { linkTo, newWorkgroups } from "~/lib/records";
 import { workgroup } from "~/lib/workgroup";
+import { Checkbox, Dialog, DialogActions, Field, Segmented, Select, TextArea, TextField } from "~/components/ui";
 
 /** Add an event of the notebook, or hold a time. */
 export default function AddEvent(props: { day: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -29,15 +28,27 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
       { name: "Calendar", value: calendar ? linkTo({ kind: "calendars", id: calendar.id, title: calendar.name }) : "" },
     ].filter((x) => x.value);
     const made = await act(
-      () => api.records.saveRecord({ kind: "events", title: text("title"), notes: text("notes"), workgroups: newWorkgroups(workgroup()), fields }),
+      () =>
+        api.records.saveRecord({
+          kind: "events",
+          title: text("title"),
+          notes: text("notes"),
+          workgroups: newWorkgroups(workgroup()),
+          fields,
+        }),
       kind() === "hold" ? "仮押さえした" : "足した",
     );
     if (made) props.onOpenChange(false);
   };
   return (
-    <Modal open={props.open} onOpenChange={props.onOpenChange} title="予定を足す" description="手帳に置く予定。Google のカレンダーに入れるときは、会話で頼む。">
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title="予定を足す"
+      description="手帳に置く予定。Google のカレンダーに入れるときは、会話で頼む。"
+    >
       <form class="dialog-form" onSubmit={add}>
-        <Segs
+        <Segmented
           label="予定の種類"
           items={[
             ["confirmed", "予定"],
@@ -46,62 +57,47 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
           value={kind()}
           onChoose={setKind}
         />
-        <label class="dialog-field">
-          <span>何の予定か</span>
-          <input class="input" name="title" required autofocus />
-        </label>
-        <label class="records-over">
-          <input type="checkbox" checked={whole()} onChange={(e) => setWhole(e.currentTarget.checked)} />
+        <Field label="何の予定か">
+          <TextField name="title" required autofocus />
+        </Field>
+        <Checkbox checked={whole()} onChange={(e) => setWhole(e.currentTarget.checked)}>
           終日
-        </label>
-        <div class="dialog-field">
-          <span>始まり</span>
+        </Checkbox>
+        <Field label="始まり" group>
           <div class="row">
-            <input class="input" type="date" name="from" value={props.day} required aria-label="始まりの日" />
+            <TextField type="date" name="from" value={props.day} required aria-label="始まりの日" />
             <Show when={!whole()}>
-              <input class="input" type="time" name="fromTime" value="10:00" required aria-label="始まりの時刻" />
+              <TextField type="time" name="fromTime" value="10:00" required aria-label="始まりの時刻" />
             </Show>
           </div>
-        </div>
-        <div class="dialog-field">
-          <span>終わり</span>
+        </Field>
+        <Field label="終わり" group>
           <div class="row">
-            <input class="input" type="date" name="to" value={props.day} required aria-label="終わりの日" />
+            <TextField type="date" name="to" value={props.day} required aria-label="終わりの日" />
             <Show when={!whole()}>
-              <input class="input" type="time" name="toTime" value="11:00" required aria-label="終わりの時刻" />
+              <TextField type="time" name="toTime" value="11:00" required aria-label="終わりの時刻" />
             </Show>
           </div>
-        </div>
-        <label class="dialog-field">
-          <span>場所</span>
-          <input class="input" name="location" />
-        </label>
-        <label class="dialog-field">
-          <span>会議の URL</span>
-          <input class="input" name="meeting" type="url" />
-        </label>
+        </Field>
+        <Field label="場所">
+          <TextField name="location" />
+        </Field>
+        <Field label="会議の URL">
+          <TextField name="meeting" type="url" />
+        </Field>
         <Show when={own().length > 0}>
-          <label class="dialog-field">
-            <span>カレンダー</span>
-            <select class="input" name="calendar">
+          <Field label="カレンダー">
+            <Select name="calendar">
               <option value="">なし</option>
               <For each={own()}>{(c) => <option value={c.id}>{c.name}</option>}</For>
-            </select>
-          </label>
+            </Select>
+          </Field>
         </Show>
-        <label class="dialog-field">
-          <span>備考</span>
-          <textarea class="input" name="notes" placeholder="Markdown で書ける" />
-        </label>
-        <div class="dialog-actions">
-          <button type="button" class="btn" onClick={() => props.onOpenChange(false)}>
-            やめる
-          </button>
-          <button type="submit" class="btn primary">
-            足す
-          </button>
-        </div>
+        <Field label="備考">
+          <TextArea name="notes" placeholder="Markdown で書ける" />
+        </Field>
+        <DialogActions submit="足す" />
       </form>
-    </Modal>
+    </Dialog>
   );
 }

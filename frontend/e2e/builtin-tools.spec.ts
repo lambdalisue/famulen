@@ -26,7 +26,7 @@ test("the owner forbids the secretary's shell on the built-in tools page and the
     await page.getByRole("button", { name: "送る" }).click();
 
     const sheet = await openLog(page, "/settings/vault", "設定 · 金庫", "ゲートウェイの控え", "控えを見る");
-    await sheet.getByRole("button", { name: "断った" }).click();
+    await sheet.getByRole("radiogroup", { name: "判断" }).getByText("断った").click();
     await expect(sheet.locator(".gateway-log-entry").filter({ hasText: "Bash" }).first()).toContainText("断った");
   } finally {
     await call(request, "ConnectionService", "SetPermission", { scope: "", tool: "Bash", permission: "PERMISSION_UNSPECIFIED" });

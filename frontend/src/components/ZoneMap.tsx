@@ -36,15 +36,7 @@ export default function ZoneMap(props: { value: string; onPick: (zone: string) =
       >
         <path class="land" d={LAND} />
         <For each={PLACES}>
-          {(p) => (
-            <circle
-              class="place"
-              classList={{ near: p.id === hover() }}
-              cx={p.at[0]}
-              cy={p.at[1]}
-              r={p.id === hover() ? 3 : 1.6}
-            />
-          )}
+          {(p) => <circle class="place" classList={{ near: p.id === hover() }} cx={p.at[0]} cy={p.at[1]} r={p.id === hover() ? 3 : 1.6} />}
         </For>
         <Show when={chosen()}>
           {(place) => {

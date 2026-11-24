@@ -1,17 +1,15 @@
-import { Switch } from "@ark-ui/solid/switch";
+import { shortTime, weekday, WEEKDAYS } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
-import Segs from "~/components/Segs";
 import type { RoutineRun } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { assigneeOf, newWorkgroups, type Rec, routinesQuery, valueOf } from "~/lib/records";
-import { shortTime } from "~/lib/time";
+import { assigneeOf, newWorkgroups, OWNER, SECRETARY, type Rec, routinesQuery, valueOf } from "~/lib/records";
+import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
+import { Button, Callout, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
+import type { RowParts } from "./Row";
 
 const useRuns = () => {
   const routines = createAsync(() => routinesQuery());
@@ -21,102 +19,115 @@ const useRuns = () => {
 const skip = (routine: string, run: RoutineRun) =>
   act(() => api.routines.skipRun({ routine, at: run.at, undo: run.skipped }), run.skipped ? "戻した" : "この回を飛ばす");
 
-/** One routine in a list. */
-export function RoutineRow(props: { routine: Rec }) {
-  const runs = useRuns();
-  const persona = createAsync(() => personaQuery());
-  const info = () => runs(props.routine.id);
-  const next = () => info()?.runs[0];
-  const on = () => valueOf(props.routine, "Enabled") !== "no";
+/** Whether a routine runs at all. */
+function Running(props: { routine: Rec }) {
+  const r = () => props.routine;
   return (
-    <>
-      <Switch.Root
-        checked={on()}
-        onCheckedChange={(d) =>
-          void act(
-            () => api.records.saveRecord({ kind: "routines", id: props.routine.id, fields: [{ name: "Enabled", value: d.checked ? "yes" : "no" }] }),
-            d.checked ? "動かす" : "止めた",
-          )
-        }
-      >
-        <Switch.Control class="switch">
-          <Switch.Thumb class="switch-thumb" />
-        </Switch.Control>
-        <Switch.Label class="sr">{props.routine.title}を動かす</Switch.Label>
-        <Switch.HiddenInput />
-      </Switch.Root>
-      <span class="rec-main">
-        <b style={on() ? {} : { color: "#8C8A82" }}>{props.routine.title}</b>
-        <span class="rec-sub">
-          <span>{info()?.when}</span>
-          <Show when={info()?.problem}>{(p) => <span class="tag bad">{p()}</span>}</Show>
-          <For each={props.routine.labels}>{(l) => <span class="tag label">{l}</span>}</For>
-        </span>
-      </span>
-      <span class="rec-side">
-        <Show when={on() && next()}>
+    <Switch
+      hidden
+      checked={isOn(r())}
+      onChange={(on) =>
+        void act(
+          () => api.records.saveRecord({ kind: "routines", id: r().id, fields: [{ name: "Enabled", value: on ? "yes" : "no" }] }),
+          on ? "動かす" : "止めた",
+        )
+      }
+    >
+      {r().title}を動かす
+    </Switch>
+  );
+}
+
+const isOn = (r: Rec) => valueOf(r, "Enabled") !== "no";
+
+/** When a routine next runs, with a way to leave that run out. */
+function Next(props: { routine: Rec }) {
+  const runs = useRuns();
+  const owner = useOwner();
+  const next = () => (isOn(props.routine) ? runs(props.routine.id)?.runs[0] : undefined);
+  const aides = () => (valueOf(props.routine, "Assignee") || OWNER) === SECRETARY;
+  return (
+    <span class="rec-side">
+      <Show when={next()}>
+        {(n) => (
+          <span class="rec-when">
+            {n().skipped ? "飛ばす " : "次 "}
+            {shortTime(n().at, owner.tz())}
+          </span>
+        )}
+      </Show>
+      <span class="row">
+        <Show when={next()}>
           {(n) => (
-            <span class="rec-when">
-              {n().skipped ? "飛ばす " : "次 "}
-              {shortTime(n().at, persona()?.timezone ?? "UTC")}
-            </span>
+            <button
+              type="button"
+              class="tag"
+              aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
+              onClick={() => void skip(props.routine.id, n())}
+            >
+              <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
+              {n().skipped ? "戻す" : "次を飛ばす"}
+            </button>
           )}
         </Show>
-        <span class="row">
-          <Show when={on() && next()}>
-            {(n) => (
-              <button
-                type="button"
-                class="tag"
-                aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
-                onClick={() => void skip(props.routine.id, n())}
-              >
-                <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
-                {n().skipped ? "戻す" : "次を飛ばす"}
-              </button>
-            )}
-          </Show>
-          <span class={`tag${assigneeOf(props.routine, "秘書") === "秘書" ? " aide" : ""}`}>{assigneeOf(props.routine, persona()?.name || "秘書")}</span>
-        </span>
+        <Tag tone={aides() ? "aide" : undefined}>{assigneeOf(props.routine, owner.aide())}</Tag>
       </span>
+    </span>
+  );
+}
+
+function When(props: { routine: Rec }) {
+  const runs = useRuns();
+  const info = () => runs(props.routine.id);
+  return (
+    <>
+      <span>{info()?.when}</span>
+      <Show when={info()?.problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>
     </>
   );
+}
+
+/** One routine in a list. */
+export function routineParts(r: () => Rec): RowParts {
+  return {
+    lead: () => <Running routine={r()} />,
+    title: () => <span classList={{ quiet: !isOn(r()) }}>{r().title}</span>,
+    sub: () => <When routine={r()} />,
+    end: () => <Next routine={r()} />,
+  };
 }
 
 /** The runs to come, each skipped or put back on its own. */
 export function Runs(props: { routine: Rec }) {
   const runs = useRuns();
-  const persona = createAsync(() => personaQuery());
-  const tz = () => persona()?.timezone ?? "UTC";
+  const owner = useOwner();
+  const tz = owner.tz;
   return (
     <Show when={runs(props.routine.id)}>
       {(info) => (
         <section class="rec-section">
           <h3>これからの回</h3>
-          <div class="callout">
+          <Callout icon={icons.repeat} action={<Show when={info().problem}>{(p) => <Tag tone="danger">{p()}</Tag>}</Show>}>
             <b>{info().when || "時刻がまだない"}</b>
             <Show when={info().lastRun > 0n}>
-              <span class="sub">前に動いたのは {shortTime(info().lastRun, tz())}</span>
+              <span class="sub"> 前に動いたのは {shortTime(info().lastRun, tz())}</span>
             </Show>
-            <Show when={info().problem}>{(p) => <span class="tag bad">{p()}</span>}</Show>
-          </div>
+          </Callout>
           <For each={info().runs}>
             {(r) => (
               <div class="run" classList={{ skipped: r.skipped }}>
                 <span class="mono run-at">{shortTime(r.at, tz())}</span>
                 <Show when={r.skipped}>
-                  <span class="tag">飛ばす</span>
+                  <Tag>飛ばす</Tag>
                 </Show>
                 <span class="grow" />
-                <button type="button" class="btn small" onClick={() => void skip(props.routine.id, r)}>
+                <Button small onClick={() => void skip(props.routine.id, r)}>
                   {r.skipped ? "戻す" : "この回を飛ばす"}
-                </button>
+                </Button>
               </div>
             )}
           </For>
-          <p class="sub">
-            ほかのタスクの状態や前の回しだいで飛ばすなら、下の「飛ばす条件」を足す。
-          </p>
+          <p class="sub">ほかのタスクの状態や前の回しだいで飛ばすなら、下の「飛ばす条件」を足す。</p>
         </section>
       )}
     </Show>
@@ -130,12 +141,11 @@ const REPEATS: [string, string][] = [
   ["monthly", "毎月"],
   ["cron", "細かく"],
 ];
-const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 /** Add a routine: what, when in words, and what to do then. */
 export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   const [repeat, setRepeat] = createSignal("weekdays");
   const [who, setWho] = createSignal("secretary");
   const add = async (e: SubmitEvent & { currentTarget: HTMLFormElement }) => {
@@ -171,55 +181,56 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
     navigate(`/tasks?tab=routines&id=${made.id}`);
   };
   return (
-    <Modal open={props.open} onOpenChange={props.onOpenChange} title="定期タスクを足す">
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title="定期タスクを足す">
       <form class="dialog-form" onSubmit={add}>
-        <label class="dialog-field">
-          <span>何をするか</span>
-          <input class="input" name="title" required autofocus />
-        </label>
-        <div class="dialog-field">
-          <span>いつ</span>
-          <Segs label="繰り返し" items={REPEATS} value={repeat()} onChoose={setRepeat} />
+        <Field label="何をするか">
+          <TextField name="title" required autofocus />
+        </Field>
+        <Field label="いつ" group>
+          <Segmented label="繰り返し" items={REPEATS} value={repeat()} onChoose={setRepeat} />
           <div class="row">
             <Show when={repeat() === "weekly"}>
-              <select class="input" name="weekday" aria-label="曜日">
-                <For each={DAYS}>{(d, i) => <option value={i()} selected={i() === 1}>{d}曜</option>}</For>
-              </select>
+              <Select name="weekday" aria-label="曜日">
+                <For each={WEEKDAYS}>
+                  {(d, i) => (
+                    <option value={i()} selected={i() === 1}>
+                      {d}曜
+                    </option>
+                  )}
+                </For>
+              </Select>
             </Show>
             <Show when={repeat() === "monthly"}>
-              <input class="input" name="day" type="number" min="1" max="28" value="1" aria-label="日" />
+              <TextField name="day" type="number" min="1" max="28" value="1" aria-label="日" />
             </Show>
-            <Show when={repeat() !== "cron"} fallback={<input class="input mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}>
-              <input class="input" name="time" type="time" value="09:00" required aria-label="時刻" />
+            <Show
+              when={repeat() !== "cron"}
+              fallback={<TextField class="mono" name="cron" required placeholder="分 時 日 月 曜日" aria-label="cron" />}
+            >
+              <TextField name="time" type="time" value="09:00" required aria-label="時刻" />
             </Show>
           </div>
-        </div>
-        <div class="dialog-field">
-          <span>だれが</span>
-          <Segs
+        </Field>
+        <Field
+          label="だれが"
+          hint={who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"}
+          group
+        >
+          <Segmented
             label="担当"
             items={[
-              ["secretary", persona()?.name || "秘書"],
+              ["secretary", owner.aide()],
               ["owner", "あなた"],
             ]}
             value={who()}
             onChoose={setWho}
           />
-          <span class="sub">{who() === "owner" ? "回が来ると、あなたのタスクができる。" : "回が来ると、下に書いたことをする。"}</span>
-        </div>
-        <label class="dialog-field">
-          <span>詳しく</span>
-          <textarea class="input" name="notes" placeholder="Markdown で書ける" />
-        </label>
-        <div class="dialog-actions">
-          <button type="button" class="btn" onClick={() => props.onOpenChange(false)}>
-            やめる
-          </button>
-          <button type="submit" class="btn primary">
-            足す
-          </button>
-        </div>
+        </Field>
+        <Field label="詳しく">
+          <TextArea name="notes" placeholder="Markdown で書ける" />
+        </Field>
+        <DialogActions submit="足す" />
       </form>
-    </Modal>
+    </Dialog>
   );
 }

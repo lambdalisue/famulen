@@ -8,15 +8,15 @@ test("the owner chooses on the vault page whether the secretary is asked before 
   request,
 }) => {
   await visit(page, "/settings/vault", "設定 · 金庫");
-  const put = page.getByRole("group", { name: "秘密を入れる・置き換える" });
-  const remove = page.getByRole("group", { name: "秘密を消す" });
-  await expect(put.getByRole("button", { name: "尋ねない" })).toHaveAttribute("aria-pressed", "true");
-  await expect(remove.getByRole("button", { name: "尋ねる" })).toHaveAttribute("aria-pressed", "true");
+  const put = page.getByRole("radiogroup", { name: "秘密を入れる・置き換える" });
+  const remove = page.getByRole("radiogroup", { name: "秘密を消す" });
+  await expect(put.getByRole("radio", { name: "許可する" })).toBeChecked();
+  await expect(remove.getByRole("radio", { name: "確認する" })).toBeChecked();
 
-  await put.getByRole("button", { name: "尋ねる" }).click();
+  await put.getByText("確認する").click();
 
   await expect(toast(page)).toHaveText("変えた");
-  await expect(put.getByRole("button", { name: "尋ねる" })).toHaveAttribute("aria-pressed", "true");
+  await expect(put.getByRole("radio", { name: "確認する" })).toBeChecked();
   expect(await call<Permissions>(request, "VaultService", "GetVaultPermissions")).toMatchObject({
     put: "PERMISSION_CONFIRM",
     delete: "PERMISSION_CONFIRM",
@@ -37,11 +37,12 @@ test("the gateway's log shows what was changed, by whom, without the secret, and
   await expect(entry).toContainText("log-probe");
   await expect(page.locator("body")).not.toContainText("log-probe-value");
 
-  await sheet.getByRole("button", { name: "断った" }).click();
-  await expect(sheet.getByRole("button", { name: "断った" })).toHaveAttribute("aria-pressed", "true");
+  const decisions = sheet.getByRole("radiogroup", { name: "判断" });
+  await decisions.getByText("断った").click();
+  await expect(decisions.getByRole("radio", { name: "断った" })).toBeChecked();
   await expect(sheet.locator(".gateway-log-entry").filter({ hasText: "log-probe" })).toHaveCount(0);
 
-  await sheet.getByRole("button", { name: "すべて" }).click();
+  await decisions.getByText("すべて").click();
   await sheet.getByLabel("呼ぶ者").selectOption("secretary");
   await expect(sheet.locator(".gateway-log-entry").filter({ hasText: "log-probe" })).toHaveCount(0);
 

@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch } from "solid-js";
 import type { LookoutTool } from "~/gen/famulen/v1/lookout_pb";
+import { Field as UiField, Select, TextField } from "~/components/ui";
 
 type Field = { name: string; title: string; type: string; description: string; required: boolean; choices: string[] };
 
@@ -92,14 +93,22 @@ function ToolArgs(props: { fields: Field[]; typed: Record<string, string>; onTyp
       {(f) => {
         const value = () => props.typed[f.name] ?? "";
         return (
-          <label class="dialog-field">
-            <span classList={{ mono: f.title === f.name }} title={f.name}>
-              {f.title}
-            </span>
+          <UiField
+            label={
+              <span classList={{ mono: f.title === f.name }} title={f.name}>
+                {f.title}
+              </span>
+            }
+            hint={
+              <>
+                {f.required ? "要る。" : "なくてもよい。"}
+                {f.description}
+              </>
+            }
+          >
             <Switch
               fallback={
-                <input
-                  class="input"
+                <TextField
                   classList={{ mono: f.type in HINTS }}
                   type={f.type === "integer" || f.type === "number" ? "number" : "text"}
                   step={f.type === "number" ? "any" : undefined}
@@ -111,19 +120,15 @@ function ToolArgs(props: { fields: Field[]; typed: Record<string, string>; onTyp
               }
             >
               <Match when={f.choices.length > 0 || f.type === "boolean"}>
-                <select class="input" required={f.required} value={value()} onChange={(e) => props.onType(f.name, e.currentTarget.value)}>
+                <Select required={f.required} value={value()} onChange={(e) => props.onType(f.name, e.currentTarget.value)}>
                   <option value="">{f.required ? "選ぶ" : "決めない"}</option>
                   <For each={f.choices.length > 0 ? f.choices : ["true", "false"]}>
                     {(c) => <option value={c}>{c === "true" ? "はい" : c === "false" ? "いいえ" : c}</option>}
                   </For>
-                </select>
+                </Select>
               </Match>
             </Switch>
-            <small class="sub">
-              {f.required ? "要る。" : "なくてもよい。"}
-              {f.description}
-            </small>
-          </label>
+          </UiField>
         );
       }}
     </For>
@@ -149,9 +154,13 @@ export function ToolField(props: {
   };
   return (
     <>
-      <label class="dialog-field">
-        <span>読む道具</span>
-        <select class="input mono" required={!props.none} onChange={(e) => props.chooseTool(e.currentTarget.value)}>
+      <UiField
+        label="読む道具"
+        hint={
+          chosen()?.description || "決まった間隔で呼び、結果に新しく出てきたものを見る。確認なしに呼ぶので、読むだけの道具しか選べない。"
+        }
+      >
+        <Select class="mono" required={!props.none} onChange={(e) => props.chooseTool(e.currentTarget.value)}>
           <option value="" selected={!props.tool}>
             {props.none ?? "選ぶ"}
           </option>
@@ -162,31 +171,23 @@ export function ToolField(props: {
               </option>
             )}
           </For>
-        </select>
-        <small class="sub">
-          {chosen()?.description ||
-            "決まった間隔で呼び、結果に新しく出てきたものを見る。確認なしに呼ぶので、読むだけの道具しか選べない。"}
-        </small>
-      </label>
+        </Select>
+      </UiField>
       <Show when={props.tool}>
         <Show
           when={fieldsOf(chosen()?.inputSchema ?? "")}
           fallback={
-            <label class="dialog-field">
-              <span>条件（JSON）</span>
-              <input
-                class="input mono"
+            <UiField label="条件（JSON）" hint="この道具は、何を受け取るかを言わない。要らなければ空のままでよい。">
+              <TextField
+                class="mono"
                 placeholder='{"query":"is:unread newer_than:1d"}'
                 value={props.args}
                 onInput={(e) => props.setArgs(e.currentTarget.value)}
               />
-              <small class="sub">この道具は、何を受け取るかを言わない。要らなければ空のままでよい。</small>
-            </label>
+            </UiField>
           }
         >
-          {(known) => (
-            <ToolArgs fields={known()} typed={props.typed} onType={(k, v) => props.setTyped({ ...props.typed, [k]: v })} />
-          )}
+          {(known) => <ToolArgs fields={known()} typed={props.typed} onType={(k, v) => props.setTyped({ ...props.typed, [k]: v })} />}
         </Show>
       </Show>
     </>

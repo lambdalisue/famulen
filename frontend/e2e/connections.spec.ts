@@ -1,5 +1,5 @@
 import { type APIRequestContext, expect, test } from "@playwright/test";
-import { call, expectView, toast, visit } from "./support";
+import { agree, call, expectView, toast, visit } from "./support";
 
 type Detail = { tools: { name: string }[] };
 type Connected = { connection: { id: string } };
@@ -213,6 +213,8 @@ test.describe("サービス", () => {
       await expect(section.locator(".item").filter({ hasText: "わたし" })).toContainText("メインのカレンダー");
 
       await section.getByRole("button", { name: "祝日を外す" }).click();
+
+      await agree(page, "外す");
       await expect(toast(page)).toHaveText("外した");
       await expect(section.getByText("祝日", { exact: true })).toHaveCount(0);
     } finally {
@@ -298,6 +300,8 @@ test.describe("サービス", () => {
     await expect(page.getByRole("heading", { name: "手元のサーバー" })).toBeVisible();
 
     await page.getByRole("button", { name: "外す", exact: true }).click();
+
+    await agree(page, "外す");
     await expect(page).toHaveURL(/\/settings\/services$/);
     await expect(toast(page)).toHaveText("外した");
     await expect(page.getByRole("link", { name: /手元のサーバー/ })).toHaveCount(0);
@@ -321,17 +325,19 @@ test.describe("見張り", () => {
       const sources = page.locator("section").filter({ has: page.getByRole("heading", { name: "見張るもの" }) });
       const source = sources.locator(".list > .item").filter({ hasText: "仕事のフック" });
       await expect(source.getByRole("radio", { name: "既定（ほか・15 分）" })).toBeChecked();
-      await expect(source.getByRole("button", { name: "見張っている" })).toHaveAttribute("aria-pressed", "true");
+      await expect(source.getByRole("checkbox", { name: /見張っている/ })).toBeChecked();
 
-      await source.getByRole("button", { name: "見張っている" }).click();
+      await source.locator(".switch").click();
       await expect(toast(page)).toHaveText("止めた");
-      await expect(source.getByRole("button", { name: "止めている" })).toHaveAttribute("aria-pressed", "false");
+      await expect(source.getByRole("checkbox", { name: /止めている/ })).not.toBeChecked();
       await page.reload();
-      await expect(source.getByRole("button", { name: "止めている" })).toBeVisible();
-      await source.getByRole("button", { name: "止めている" }).click();
+      await expect(source.getByText("止めている")).toBeVisible();
+      await source.locator(".switch").click();
       await expect(toast(page)).toHaveText("見張りを始めた");
 
       await source.getByRole("button", { name: "外す" }).click();
+
+      await agree(page, "外す");
       await expect(toast(page)).toHaveText("外した");
       await expect(source).toHaveCount(0);
     } finally {
@@ -367,6 +373,8 @@ test.describe("見張り", () => {
       await expect(source).toContainText("分ごとに読みに行く");
 
       await source.getByRole("button", { name: "外す" }).click();
+
+      await agree(page, "外す");
       await expect(source).toHaveCount(0);
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
@@ -398,6 +406,7 @@ test.describe("見張り", () => {
       const source = page.locator(".list > .item").filter({ hasText: "畳んだ見張り" });
       await expect(source).toBeVisible();
       await source.getByRole("button", { name: "外す" }).click();
+      await agree(page, "外す");
       await expect(source).toHaveCount(0);
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
@@ -594,7 +603,7 @@ test.describe("見張り", () => {
       await dialog.getByRole("button", { name: "足す", exact: true }).click();
       await expect(dialog).toBeVisible();
       await tool.selectOption("http_get");
-      await expect(dialog.locator("small", { hasText: /^GET/ })).toBeVisible();
+      await expect(dialog.locator(".sub", { hasText: /^GET/ })).toBeVisible();
       await expect(dialog.getByLabel("path")).toHaveAttribute("required", "");
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
@@ -620,6 +629,7 @@ test.describe("見張り", () => {
       const source = page.locator(".list > .item").filter({ hasText: "既定で見る課題" });
       await expect(source.getByRole("radio", { name: "既定（ほか・15 分）" })).toBeChecked();
       await source.getByRole("button", { name: "外す" }).click();
+      await agree(page, "外す");
       await expect(source).toHaveCount(0);
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
@@ -712,6 +722,7 @@ test.describe("見張り", () => {
 
       await visit(page, "/settings/lookout", "設定 · 見張り");
       await source.getByRole("button", { name: "外す" }).click();
+      await agree(page, "外す");
       await expect(source).toHaveCount(0);
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
@@ -753,7 +764,7 @@ test.describe("見張り", () => {
     try {
       await visit(page, "/settings/lookout", "設定 · 見張り");
       const source = page.locator(".list > .item").filter({ hasText: "打ちかけの見張り" });
-      const toggle = () => source.getByRole("button", { name: /見張っている|止めている/ }).click();
+      const toggle = () => source.locator(".switch").click();
       await typeDuring(toggle, source.getByLabel("打ちかけの見張りを見る間隔（分）"), "7");
       await expectView(page, "設定 · 見張り");
       await typeDuring(toggle, page.getByLabel("ほかの既定の間隔（分）"), "8");

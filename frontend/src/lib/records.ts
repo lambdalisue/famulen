@@ -1,13 +1,35 @@
+import { Code, ConnectError } from "@connectrpc/connect";
 import { query } from "@solidjs/router";
 import type { Field, FieldType, LinkAccountRequest, Record as Rec, RecordItem, RecordKind } from "~/gen/famulen/v1/records_pb";
 import type { Workgroup } from "~/gen/famulen/v1/workgroups_pb";
 import { api } from "./api";
+import { daysBetween } from "./dates";
+import { hasWords } from "./words";
 
 export type { Field, FieldType, LinkAccountRequest, Rec, RecordItem, RecordKind };
 
 export const OWNER = "owner";
 export const SECRETARY = "secretary";
 export const WORKER = "worker";
+
+/** What a field holds, as it is saved. */
+export type FieldValue = { value: string; values: string[] };
+/** A field with what it holds, whether it came from the API or is being put together. */
+export type FieldLike = FieldValue & { name: string };
+/** What a field may hold. */
+export type FieldSpec = Pick<FieldType, "name" | "type" | "choices" | "of">;
+/** An item of a section, as it is saved. */
+export type ItemLike = { text: string; fields: FieldLike[] };
+
+export const plainField = (f: FieldLike): FieldLike => ({ name: f.name, value: f.value, values: f.values });
+export const plainItem = (i: ItemLike): ItemLike => ({ text: i.text, fields: i.fields.map(plainField) });
+export const isEmpty = (v: FieldValue) => !v.value && v.values.length === 0;
+
+/** Set a field among others, or take it out when it is left empty. */
+export function withField(fields: readonly FieldLike[], name: string, v: FieldValue): FieldLike[] {
+  const left = fields.filter((f) => !same(f.name, name)).map(plainField);
+  return isEmpty(v) ? left : [...left, { name, ...v }];
+}
 
 /** The field every kind has: the records it has to do with. */
 export const RELATED = "Related";
@@ -17,29 +39,31 @@ export const recordsQuery = query(
   "records",
 );
 
-/** One record whole, or nothing when it is gone. */
+/** One record whole, or null when there is none; a read that fails is thrown, not taken for a record that is gone. */
 export const recordQuery = query(async (kind: string, id: string) => {
   try {
     return await api.records.getRecord({ kind, id });
-  } catch {
-    return undefined;
+  } catch (e) {
+    if (ConnectError.from(e).code === Code.NotFound) return null;
+    throw e;
   }
 }, "record");
 
 export const kindsQuery = query(async () => (await api.records.listKinds({})).kinds, "kinds");
 export const routinesQuery = query(async () => (await api.routines.listRoutines({})).routines, "routines");
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** Names of fields and sections are read whatever their case. */
+export const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-export function fieldOf(r: { fields: Field[] } | undefined, name: string): Field | undefined {
+export function fieldOf<T extends FieldLike>(r: { fields: T[] } | undefined, name: string): T | undefined {
   return r?.fields.find((f) => same(f.name, name));
 }
 
-export function valueOf(r: { fields: Field[] } | undefined, name: string): string {
+export function valueOf(r: { fields: FieldLike[] } | undefined, name: string): string {
   return fieldOf(r, name)?.value ?? "";
 }
 
-export function valuesOf(r: { fields: Field[] } | undefined, name: string): string[] {
+export function valuesOf(r: { fields: FieldLike[] } | undefined, name: string): string[] {
   return fieldOf(r, name)?.values ?? [];
 }
 
@@ -47,7 +71,12 @@ export function itemsOf(r: Rec, section: string): RecordItem[] {
   return r.sections.find((s) => same(s.name, section))?.items ?? [];
 }
 
-export function sectionOf(r: Rec, section: string): { fields: Field[] } | undefined {
+/** A section of a record, by its name. */
+export function sectionIn(r: Rec, name: string) {
+  return r.sections.find((s) => same(s.name, name));
+}
+
+export function sectionOf(r: Rec, section: string): { fields: FieldLike[] } | undefined {
   return r.sections.find((s) => same(s.name, section));
 }
 
@@ -252,8 +281,7 @@ export function bucketOf(r: Rec, today: string): Bucket {
   const due = valueOf(r, "Due").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return "later";
   if (due <= today) return "today";
-  const days = (Date.parse(`${due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000;
-  return days < 7 ? "week" : "later";
+  return daysBetween(today, due) < 7 ? "week" : "later";
 }
 
 /** Who does a task, in a word. */
@@ -262,7 +290,19 @@ export function assigneeOf(r: Rec, aide: string): string {
   return linkOf(who)?.title || choiceOf(who || OWNER, aide);
 }
 
-/** The deadlines of a thing or contract that are still to come round, soonest first. */
+/** Whether a thing was let go, or a contract is over: its deadlines no longer matter. */
+export const isPast = (r: Rec) => ["released", "ended"].includes(valueOf(r, "Status"));
+
+/** Text of Markdown on one line, as a list shows it. */
+export function excerptOf(markdown: string, length = 160): string {
+  return plainText(markdown)
+    .replace(/[#>*`|_~-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, length);
+}
+
+/** Every deadline of a thing or contract, soonest first. */
 export function deadlinesOf(r: Rec): { what: string; on: string }[] {
   return itemsOf(r, "Deadlines")
     .map((i) => ({ what: i.text, on: valueOf(i, "On") }))
@@ -270,18 +310,9 @@ export function deadlinesOf(r: Rec): { what: string; on: string }[] {
     .sort((a, b) => a.on.localeCompare(b.on));
 }
 
-/** `3 日後`, `今日`, `5 日過ぎた`. */
-export function daysLeft(on: string, today: string): string {
-  const days = Math.round((Date.parse(`${on.slice(0, 10)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
-  if (Number.isNaN(days)) return "";
-  if (days === 0) return "今日";
-  if (days === 1) return "明日";
-  return days > 0 ? `${days} 日後` : `${-days} 日過ぎた`;
-}
-
 /** Whether every word is somewhere in the record. */
 export function matches(r: Rec, words: string): boolean {
-  const hay = [
+  const said = [
     r.title,
     r.code,
     r.notes,
@@ -289,13 +320,8 @@ export function matches(r: Rec, words: string): boolean {
     ...r.fields.map((f) => f.value),
     ...r.details.flatMap((f) => [f.name, f.value]),
     ...r.sections.flatMap((s) => [...s.fields.map((f) => f.value), ...s.items.flatMap((i) => [i.text, ...i.fields.map((f) => f.value)])]),
-  ]
-    .join("\n")
-    .toLowerCase();
-  return words
-    .toLowerCase()
-    .split(/\s+/)
-    .every((w) => hay.includes(w));
+  ];
+  return hasWords(said.join("\n"), words);
 }
 
 /** The names of the workgroups a record is in, joined for a sub line. */
@@ -309,14 +335,6 @@ export function workgroupNames(workgroups: Workgroup[] | undefined, ids: string[
 /** A new record goes into the workgroup on screen, unless that is すべて. */
 export function newWorkgroups(workgroup: string): string[] {
   return workgroup && workgroup !== "all" ? [workgroup] : [];
-}
-
-/** `2026年3月1日`, with its time when it has one. */
-export function dateText(text: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?$/.exec(text.trim());
-  if (!m) return text;
-  const year = Number(m[1]) === new Date().getFullYear() ? "" : `${m[1]}年`;
-  return `${year}${Number(m[2])}月${Number(m[3])}日${m[4] ? ` ${m[4]}` : ""}`;
 }
 
 export function moneyText(text: string): string {

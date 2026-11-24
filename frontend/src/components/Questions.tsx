@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import type { ApprovalQuestion } from "~/gen/famulen/v1/console_pb";
+import { Button, TextField } from "~/components/ui";
 
 /** Questions the owner answers by choosing or in their own words. */
 export default function Questions(props: { questions: ApprovalQuestion[]; onAnswer: (replies: string[]) => void }) {
@@ -37,16 +38,15 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
             <div class="question-choices">
               <For each={q.choices}>
                 {(c) => (
-                  <button
-                    type="button"
-                    class="btn small"
+                  <Button
+                    small
                     classList={{ primary: (chosen()[i()] ?? []).includes(c.label) }}
                     aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)}
                     title={c.description}
                     onClick={() => choose(i(), q, c.label)}
                   >
                     {c.label}
-                  </button>
+                  </Button>
                 )}
               </For>
             </div>
@@ -57,9 +57,7 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
                 </span>
               )}
             </For>
-            <input
-              class="input"
-              autocomplete="off"
+            <TextField
               aria-label={`${q.question} に自分の言葉で答える`}
               placeholder="自分の言葉で答える"
               value={words()[i()] ?? ""}
@@ -72,9 +70,9 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
         )}
       </For>
       <Show when={!quick() || words()[0]?.trim()}>
-        <button class="btn go small" disabled={!replies().every((r) => r)}>
+        <Button variant="go" small type="submit" disabled={!replies().every((r) => r)}>
           答える
-        </button>
+        </Button>
       </Show>
     </form>
   );

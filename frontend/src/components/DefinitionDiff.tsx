@@ -47,9 +47,7 @@ export default function DefinitionDiff(props: { before: string; after: string })
         {props.before === "" ? <span>新しい定義</span> : null}
       </div>
       <div class="diff-body mono">
-        <For each={shown()}>
-          {(part) => (part.kind === "fold" ? <Folded fold={part} /> : <Line line={part} />)}
-        </For>
+        <For each={shown()}>{(part) => (part.kind === "fold" ? <Folded fold={part} /> : <Line line={part} />)}</For>
       </div>
     </div>
   );

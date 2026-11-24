@@ -3,7 +3,7 @@
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::slack::attention;
 
-use crate::connections::status_label;
+use crate::connections::{state_of, status_label};
 use crate::pb::*;
 use crate::{Api, OrFail, actor, changed, fail, given};
 
@@ -36,6 +36,7 @@ impl Api {
             .into_iter()
             .map(|c| Channel {
                 status: status_label(&c.status).into(),
+                state: state_of(&c.status).into(),
                 connection: c.connection,
                 receiver: c.receiver,
                 name: c.name,

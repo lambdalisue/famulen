@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { acceptDialogs, call, dayFromToday, detail, expectView, field, record, row, toast, visit } from "./support";
+import { agree, call, dayFromToday, detail, expectView, field, pane, record, row, toast, visit } from "./support";
 
 function group(page: Page, heading: string) {
   return page.locator("details.rec-group").filter({ has: page.getByRole("heading", { name: heading, exact: true }) });
@@ -141,35 +141,109 @@ test("a task says what it waits for, and the other says what waits for it", asyn
   await expect(detail(page).locator(".rec-links").filter({ hasText: "これを待つタスク" })).toContainText("後の仕事");
   await detail(page).getByRole("button", { name: "済にする" }).click();
   await expect(toast(page)).toHaveText("済にした");
-  await page.getByRole("link", { name: "タスクの一覧" }).click();
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
   await expect(row(page, "後の仕事")).toBeVisible();
   await expect(row(page, "後の仕事").getByText("待ち")).toHaveCount(0);
 });
 
-test("a task opens on a page of its own, with the ones before and after, and the list comes back as it was", async ({ page, request }) => {
+test("a task opens beside the list, which stays as it was narrowed, and closing gives the list its room back", async ({ page, request }) => {
   for (const n of ["一", "二", "三"]) await record(request, "tasks", `行き来するタスク${n}`);
   await visit(page, "/tasks", "タスク");
   await page.getByLabel("タスクを探す").fill("行き来する");
   await expect(page.locator("[data-record]")).toHaveCount(3);
-  await page.locator("[data-record]").nth(1).getByText("行き来するタスク").click();
-  await expect(page.locator("[data-record]").first()).toBeHidden();
+  const wide = (await page.locator("[data-record]").first().boundingBox())?.width ?? 0;
+
+  await page.locator("[data-record]").nth(1).getByRole("link").click();
+  await expect(page).toHaveURL(/\/tasks\?id=/);
+  await expect(page.locator("[data-record]:visible")).toHaveCount(3);
+  await expect(page.locator("[data-record]").nth(1).getByRole("link")).toHaveAttribute("aria-current", "true");
+  expect((await page.locator("[data-record]").first().boundingBox())?.width ?? 0).toBeLessThan(wide);
   await expect(page.getByText("2 / 3")).toBeVisible();
   const here = await detail(page).getByLabel("題名").inputValue();
-  await page.getByRole("link", { name: "次の項目" }).click();
+  await page.getByRole("button", { name: "次の項目" }).click();
   await expect(page.getByText("3 / 3")).toBeVisible();
   await expect(detail(page).getByLabel("題名")).not.toHaveValue(here);
   await expect(page.getByRole("button", { name: "次の項目" })).toBeDisabled();
 
-  await page.getByRole("link", { name: "タスクの一覧" }).click();
+  await page.reload();
+  await expect(detail(page).getByLabel("題名")).not.toHaveValue(here);
+  await page.getByLabel("タスクを探す").fill("行き来する");
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await expect(page).toHaveURL(/\/tasks$/);
   await expect(page.getByLabel("タスクを探す")).toHaveValue("行き来する");
-  await expect(page.locator("[data-record]:visible")).toHaveCount(3);
+  await expect(detail(page)).toHaveCount(0);
+});
+
+test("up and down move between the tasks and bring the open one along, and Escape closes it", async ({ page, request }) => {
+  for (const n of ["一", "二", "三"]) await record(request, "tasks", `上下のタスク${n}`);
+  await visit(page, "/tasks", "タスク");
+  await page.getByLabel("タスクを探す").fill("上下のタスク");
+  await expect(page.locator("[data-record]")).toHaveCount(3);
+  const link = (n: number) => page.locator("[data-record]").nth(n).getByRole("link");
+  await link(0).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(link(1)).toBeFocused();
+  await expect(detail(page)).toHaveCount(0);
+
+  await page.keyboard.press("Enter");
+  const title = (await link(1).textContent()) ?? "";
+  await expect(detail(page).getByLabel("題名")).toHaveValue(title);
+  await page.keyboard.press("ArrowDown");
+  await expect(link(2)).toBeFocused();
+  await expect(detail(page).getByLabel("題名")).toHaveValue((await link(2).textContent()) ?? "");
+  await page.keyboard.press("Home");
+  await expect(detail(page).getByLabel("題名")).toHaveValue((await link(0).textContent()) ?? "");
+
+  // However far it moved along the list, the way back is one step.
+  await page.goBack();
+  await expect(page).not.toHaveURL(/id=/);
+  await expect(detail(page)).toHaveCount(0);
+
+  await link(0).click();
+  await expect(detail(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail(page)).toHaveCount(0);
+  await expect(link(0)).toBeFocused();
+});
+
+test("a record that cannot be read says so and is read again; one that is gone says that", async ({ page, request }) => {
+  const t = await record(request, "tasks", "読めないタスク");
+  let broken = true;
+  await page.route("**/famulen.v1.RecordService/GetRecord**", (route) =>
+    broken ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: "internal", message: "disk is away" }) }) : route.continue(),
+  );
+  await visit(page, "/tasks", "タスク");
+  await row(page, "読めないタスク").getByRole("link").click();
+  const there = pane(page, "タスクの詳細");
+  await expect(there.getByRole("alert")).toContainText("disk is away");
+  await expect(there.getByText("この記録はもうない")).toHaveCount(0);
+  broken = false;
+  await there.getByRole("button", { name: "読み直す" }).click();
+  await expect(detail(page).getByLabel("題名")).toHaveValue("読めないタスク");
+
+  await page.goto("/tasks?id=01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  await expect(pane(page, "タスクの詳細").getByText("この記録はもうない")).toBeVisible();
+  expect(t.id).not.toBe("");
+});
+
+test("leaving notes half written asks before they are lost", async ({ page, request }) => {
+  const t = await record(request, "tasks", "書きかけのタスク");
+  await visit(page, `/tasks?id=${t.id}`, "タスク · 書きかけのタスク");
+  await detail(page).getByRole("button", { name: "備考を書く" }).click();
+  await detail(page).getByLabel("備考", { exact: true }).fill("まだ途中");
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "やめる" }).click();
+  await expect(detail(page).getByLabel("備考", { exact: true })).toHaveValue("まだ途中");
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await agree(page, "捨てる");
+  await expect(detail(page)).toHaveCount(0);
 });
 
 test("deleting a task asks first and then takes it off the list", async ({ page, request }) => {
   const t = await record(request, "tasks", "古い下書きを捨てる");
-  acceptDialogs(page);
   await visit(page, `/tasks?id=${t.id}`, "タスク · 古い下書きを捨てる");
   await page.getByRole("button", { name: "古い下書きを捨てるを消す" }).click();
+  await agree(page, "消す");
   await expect(toast(page)).toHaveText("消した");
   await expect(page).toHaveURL(/\/tasks$/);
   await expect(row(page, "古い下書きを捨てる")).toHaveCount(0);
@@ -189,6 +263,7 @@ test("a wake-up the secretary set waits on the task page and can be cancelled", 
   await expect(page.getByText("タスクに出る起床予約")).toBeVisible();
   await expect(page.getByText("主人が返事を待っている")).toBeVisible();
   await page.getByRole("button", { name: "起床予約「タスクに出る起床予約」を取り消す" }).click();
+  await agree(page, "取り消す");
   await expect(toast(page)).toHaveText("起床予約を取り消した");
   await expect(page.getByText("タスクに出る起床予約")).toHaveCount(0);
 });
@@ -281,10 +356,10 @@ test.describe("定期", () => {
     await detail(page).getByRole("button", { name: "＋ 飛ばす条件" }).click();
     await detail(page).getByRole("button", { name: "前の回が済むまで" }).click();
     await expect(detail(page).getByText("前の回がまだ済んでいない")).toBeVisible();
-    await page.getByRole("link", { name: "定期タスクの一覧" }).click();
+    await page.getByRole("button", { name: "詳細を閉じる" }).click();
     await row(page, "止められる仕事").locator(".switch").click();
     await expect(toast(page)).toHaveText("止めた");
-    await row(page, "止められる仕事").locator("b").click();
+    await row(page, "止められる仕事").getByRole("link").click();
     await expect(field(page, "動かす")).toContainText("いいえ");
   });
 

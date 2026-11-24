@@ -1,4 +1,3 @@
-import { A } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { hrefOf, linkOf } from "~/lib/records";
 import { memoryHref } from "~/lib/memory";
@@ -36,9 +35,9 @@ function Link(props: { text: string }) {
     <Show when={!now()?.missing} fallback={<span class="md-link-missing">{title()}（もうない）</span>}>
       <Show when={href()} fallback={title()}>
         {(to) => (
-          <A href={to()} title={now()?.title}>
+          <a href={to()} title={now()?.title}>
             {title()}
-          </A>
+          </a>
         )}
       </Show>
     </Show>

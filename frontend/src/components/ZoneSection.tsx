@@ -1,12 +1,12 @@
 import { Combobox, useListCollection } from "@ark-ui/solid/combobox";
 import { For, Show, createSignal, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
-import Icon from "~/components/Icon";
 import ZoneMap from "~/components/ZoneMap";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { chevronDown, mapPin } from "~/lib/icons";
 import { type Zone, allZones, browserZone, zone } from "~/lib/zones";
+import { Button, Icon, Section } from "~/components/ui";
 
 /** The owner's time zone, found by name or picked on the world map. */
 export default function ZoneSection(props: { timezone: string }) {
@@ -32,11 +32,7 @@ export default function ZoneSection(props: { timezone: string }) {
     if (id && id !== props.timezone) void act(() => api.settings.updatePersona({ timezone: id }));
   };
   return (
-    <section class="pref">
-      <div class="pref-head">
-        <h3>タイムゾーン</h3>
-        <p class="sub">予定・起床予約・定期の仕事・夢の時刻は、このタイムゾーンで数える。</p>
-      </div>
+    <Section title="タイムゾーン" level={3} note="予定・起床予約・定期の仕事・夢の時刻は、このタイムゾーンで数える。">
       <div class="zone-now">
         <Icon svg={mapPin} size={16} />
         <b>{current().name || current().id}</b>
@@ -74,7 +70,10 @@ export default function ZoneSection(props: { timezone: string }) {
                   {(z) => (
                     <Combobox.Item item={z} class="zone-item">
                       <Combobox.ItemText>
-                        <b>{z.id}</b> <span class="sub">{z.name}（{z.offset}）</span>
+                        <b>{z.id}</b>{" "}
+                        <span class="sub">
+                          {z.name}（{z.offset}）
+                        </span>
                       </Combobox.ItemText>
                     </Combobox.Item>
                   )}
@@ -84,12 +83,12 @@ export default function ZoneSection(props: { timezone: string }) {
           </Portal>
         </Combobox.Root>
         <Show when={detected() && detected() !== props.timezone}>
-          <button type="button" class="btn small" onClick={() => pick(detected() ?? "")}>
+          <Button small onClick={() => pick(detected() ?? "")}>
             このブラウザのタイムゾーン（{detected()}）にする
-          </button>
+          </Button>
         </Show>
       </div>
       <ZoneMap value={props.timezone} onPick={pick} />
-    </section>
+    </Section>
   );
 }

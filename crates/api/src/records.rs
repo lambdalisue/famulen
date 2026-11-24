@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc::{ConnectError, RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{self as core, Patch, ROUTINES, SECRETARY, TASKS};
 use famulen_core::workgroups::ALL;
@@ -309,6 +309,18 @@ impl RecordService for Api {
         _ctx: RequestContext,
         request: ServiceRequest<'_, RecordRef>,
     ) -> ServiceResult<Record> {
+        if self
+            .app
+            .records
+            .get(request.kind, request.id)
+            .or_fail()?
+            .is_none()
+        {
+            return Err(ConnectError::not_found(format!(
+                "no record {}/{}",
+                request.kind, request.id
+            )));
+        }
         Response::ok(self.whole(request.kind, request.id).or_fail()?)
     }
 

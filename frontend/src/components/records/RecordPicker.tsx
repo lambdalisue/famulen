@@ -1,10 +1,9 @@
 import { createAsync, query } from "@solidjs/router";
 import { createEffect, createSignal, For, on, Show } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { KIND_NAMES, kindsQuery, matches, type Rec } from "~/lib/records";
+import { Button, Dialog, SearchBox } from "~/components/ui";
 
 /** Every record of these kinds, or of every kind there is. */
 const pickQuery = query(async (kinds: string) => {
@@ -29,27 +28,23 @@ function Choices(props: { kinds?: string[]; onPick: (r: Rec) => void }) {
   let list: HTMLUListElement | undefined;
   return (
     <div class="service-add">
-      <label class="service-search">
-        <Icon svg={icons.search} size={16} />
-        <input
-          class="input"
-          aria-label="探す"
-          placeholder="題名や中身の言葉"
-          autofocus
-          value={words()}
-          onInput={(e) => setWords(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.isComposing) return;
-            if (e.key === "ArrowDown") move(at() + 1);
-            else if (e.key === "ArrowUp") move(at() - 1);
-            else if (e.key === "Enter") {
-              const r = found()[at()];
-              if (r) props.onPick(r);
-            } else return;
-            e.preventDefault();
-          }}
-        />
-      </label>
+      <SearchBox
+        label="探す"
+        placeholder="題名や中身の言葉"
+        autofocus
+        value={words()}
+        onInput={(e) => setWords(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.isComposing) return;
+          if (e.key === "ArrowDown") move(at() + 1);
+          else if (e.key === "ArrowUp") move(at() - 1);
+          else if (e.key === "Enter") {
+            const r = found()[at()];
+            if (r) props.onPick(r);
+          } else return;
+          e.preventDefault();
+        }}
+      />
       <ul class="pick-list" ref={list}>
         <For each={found()} fallback={<li class="empty">見つからない</li>}>
           {(r, n) => (
@@ -79,7 +74,7 @@ export function PickDialog(props: {
   focusAfter?: () => HTMLElement | null;
 }) {
   return (
-    <Modal open={props.open} onOpenChange={props.onOpenChange} title={props.label} size="wide" focusAfter={props.focusAfter}>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.label} size="wide" focusAfter={props.focusAfter}>
       <Show when={props.open}>
         <Choices
           kinds={props.kinds}
@@ -89,7 +84,7 @@ export function PickDialog(props: {
           }}
         />
       </Show>
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -98,10 +93,9 @@ export default function RecordPicker(props: { label: string; kinds?: string[]; o
   const [open, setOpen] = createSignal(false);
   return (
     <>
-      <button type="button" class="btn small" onClick={() => setOpen(true)}>
-        <Icon svg={icons.plus} size={12} />
+      <Button small icon={icons.plus} onClick={() => setOpen(true)}>
         {props.label}
-      </button>
+      </Button>
       <PickDialog label={props.label} kinds={props.kinds} open={open()} onOpenChange={setOpen} onPick={props.onPick} />
     </>
   );

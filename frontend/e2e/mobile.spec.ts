@@ -21,9 +21,17 @@ test("the calendar opens on a single day in the narrow layout", async ({ page })
   await tabbar(page).getByRole("link", { name: "カレンダー" }).click();
   await expect(page).toHaveURL(/\/calendar\?unit=day/);
   await expect(page.getByRole("navigation", { name: "表示の単位" }).getByRole("link", { name: "日" })).toHaveAttribute(
-    "aria-pressed",
+    "aria-current",
     "true",
   );
+});
+
+test("an event's own link keeps it open when the narrow layout turns to a single day", async ({ page, request }) => {
+  const e = await record(request, "events", "リンクで開く予定", { fields: { Start: "2026-12-09 13:00", End: "2026-12-09 14:00" } });
+  await visit(page, `/calendar?record=${e.id}`, /^カレンダー/);
+  await expect(page).toHaveURL(/unit=day/);
+  await expect(page).toHaveURL(new RegExp(`record=${e.id}`));
+  await expect(detail(page).getByLabel("題名")).toHaveValue("リンクで開く予定");
 });
 
 test("ほか lists the other tabs and leads into the settings and memory menus", async ({ page }) => {
@@ -118,7 +126,7 @@ test("the workgroup chip opens a sheet, and choosing there narrows the console",
 test("the memo list opens one memo on its own, and the back link returns to the list", async ({ page, request }) => {
   const memo = await record(request, "memos", "スマホで読むメモ", { notes: "本文です" });
   await visit(page, "/memos", "メモ");
-  await row(page, "スマホで読むメモ").click();
+  await row(page, "スマホで読むメモ").getByRole("link").click();
   await expect(page).toHaveURL(new RegExp(`/memos\\?id=${memo.id}$`));
   await expect(detail(page).getByLabel("題名")).toHaveValue("スマホで読むメモ");
   await expect(row(page, "スマホで読むメモ")).toBeHidden();

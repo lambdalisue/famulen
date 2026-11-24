@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { acceptDialogs, record, toast, visit } from "./support";
+import { agree, pane, record, toast, visit } from "./support";
 
 test("the unit buttons switch between a day, a week and a month around the same date", async ({ page }) => {
   await visit(page, "/calendar?unit=week&at=2026-12-07", "カレンダー · 週 · 12月7日 – 12月13日");
@@ -40,7 +40,6 @@ test("without a calendar the page says where to add one", async ({ page }) => {
 });
 
 test("a hold added in the dialog shows in the grid, opens with what it says, and is removed", async ({ page }) => {
-  acceptDialogs(page);
   await visit(page, "/calendar?unit=week&at=2026-12-07", /^カレンダー · 週/);
   await page.getByRole("button", { name: "予定を足す" }).click();
   const dialog = page.getByRole("dialog");
@@ -55,13 +54,14 @@ test("a hold added in the dialog shows in the grid, opens with what it says, and
   await expect(toast(page)).toHaveText("仮押さえした");
 
   await page.getByRole("button", { name: /仮 · 設計の打ち合わせ/ }).click();
-  const sheet = page.getByRole("dialog", { name: "設計の打ち合わせ" });
+  const sheet = pane(page, "設計の打ち合わせ");
   await expect(sheet.getByText("12月8日（火） 10:00 – 11:00")).toBeVisible();
   await expect(sheet.getByRole("link", { name: "会議に入る" })).toHaveAttribute("href", "https://meet.example.com/abc");
   await expect(sheet.getByRole("link", { name: "地図" })).toHaveAttribute("href", /google\.com\/maps/);
   await expect(sheet.locator(".markdown-body strong")).toHaveText("忘れない");
   await expect(page.locator("#selection")).toContainText("設計の打ち合わせ");
   await sheet.getByRole("button", { name: "設計の打ち合わせを消す" }).click();
+  await agree(page, "消す");
   await expect(toast(page)).toHaveText("消した");
   await expect(page.getByRole("button", { name: /設計の打ち合わせ/ })).toHaveCount(0);
 });
@@ -101,4 +101,27 @@ test("a task due on a day opens from its day", async ({ page, request }) => {
   await visit(page, "/calendar?unit=week&at=2026-12-07", /^カレンダー · 週/);
   await page.getByRole("link", { name: "年賀状を出す" }).click();
   await expect(page).toHaveURL(new RegExp(`/tasks\\?id=${t.id}`));
+});
+
+test("an event over several days shows on each of them, from midnight to midnight", async ({ page, request }) => {
+  await record(request, "events", "夜行で帰る", { fields: { Start: "2026-12-21 22:00", End: "2026-12-22 07:30" } });
+  await record(request, "events", "真夜中まで", { fields: { Start: "2026-12-23 20:00", End: "2026-12-24 00:00" } });
+  await visit(page, "/calendar?unit=week&at=2026-12-21", /^カレンダー · 週/);
+  await expect(page.getByRole("button", { name: /夜行で帰る/ })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /夜行で帰る/ }).nth(0)).toContainText("22:00–");
+  await expect(page.getByRole("button", { name: /夜行で帰る/ }).nth(1)).toContainText("–07:30");
+  await expect(page.getByRole("button", { name: /真夜中まで/ })).toHaveCount(1);
+  await visit(page, "/calendar?unit=month&at=2026-12-21", /^カレンダー · 月/);
+  await expect(page.getByRole("button", { name: /夜行で帰る/ })).toHaveCount(2);
+});
+
+test("an event opens beside the calendar, which stays", async ({ page, request }) => {
+  await record(request, "events", "横に開く会", { fields: { Start: "2026-12-28 10:00", End: "2026-12-28 11:00" } });
+  await visit(page, "/calendar?unit=week&at=2026-12-28", /^カレンダー · 週/);
+  const event = page.locator(".week").getByRole("button", { name: /横に開く会/ });
+  await event.click();
+  await expect(pane(page, "横に開く会")).toBeVisible();
+  await expect(event).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "予定を閉じる" }).click();
+  await expect(pane(page, "横に開く会")).toHaveCount(0);
 });

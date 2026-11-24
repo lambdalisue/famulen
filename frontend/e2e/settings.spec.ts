@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
-import { call, dayFromToday, expectView, openLog, toast, visit } from "./support";
+import { agree, call, dayFromToday, expectView, openLog, toast, visit } from "./support";
 
 type Models = {
   roles: { role: string; label: string; choices: string[] }[];
@@ -114,7 +114,7 @@ test.describe("秘書", () => {
     await visit(page, "/settings", "設定 · 秘書");
     await page.getByText("自分で書く", { exact: true }).click();
     await page.getByLabel("話し方を自分で書く").fill("関西弁で、気さくに。");
-    await page.getByLabel("話し方を自分で書く").press("Tab");
+    await page.locator("form").filter({ has: page.getByLabel("話し方を自分で書く") }).getByRole("button", { name: "保存" }).click();
     await expect(toast(page)).toHaveText("保存した");
 
     await page.getByText("箇条書き", { exact: true }).click();
@@ -131,7 +131,7 @@ test.describe("秘書", () => {
   test("the owner adds a place the secretary may write in and takes it away again", async ({ page }) => {
     await visit(page, "/settings", "設定 · 秘書");
     await expect(page.getByRole("heading", { name: "秘書が書ける場所" })).toBeVisible();
-    await expect(page.getByText("まだない。")).toBeVisible();
+    await expect(page.locator("section.pref").filter({ hasText: "秘書が書ける場所" }).getByText("まだない")).toBeVisible();
 
     await page.getByLabel("書ける場所を足す").fill("/srv/e2e-notes");
     await page.getByRole("button", { name: "足す" }).click();
@@ -148,7 +148,7 @@ test.describe("秘書", () => {
 
     await page.getByRole("button", { name: "/srv/e2e-notes を外す" }).click();
     await expect(toast(page)).toHaveText("外した");
-    await expect(page.getByText("まだない。")).toBeVisible();
+    await expect(page.locator("section.pref").filter({ hasText: "秘書が書ける場所" }).getByText("まだない")).toBeVisible();
   });
 
   test("several places are picked at once in a wide dialog, and a folder under one picked cannot be", async ({
@@ -287,7 +287,8 @@ test.describe("ワークグループ", () => {
     await expect(adding).toBeHidden();
     const list = page.getByRole("navigation", { name: "ワークグループの一覧" });
     await expect(list.getByRole("button", { name: "趣味" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("tab", { name: "趣味" })).toBeVisible();
+    const bar = page.getByRole("group", { name: "ワークグループ", exact: true });
+    await expect(bar.getByRole("button", { name: "趣味" })).toBeVisible();
     const added = (await call<{ workgroups: { name: string; color: string }[] }>(request, "WorkgroupService", "ListWorkgroups")).workgroups;
     expect(added.find((c) => c.name === "趣味")?.color.toLowerCase()).toBe("#6250d6");
 
@@ -296,16 +297,15 @@ test.describe("ワークグループ", () => {
     await editing.getByLabel("名前", { exact: true }).fill("山歩き");
     await editing.getByRole("button", { name: "変える" }).click();
     await expect(toast(page)).toHaveText("保存した");
-    await expect(page.getByRole("tab", { name: "山歩き" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "山歩き" })).toBeVisible();
     await page.reload();
     await expect(list.getByRole("button", { name: "山歩き" })).toBeVisible();
 
     await list.getByRole("button", { name: "山歩き" }).click();
     await page.getByRole("button", { name: "消す", exact: true }).click();
-    const deleting = page.getByRole("dialog", { name: "「山歩き」を消す" });
-    await deleting.getByRole("button", { name: "消す", exact: true }).click();
+    await agree(page, "消す", "「山歩き」を消す");
     await expect(toast(page)).toHaveText("ワークグループを消した");
-    await expect(page.getByRole("tab", { name: "山歩き" })).toHaveCount(0);
+    await expect(bar.getByRole("button", { name: "山歩き" })).toHaveCount(0);
     await expect(list.getByRole("button", { name: "山歩き" })).toHaveCount(0);
   });
 
@@ -330,7 +330,7 @@ test.describe("ワークグループ", () => {
 
   test("something is put into a workgroup with its switch and taken out again", async ({ page }) => {
     await visit(page, "/settings/workgroups?id=work", "設定 · ワークグループ");
-    const row = page.locator(".wg-switch").first();
+    const row = page.locator(".wg-group .switch-row").first();
     const was = await row.getAttribute("data-state");
     await row.click();
     await expect(toast(page)).toHaveText("保存した");
@@ -349,8 +349,7 @@ test.describe("役のモデル", () => {
   async function chooseModel(page: Page, name: string) {
     const picker = modelPicker(page);
     await picker.scrollIntoViewIfNeeded();
-    await picker.click();
-    await page.getByRole("option", { name, exact: true }).click();
+    await picker.selectOption({ label: name });
   }
 
   test("a model chosen on a role's page is kept after a reload and leaves the other roles alone", async ({ page, request }) => {
@@ -374,9 +373,9 @@ test.describe("役のモデル", () => {
     await expect(toast(page)).toHaveText("保存した");
 
     await page.reload();
-    await expect(modelPicker(page)).toHaveText(forDream?.name ?? "");
+    await expect(modelPicker(page).locator("option:checked")).toHaveText(forDream?.name ?? "");
     await visit(page, "/settings", "設定 · 秘書");
-    await expect(modelPicker(page)).toHaveText(forSecretary?.name ?? "");
+    await expect(modelPicker(page).locator("option:checked")).toHaveText(forSecretary?.name ?? "");
 
     await visit(page, "/settings/models", "設定 · 登録したモデル");
     const registered = page.locator("section").filter({ has: page.getByRole("heading", { name: "一覧", exact: true }) });
@@ -416,6 +415,9 @@ test.describe("役のモデル", () => {
     await page.reload();
     await expect(page.getByLabel("一日の上限")).toHaveValue("3");
     expect(await capOf("ROLE_DREAM")).toBe(3);
+    await page.getByLabel("一日の上限").fill("0.5");
+    await page.getByLabel("一日の上限").press("Tab");
+    await expect.poll(() => capOf("ROLE_DREAM")).toBe(0.5);
     expect(await capOf("ROLE_TRIAGE")).toBe(triageBefore);
   });
 
@@ -434,7 +436,7 @@ test.describe("役のモデル", () => {
     await chooseModel(page, "使わない");
     await expect(toast(page)).toHaveText("保存した");
     await page.reload();
-    await expect(modelPicker(page)).toHaveText("使わない");
+    await expect(modelPicker(page).locator("option:checked")).toHaveText("使わない");
   });
 
   test("the dream's effort is set on its slider, kept after a reload and apart from the secretary's", async ({
@@ -530,8 +532,7 @@ test.describe("夢の頁", () => {
     await when.getByText("水", { exact: true }).click();
     await expect.poll(async () => (await plan(request)).weekday).toBe(3);
 
-    await when.getByRole("combobox", { name: "時刻" }).click();
-    await page.getByRole("option", { name: "23:30", exact: true }).click();
+    await when.getByRole("combobox", { name: "時刻" }).selectOption("23:30");
     await expect.poll(async () => (await plan(request)).at).toBe("23:30");
 
     const early = when.getByLabel("早めに見る");
@@ -542,7 +543,7 @@ test.describe("夢の頁", () => {
     await page.reload();
     await expect(when.getByRole("radio", { name: "週に一度" })).toBeChecked();
     await expect(when.getByRole("radio", { name: "水" })).toBeChecked();
-    await expect(when.getByRole("combobox", { name: "時刻" })).toHaveText(/23:30/);
+    await expect(when.getByRole("combobox", { name: "時刻" })).toHaveValue("23:30");
     await expect(when.getByLabel("早めに見る")).toHaveValue("0");
     const saved = await plan(request);
     expect(saved.frequency).toBe("DREAM_FREQUENCY_WEEKLY");
@@ -626,7 +627,7 @@ test.describe("モデル", () => {
     await page.getByRole("button", { name: "モデルの追加" }).click();
     const dialog = page.getByRole("dialog", { name: "モデルの追加" });
     await expect(dialog.getByLabel("API キー")).toHaveCount(0);
-    await dialog.locator(".model-way").filter({ hasText: "鍵で呼ぶ" }).click();
+    await dialog.locator(".radio-card").filter({ hasText: "鍵で呼ぶ" }).click();
     await expect(dialog.getByLabel("URL")).toHaveValue("https://api.openai.com/v1");
     await dialog.getByText("ほか", { exact: true }).click();
     await dialog.getByLabel("URL").fill("https://api.example.com/v1");
@@ -659,6 +660,8 @@ test.describe("モデル", () => {
     }
 
     await row.getByRole("button", { name: "外す" }).click();
+
+    await agree(page, "外す");
     await expect(toast(page)).toHaveText("外した");
     await expect(row).toHaveCount(0);
   });
@@ -677,6 +680,7 @@ test.describe("モデルの自動の登録と追加", () => {
     const row = list(page).locator(".item").filter({ hasText: "claude-opus-5" });
     await expect(row).toContainText("Claude Opus 5");
     await row.getByRole("button", { name: "外す" }).click();
+    await agree(page, "外す");
     await expect(toast(page)).toHaveText("外した");
     await page.getByRole("button", { name: "探し直す" }).click();
     await expect(toast(page)).toHaveText("探し直した");
@@ -700,7 +704,7 @@ test.describe("モデルの自動の登録と追加", () => {
     const port = typeof address === "object" && address ? address.port : 0;
     await visit(page, "/settings/models", "設定 · 登録したモデル");
     const dialog = await openAdd(page);
-    await dialog.locator(".model-way").filter({ hasText: "ローカルのサーバー" }).click();
+    await dialog.locator(".radio-card").filter({ hasText: "ローカルのサーバー" }).click();
     await expect(dialog.getByLabel("API キー")).toHaveCount(0);
     await dialog.getByLabel("URL").fill(`http://127.0.0.1:${port}/v1`);
     await dialog.getByRole("button", { name: "モデルを探す" }).click();
@@ -713,13 +717,14 @@ test.describe("モデルの自動の登録と追加", () => {
     const row = list(page).locator(".item").filter({ hasText: "local-b" });
     await expect(row).toContainText("ローカル");
     await row.getByRole("button", { name: "外す" }).click();
+    await agree(page, "外す");
     await expect(row).toHaveCount(0);
   });
 
   test("an agent CLI is asked only for its program, model and name", async ({ page }) => {
     await visit(page, "/settings/models", "設定 · 登録したモデル");
     const dialog = await openAdd(page);
-    await dialog.locator(".model-way").filter({ hasText: "エージェント CLI" }).click();
+    await dialog.locator(".radio-card").filter({ hasText: "エージェント CLI" }).click();
     await dialog.getByText("Codex", { exact: true }).click();
     await expect(dialog.getByText("秘書には使えない。")).toBeVisible();
     await expect(dialog.getByLabel("URL")).toHaveCount(0);
@@ -795,6 +800,7 @@ test("a pending wake-up shows among what is coming with why it was set, and is g
   await expect(coming.getByText("見積書の返事を待っている")).toBeVisible();
 
   await coming.getByRole("button", { name: "起床予約「状態に出る起床予約」を取り消す" }).click();
+  await agree(page, "取り消す");
   await expect(toast(page)).toHaveText("起床予約を取り消した");
   await expect(coming.getByText("起床予約 · 状態に出る起床予約")).toHaveCount(0);
   await page.reload();
@@ -814,10 +820,11 @@ test("the log shows a turn the owner asked for, and the filters narrow it", asyn
   const turn = sheet.getByRole("button").filter({ hasText: "ログに残る頼みごと" });
   await expect(turn).toBeVisible();
 
-  await sheet.getByRole("button", { name: "夢・見張り・設定" }).click();
-  await expect(sheet.getByRole("button", { name: "夢・見張り・設定" })).toHaveAttribute("aria-pressed", "true");
+  const kinds = sheet.getByRole("radiogroup", { name: "出すもの" });
+  await kinds.getByText("夢・見張り・設定").click();
+  await expect(kinds.getByRole("radio", { name: "夢・見張り・設定" })).toBeChecked();
   await expect(turn).toHaveCount(0);
-  await sheet.getByRole("button", { name: "秘書のやりとり" }).click();
+  await kinds.getByText("秘書のやりとり").click();
   await expect(turn).toBeVisible();
   await turn.click();
   await expect(turn).toHaveAttribute("aria-expanded", "true");

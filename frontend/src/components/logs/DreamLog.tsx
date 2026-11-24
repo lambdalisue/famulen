@@ -1,10 +1,11 @@
-import { A, createAsync, query } from "@solidjs/router";
+import { dateTimeText } from "~/lib/dates";
+import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
 import { api } from "~/lib/api";
-import { personaQuery } from "~/lib/data";
-import { nightLabel } from "~/lib/memory";
+import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
+import { EmptyState, List } from "~/components/ui";
 
 const dreamLogQuery = query(async (before: number) => {
   const page = await api.log.listDreamLog({ before: BigInt(before), limit: PAGE });
@@ -31,21 +32,19 @@ function counts(d: Dream): string {
 /** Each night the dream ran: how it went and how much it changed. */
 export default function DreamLog() {
   const pages = createPages(dreamLogQuery);
-  const persona = createAsync(() => personaQuery());
+  const owner = useOwner();
   return (
     <>
       <p class="sub">
-        夜ごとに夢を見たか、何件の記憶と記録を変えたか。変えた中身は<A href="/memory">記憶</A>の夢で読む。
+        夜ごとに夢を見たか、何件の記憶と記録を変えたか。変えた中身は<a href="/memory">記憶</a>の夢で読む。
       </p>
-      <div class="list">
+      <List>
         <For each={pages.rows()}>
           {(d) => (
-            <div class="item dream-log-entry">
-              <span class="mono sub" style={{ width: "90px" }}>
-                {nightLabel(d.at, persona()?.timezone ?? "")}
-              </span>
+            <div role="listitem" class="item dream-log-entry">
+              <span class="mono sub when">{dateTimeText(d.at, owner.tz())}</span>
               <div class="grow">
-                <div style={{ "font-size": "13px", "overflow-wrap": "anywhere" }}>{d.status}</div>
+                <div>{d.status}</div>
                 <Show when={counts(d)}>
                   <div class="sub">{counts(d)}</div>
                 </Show>
@@ -54,9 +53,9 @@ export default function DreamLog() {
           )}
         </For>
         <Show when={pages.loaded() && pages.rows().length === 0}>
-          <p class="empty">まだ夢を見ていない</p>
+          <EmptyState>まだ夢を見ていない</EmptyState>
         </Show>
-      </div>
+      </List>
       <PageNav pages={pages} />
     </>
   );

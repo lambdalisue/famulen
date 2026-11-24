@@ -14,11 +14,11 @@ test("a message sent from the console stays in the chat while pages change", asy
 
 test("choosing a workgroup colors the console and survives a reload", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("tab", { name: "仕事" }).click();
-  await expect(page.getByRole("tab", { name: "仕事" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "仕事" }).click();
+  await expect(page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "仕事" })).toHaveAttribute("aria-pressed", "true");
   await page.reload();
-  await expect(page.getByRole("tab", { name: "仕事" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "すべて" }).click();
+  await expect(page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "仕事" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "すべて" }).click();
 });
 
 test("after the workgroup changes, only its messages are pushed to the chat", async ({ page, request }) => {
@@ -30,8 +30,8 @@ test("after the workgroup changes, only its messages are pushed to the chat", as
     if (body) followed.push(body);
   });
   await visit(page, "/", /^ホーム/);
-  await page.getByRole("tab", { name: "仕事" }).click();
-  await expect(page.getByRole("tab", { name: "仕事" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "仕事" }).click();
+  await expect(page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "仕事" })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => followed.at(-1)).toContain(`"${idOf("仕事")}"`);
 
   const say = (text: string, name: string) => call(request, "ConsoleService", "Send", { text, workgroup: idOf(name) });
@@ -39,7 +39,7 @@ test("after the workgroup changes, only its messages are pushed to the chat", as
   await say("e2e: 仕事の話", "仕事");
   await expect(page.getByTestId("message").filter({ hasText: "e2e: 仕事の話" })).toBeVisible();
   await expect(page.getByTestId("message").filter({ hasText: "e2e: 個人の話" })).toHaveCount(0);
-  await page.getByRole("tab", { name: "すべて" }).click();
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "すべて" }).click();
 });
 
 test("the page hydrates without errors", async ({ page }) => {

@@ -1,20 +1,29 @@
-import { Switch } from "@ark-ui/solid/switch";
+import { dateText } from "~/lib/dates";
 import { createAsync } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "solid-js";
-import Icon from "~/components/Icon";
-import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { choiceOf, dateText, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
+import {
+  choiceOf,
+  type FieldLike,
+  type FieldSpec,
+  type FieldValue,
+  linkOf,
+  linkTo,
+  moneyText,
+  OWNER,
+  SECRETARY,
+  WORKER,
+} from "~/lib/records";
 import RecordChip from "./links/RecordChip";
+import { useOwner } from "~/lib/owner";
 import RecordPicker from "./RecordPicker";
+import { Icon, Select, Switch, Tag, TextField } from "~/components/ui";
 
-export type Typed = { value: string; values: string[] };
-
-const one = (value: string): Typed => ({ value, values: [] });
-const many = (values: string[]): Typed => ({ value: "", values });
+const one = (value: string): FieldValue => ({ value, values: [] });
+const many = (values: string[]): FieldValue => ({ value: "", values });
 
 /** A field's value as it is read. */
-export function FieldView(props: { type: FieldType; field: Field | undefined; aide: string }) {
+export function FieldView(props: { type: FieldSpec; field: FieldLike | undefined; aide: string }) {
   const value = () => props.field?.value ?? "";
   const t = () => props.type.type;
   return (
@@ -36,7 +45,7 @@ export function FieldView(props: { type: FieldType; field: Field | undefined; ai
         <span class="chips-line">
           <For each={props.field?.values ?? []}>
             {(v) => (
-              <Show when={linkOf(v)} fallback={<span class="tag">{v}</span>}>
+              <Show when={linkOf(v)} fallback={<Tag>{v}</Tag>}>
                 <RecordChip text={v} />
               </Show>
             )}
@@ -47,7 +56,7 @@ export function FieldView(props: { type: FieldType; field: Field | undefined; ai
   );
 }
 
-function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) => void }) {
+function ListEdit(props: { label: string; values: string[]; onSave: (v: FieldValue) => void }) {
   const [text, setText] = createSignal("");
   const add = () => {
     const v = text().trim();
@@ -59,7 +68,7 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) =
     <span class="chips-edit">
       <For each={props.values}>
         {(v) => (
-          <span class="tag removable">
+          <Tag class="removable">
             {v}
             <button
               type="button"
@@ -68,11 +77,10 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) =
             >
               <Icon svg={icons.x} size={12} />
             </button>
-          </span>
+          </Tag>
         )}
       </For>
-      <input
-        class="input"
+      <TextField
         aria-label={`${props.label}に足す`}
         placeholder="足す"
         value={text()}
@@ -89,19 +97,19 @@ function ListEdit(props: { label: string; values: string[]; onSave: (v: Typed) =
   );
 }
 
-function LinksEdit(props: { label: string; of: string; values: string[]; single: boolean; onSave: (v: Typed) => void }) {
+function LinksEdit(props: { label: string; of: string; values: string[]; single: boolean; onSave: (v: FieldValue) => void }) {
   const without = (v: string) => props.values.filter((x) => x !== v);
   const save = (values: string[]) => props.onSave(values.length === 0 ? one("") : props.single ? one(values[0]) : many(values));
   return (
     <span class="chips-edit">
       <For each={props.values}>
         {(v) => (
-          <span class="tag removable">
+          <Tag class="removable">
             <RecordChip text={v} />
             <button type="button" aria-label="外す" onClick={() => save(without(v))}>
               <Icon svg={icons.x} size={12} />
             </button>
-          </span>
+          </Tag>
         )}
       </For>
       <RecordPicker
@@ -116,35 +124,51 @@ function LinksEdit(props: { label: string; of: string; values: string[]; single:
   );
 }
 
-function TimeEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+function TimeEdit(props: { label: string; value: string; onSave: (v: FieldValue) => void }) {
   const day = () => props.value.slice(0, 10);
   const time = () => props.value.slice(11, 16);
   const save = (d: string, t: string) => props.onSave(one(d ? (t ? `${d} ${t}` : d) : ""));
   return (
     <span class="row">
-      <input class="input" type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
-      <input class="input" type="time" aria-label={`${props.label}の時刻`} value={time()} disabled={!day()} onChange={(e) => save(day(), e.currentTarget.value)} />
+      <TextField type="date" aria-label={`${props.label}の日付`} value={day()} onChange={(e) => save(e.currentTarget.value, time())} />
+      <TextField
+        type="time"
+        aria-label={`${props.label}の時刻`}
+        value={time()}
+        disabled={!day()}
+        onChange={(e) => save(day(), e.currentTarget.value)}
+      />
     </span>
   );
 }
 
-function MoneyEdit(props: { label: string; value: string; onSave: (v: Typed) => void }) {
+function MoneyEdit(props: { label: string; value: string; onSave: (v: FieldValue) => void }) {
   const amount = () => props.value.split(" ")[0] ?? "";
   const currency = () => props.value.split(" ")[1] || "JPY";
   const save = (a: string, c: string) => props.onSave(one(a.trim() ? `${a.trim()} ${c}` : ""));
   return (
     <span class="row">
-      <input class="input" inputmode="decimal" aria-label={`${props.label}の額`} value={amount()} onChange={(e) => save(e.currentTarget.value, currency())} />
-      <select class="input" aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
+      <TextField
+        inputmode="decimal"
+        aria-label={`${props.label}の額`}
+        value={amount()}
+        onChange={(e) => save(e.currentTarget.value, currency())}
+      />
+      <Select aria-label={`${props.label}の通貨`} value={currency()} onChange={(e) => save(amount(), e.currentTarget.value)}>
         <For each={[...new Set(["JPY", "USD", "EUR", "GBP", currency()])]}>{(c) => <option value={c}>{c}</option>}</For>
-      </select>
+      </Select>
     </span>
   );
 }
 
 /** The control that changes a field, by what the field holds. */
-export default function FieldEdit(props: { type: FieldType; label: string; field: Field | undefined; onSave: (v: Typed) => void }) {
-  const persona = createAsync(() => personaQuery());
+export default function FieldEdit(props: {
+  type: FieldSpec;
+  label: string;
+  field: FieldLike | undefined;
+  onSave: (v: FieldValue) => void;
+}) {
+  const owner = useOwner();
   const value = () => props.field?.value ?? "";
   const values = () => props.field?.values ?? [];
   const t = () => props.type.type;
@@ -155,9 +179,9 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
   return (
     <Cases
       fallback={
-        <input
+        <TextField
+          class="grow"
           ref={box}
-          class="input grow"
           aria-label={props.label}
           type={t() === "number" ? "number" : t() === "date" ? "date" : "text"}
           value={t() === "url" ? value().replace(/^<|>$/g, "") : value()}
@@ -169,24 +193,19 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
       }
     >
       <Match when={t() === "choice"}>
-        <select class="input" aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
+        <Select aria-label={props.label} value={value()} onChange={(e) => props.onSave(one(e.currentTarget.value))}>
           <option value="">—</option>
-          <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, persona()?.name)}</option>}</For>
-        </select>
+          <For each={props.type.choices}>{(c) => <option value={c}>{choiceOf(c, owner.aide())}</option>}</For>
+        </Select>
       </Match>
       <Match when={t() === "flag"}>
-        <Switch.Root checked={value() === "yes"} onCheckedChange={(d) => props.onSave(one(d.checked ? "yes" : "no"))}>
-          <Switch.Control class="switch">
-            <Switch.Thumb class="switch-thumb" />
-          </Switch.Control>
-          <Switch.Label class="sr">{props.label}</Switch.Label>
-          <Switch.HiddenInput />
-        </Switch.Root>
+        <Switch hidden checked={value() === "yes"} onChange={(on) => props.onSave(one(on ? "yes" : "no"))}>
+          {props.label}
+        </Switch>
       </Match>
       <Match when={props.type.name === "Assignee"}>
         <span class="row">
-          <select
-            class="input"
+          <Select
             aria-label={props.label}
             value={linkOf(value()) ? "other" : value() || OWNER}
             onChange={(e) => {
@@ -194,10 +213,10 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
             }}
           >
             <option value={OWNER}>あなた</option>
-            <option value={SECRETARY}>{persona()?.name || "秘書"}</option>
+            <option value={SECRETARY}>{owner.aide()}</option>
             <option value={WORKER}>{choiceOf(WORKER)}</option>
             <Show when={linkOf(value())}>{(l) => <option value="other">{l().title}</option>}</Show>
-          </select>
+          </Select>
           <RecordPicker label="相手に任せる" kinds={["parties"]} onPick={(r) => props.onSave(one(linkTo(r)))} />
         </span>
       </Match>

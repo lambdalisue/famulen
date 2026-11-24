@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
-import Segs from "~/components/Segs";
 import { Permission } from "~/gen/famulen/v1/services_pb";
+import { Segmented, SegmentedOf } from "~/components/ui";
 
 export const PERMISSIONS: [Permission, string][] = [
   [Permission.AUTO, "まかせる"],
@@ -25,7 +25,7 @@ export default function PermissionSeg(props: {
   const own = () => props.permission !== Permission.UNSPECIFIED;
   return (
     <div class="permission-seg">
-      <Segs
+      <Segmented
         label={`${props.tool}の権限の決め方`}
         items={[
           ["default", `既定（${label(props.inherited) ?? "まかせる"}）`],
@@ -33,21 +33,11 @@ export default function PermissionSeg(props: {
         ]}
         value={own() ? "own" : "default"}
         onChoose={(way) =>
-          way === "own"
-            ? props.onChoose(props.inherited, "既定を上書きした")
-            : props.onChoose(Permission.UNSPECIFIED, "既定に戻した")
+          way === "own" ? props.onChoose(props.inherited, "既定を上書きした") : props.onChoose(Permission.UNSPECIFIED, "既定に戻した")
         }
       />
       <Show when={own()}>
-        <Segs
-          label={`${props.tool}の権限`}
-          items={PERMISSIONS.map(([p, text]) => [String(p), text])}
-          value={String(props.permission)}
-          onChoose={(value) => {
-            const chosen = PERMISSIONS.find(([p]) => String(p) === value);
-            if (chosen) props.onChoose(chosen[0]);
-          }}
-        />
+        <SegmentedOf label={`${props.tool}の権限`} items={PERMISSIONS} value={props.permission} onChoose={(p) => props.onChoose(p)} />
       </Show>
     </div>
   );

@@ -1,13 +1,10 @@
-import { Checkbox } from "@ark-ui/solid/checkbox";
-import { Dialog } from "@ark-ui/solid/dialog";
 import { For, Show, createSignal } from "solid-js";
-import Icon from "~/components/Icon";
-import Modal from "~/components/Modal";
 import type { Folder } from "~/gen/famulen/v1/settings_pb";
 import { look } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
 import { coveringPlace, isUnder } from "~/lib/places";
+import { Checkbox, Dialog, DialogActions, DialogTrigger, Icon, IconButton } from "~/components/ui";
 
 type Mark = { kind: "added" | "chosen" | "covered" | "within" | "disk" | "none"; by?: string };
 
@@ -67,20 +64,14 @@ export default function FolderPicker(props: {
     const m = () => mark(row.path);
     return (
       <li class="folder-row" data-mark={m().kind}>
-        <Checkbox.Root
+        <Checkbox
           class="folder-check"
           checked={["added", "chosen", "covered", "within"].includes(m().kind)}
           disabled={["added", "covered", "within", "disk"].includes(m().kind)}
-          onCheckedChange={(d) => toggle(row.path, d.checked === true)}
+          onChange={(e) => toggle(row.path, e.currentTarget.checked)}
         >
-          <Checkbox.Control class="check-box">
-            <Checkbox.Indicator>
-              <Icon svg={icons.check} size={12} />
-            </Checkbox.Indicator>
-          </Checkbox.Control>
-          <Checkbox.Label class="visually-hidden">{`${row.path} を選ぶ`}</Checkbox.Label>
-          <Checkbox.HiddenInput />
-        </Checkbox.Root>
+          <span class="sr">{`${row.path} を選ぶ`}</span>
+        </Checkbox>
         <Show
           when={row.enter}
           fallback={
@@ -97,41 +88,34 @@ export default function FolderPicker(props: {
             </button>
           )}
         </Show>
-        <span class="folder-note sub">
-          {NOTES[m().kind](m().by ?? "")}
-        </span>
+        <span class="folder-note sub">{NOTES[m().kind](m().by ?? "")}</span>
       </li>
     );
   };
 
   return (
-    <Modal
+    <Dialog
       open={open()}
       onOpenChange={(o) => void opened(o)}
       size="wide"
       title="フォルダを選ぶ"
       description="Famulen が動いているマシンのフォルダ。名前を押すと中へ進み、チェックで選ぶ。ほかのフォルダへ移っても、選んだものは残る。書ける場所の下は、選ばなくても書ける。"
       trigger={
-        <Dialog.Trigger class="btn small" type="button">
-          <Icon svg={icons.folder} size={14} />
+        <DialogTrigger small icon={icons.folder}>
           選ぶ
-        </Dialog.Trigger>
+        </DialogTrigger>
       }
     >
       <div class="folder-picker">
         <div class="folder-bar">
-          <button type="button" class="btn small ghost" aria-label="ホーム" onClick={() => void go("")}>
-            <Icon svg={icons.home} size={14} />
-          </button>
-          <button
-            type="button"
-            class="btn small ghost"
-            aria-label="ひとつ上へ"
+          <IconButton icon={icons.home} label="ホーム" variant="ghost" onClick={() => void go("")} />
+          <IconButton
+            icon={icons.folderUp}
+            label="ひとつ上へ"
+            variant="ghost"
             disabled={!folder()?.parent}
             onClick={() => void go(folder()?.parent ?? "")}
-          >
-            <Icon svg={icons.folderUp} size={14} />
-          </button>
+          />
           <span class="mono folder-path" aria-label="いまのフォルダ">
             {folder()?.path ?? "…"}
           </span>
@@ -164,14 +148,11 @@ export default function FolderPicker(props: {
           </Show>
         </div>
       </div>
-      <div class="dialog-actions">
-        <Dialog.CloseTrigger class="btn" type="button">
-          やめる
-        </Dialog.CloseTrigger>
-        <button type="button" class="btn primary" disabled={chosen().length === 0} onClick={() => void add()}>
-          {chosen().length > 0 ? `${chosen().length} 件を足す` : "足す"}
-        </button>
-      </div>
-    </Modal>
+      <DialogActions
+        submit={chosen().length > 0 ? `${chosen().length} 件を足す` : "足す"}
+        disabled={chosen().length === 0}
+        onSubmit={() => void add()}
+      />
+    </Dialog>
   );
 }
