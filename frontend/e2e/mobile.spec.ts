@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { detail, expectView, record, row, visit } from "./support";
+import { call, detail, expectView, record, row, visit } from "./support";
 
 function tabbar(page: Page) {
   return page.locator("#m-tabbar");
@@ -58,7 +58,7 @@ test("ほか lists the other tabs and leads into the settings and memory menus",
   await expect(page).toHaveURL(/\/memory\/core$/);
 });
 
-test("the chat peeks above the tab bar, opens as a half sheet, widens, and closes", async ({ page }) => {
+test("the chat peeks above the tab bar, opens over the whole screen, and closes", async ({ page }) => {
   await visit(page, "/", /^ホーム/);
   const peek = page.getByRole("button", { name: "会話を引き上げる" });
   const close = page.getByRole("button", { name: "閉じる" });
@@ -66,16 +66,52 @@ test("the chat peeks above the tab bar, opens as a half sheet, widens, and close
   await expect(close).toBeHidden();
 
   await peek.click();
-  await expect(page.locator("body")).toHaveClass(/sheet-half/);
   await expect(close).toBeVisible();
   await expect(peek).toBeHidden();
-
-  await page.getByRole("button", { name: "広げる" }).click();
-  await expect(page.locator("body")).toHaveClass(/sheet-full/);
+  const box = await page.locator(".chat").boundingBox();
+  expect(box?.y).toBe(0);
 
   await close.click();
-  await expect(page.locator("body")).not.toHaveClass(/sheet-(half|full)/);
   await expect(peek).toBeVisible();
+  await expect(close).toBeHidden();
+});
+
+/** Pull with a finger from the middle of an element. */
+async function pull(page: Page, selector: string, by: number) {
+  const box = await page.locator(selector).boundingBox();
+  if (!box) throw new Error(`no ${selector}`);
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", at?: number) =>
+    cdp.send("Input.dispatchTouchEvent", { type, touchPoints: at === undefined ? [] : [{ x, y: at }] });
+  await touch("touchStart", y);
+  for (let i = 1; i <= 10; i++) await touch("touchMove", y + (by * i) / 10);
+  await touch("touchEnd");
+}
+
+test("the chat is pulled up by its peek and down by its bar", async ({ page }) => {
+  await visit(page, "/", /^ホーム/);
+  await pull(page, ".m-peek", -400);
+  await expect(page.locator(".m-sheetbar")).toBeInViewport();
+  await expect.poll(async () => (await page.locator(".chat").boundingBox())?.y).toBe(0);
+
+  await pull(page, ".m-sheetbar", 400);
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  await expect(page.locator("#messages")).toBeHidden();
+});
+
+test("starting to write opens the chat, on the newest message", async ({ page, request }) => {
+  for (let i = 0; i < 12; i++) await call(request, "ConsoleService", "PostMessage", { text: `スマホの発言 ${i}\n\n${"長い話。".repeat(30)}` });
+  await visit(page, "/", /^ホーム/);
+  await expect(page.locator(".m-peek")).toContainText("スマホの発言 11");
+  await page.getByPlaceholder(/に頼む$/).focus();
+  await expect(page.locator(".m-sheetbar")).toBeVisible();
+  const atEnd = () => page.locator("#messages").evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  await expect.poll(atEnd).toBeLessThan(2);
+
+  await call(request, "ConsoleService", "PostMessage", { text: `あとから来た発言\n\n${"続き。".repeat(40)}` });
+  await expect(page.getByTestId("message").filter({ hasText: "あとから来た発言" })).toBeVisible();
+  await expect.poll(atEnd).toBeLessThan(2);
 });
 
 test("a message is sent with one tap while typing, and the keyboard stays until dismissed", async ({ page }) => {
@@ -98,11 +134,11 @@ test("a message is sent with one tap while typing, and the keyboard stays until 
 test("changing page closes the chat sheet", async ({ page }) => {
   await visit(page, "/", /^ホーム/);
   await page.getByRole("button", { name: "会話を引き上げる" }).click();
-  await expect(page.locator("body")).toHaveClass(/sheet-half/);
+  await expect(page.locator("#messages")).toBeVisible();
   await page.goto("/tasks");
   await expectView(page, "タスク");
   await page.locator("#m-tabbar").getByRole("link", { name: "メモ" }).click();
-  await expect(page.locator("body")).not.toHaveClass(/sheet-half/);
+  await expect(page.locator("#messages")).toBeHidden();
 });
 
 test("the workgroup chip opens a sheet, and choosing there narrows the console", async ({ page }) => {

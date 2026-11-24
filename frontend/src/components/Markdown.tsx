@@ -8,9 +8,10 @@ import { draw, notebookHref } from "~/lib/markdown";
  * Markdown drawn as Arto draws it; until that is ready, the text itself.
  * `inline` sets it into the line it stands in, such as a title or an item of
  * a list; `attributes` sets apart what memory items carry at their end; `links`
- * says what the records it links to are called now.
+ * says what the records it links to are called now; `plain` is what stands
+ * for `text` until it is drawn.
  */
-export default function Markdown(props: { text: string; inline?: boolean; attributes?: boolean; links?: RecordLink[] }) {
+export default function Markdown(props: { text: string; plain?: string; inline?: boolean; attributes?: boolean; links?: RecordLink[] }) {
   let viewer: HTMLElement | undefined;
   const navigate = useNavigate();
   const [drawn, setDrawn] = createSignal(false);
@@ -51,7 +52,7 @@ export default function Markdown(props: { text: string; inline?: boolean; attrib
     <Dynamic component={props.inline ? "span" : "div"} class={props.inline ? "md md-inline" : "md"} onClick={onClick} onKeyDown={onKeyDown}>
       <Show when={!drawn()}>
         <Dynamic component={props.inline ? "span" : "pre"} class="md-plain">
-          {props.text}
+          {props.plain ?? props.text}
         </Dynamic>
       </Show>
       <Dynamic

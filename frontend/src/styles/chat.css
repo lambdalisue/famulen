@@ -1,8 +1,11 @@
-.chat { width: var(--chat); flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-.messages { flex: 1; overflow-y: auto; padding: var(--s4) 18px; display: flex; flex-direction: column; gap: 14px; }
-.msg { display: flex; flex-direction: column; gap: var(--s1); max-width: 88%; align-items: flex-start; }
+.chat { position: relative; width: var(--chat); max-width: calc(100vw - 480px); flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.messages { flex: 1; overflow-y: auto; padding: var(--s4) 18px; overflow-anchor: none; }
+.said { display: flex; flex-direction: column; gap: 14px; }
+.chat-edge { position: relative; flex: none; width: 0; }
+.chat-edge > .resize-edge { left: -5px; }
+.msg { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; max-width: 92%; align-items: flex-start; }
 .msg .meta { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--muted); }
-.msg .text { font-size: var(--t-md); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 14px; }
+.msg .text { font-size: var(--t-md); line-height: 1.75; overflow-wrap: anywhere; padding: 10px 14px; min-width: 0; max-width: 100%; }
 .msg.owner { align-self: flex-end; align-items: flex-end; }
 .msg.owner .meta { text-align: right; }
 .msg.owner .text { background: var(--ink); color: var(--on-ink); border-radius: 14px 14px 4px 14px; }
@@ -12,7 +15,7 @@
 .approval { border: 1px solid var(--warn-line); background: var(--warn-soft); border-radius: var(--r-lg); padding: 12px 14px; display: flex; flex-direction: column; gap: var(--s2); font-size: var(--t-base); }
 .approval-title { color: var(--warn); }
 .approval pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--t-sm); max-height: 160px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: var(--s2); }
-.approval .said { white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval .asked { white-space: pre-wrap; overflow-wrap: anywhere; }
 .questions, .question { display: flex; flex-direction: column; gap: var(--s2); align-items: flex-start; }
 .question { width: 100%; gap: 6px; }
 .question .input { width: 100%; }

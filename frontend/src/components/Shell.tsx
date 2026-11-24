@@ -8,7 +8,7 @@ import { useWaiting } from "~/lib/inbox";
 import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
-import { isNarrow } from "~/lib/viewport";
+import { followKeyboard, isNarrow } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import AideIcon from "./AideIcon";
@@ -47,7 +47,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   const workgroups = createAsync(() => workgroupsQuery());
   const owner = useOwner();
   followPortrait();
-  const [sheet, setSheet] = createSignal<"" | "half" | "full">("");
+  const [chatOpen, setChatOpen] = createSignal(false);
   let workgroupSheet: HTMLDialogElement | undefined;
 
   const tab = () => tabOf(location.pathname);
@@ -59,10 +59,14 @@ export default function Shell(props: { children?: JSX.Element }) {
 
   onMount(() => {
     followEvents(workgroup);
+    followKeyboard();
     // The narrow layout's rules read these from <body>: while typing, the
     // bottom bar gives way to the keyboard.
     const focusIn = (e: FocusEvent) => {
-      if (isNarrow() && e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.add("typing");
+      if (isNarrow() && e.target instanceof HTMLElement && e.target.id === "say") {
+        document.body.classList.add("typing");
+        setChatOpen(true);
+      }
     };
     const focusOut = (e: FocusEvent) => {
       if (e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.remove("typing");
@@ -75,13 +79,12 @@ export default function Shell(props: { children?: JSX.Element }) {
     });
   });
   createEffect(() => {
-    document.body.classList.toggle("sheet-half", sheet() === "half");
-    document.body.classList.toggle("sheet-full", sheet() === "full");
+    document.body.classList.toggle("chat-open", chatOpen());
   });
   createEffect(
     on(
       () => location.pathname,
-      () => setSheet(""),
+      () => setChatOpen(false),
       { defer: true },
     ),
   );
@@ -151,7 +154,7 @@ export default function Shell(props: { children?: JSX.Element }) {
         </button>
       </header>
       <div class="body">
-        <Chat sheet={setSheet} />
+        <Chat open={chatOpen()} setOpen={setChatOpen} />
         <div id="main" class="main">
           <nav class="tabs" aria-label="セクション">
             <For each={SECTIONS}>
