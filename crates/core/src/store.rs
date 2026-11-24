@@ -591,6 +591,35 @@ CREATE TABLE IF NOT EXISTS lookout_heard (
     title  TEXT NOT NULL,
     body   TEXT NOT NULL
 );
+-- mail that may tell of a purchase: unscreened, waiting, read or failed
+CREATE TABLE IF NOT EXISTS purchase_mails (
+    id         INTEGER PRIMARY KEY,
+    connection TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    at         INTEGER NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'waiting',
+    tries      INTEGER NOT NULL DEFAULT 0,
+    next_at    INTEGER NOT NULL DEFAULT 0,
+    -- what an unscreened one is screened by
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL DEFAULT '',
+    UNIQUE (connection, message)
+);
+-- what was added from mail; it outlives the record
+CREATE TABLE IF NOT EXISTS purchases (
+    holding   TEXT PRIMARY KEY,
+    mail      INTEGER NOT NULL,
+    shop      TEXT NOT NULL,
+    number    TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    bought_on TEXT NOT NULL
+);
+-- what each mail settled
+CREATE TABLE IF NOT EXISTS purchase_settled (
+    mail    INTEGER NOT NULL,
+    holding TEXT NOT NULL,
+    PRIMARY KEY (mail, holding)
+);
 CREATE TABLE IF NOT EXISTS slack_taken (
     workspace TEXT NOT NULL,
     channel   TEXT NOT NULL,

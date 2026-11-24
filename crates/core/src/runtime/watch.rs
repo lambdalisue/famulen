@@ -32,6 +32,8 @@ notify (the owner should know today: a vulnerability in what they use, a sale on
 or digest (worth a line in tomorrow morning's summary). \
 Give each group a short title and say why in one short sentence, both in Japanese. \
 Every item that concerns the owner belongs to one group.
+Apart from that, list in purchases the index of every mail that tells of something the owner bought: \
+an order taken, shipped, delivered, returned or cancelled, whether or not it concerns them now; not advertising.
 What the owner cares about, and what they said does not concern them:
 ";
 
@@ -239,7 +241,12 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
         let model = async |items: Vec<Item>| {
             let system = format!("{SCREEN}{profile}");
             let schema = lookout::verdict_schema();
-            let answer = ask_lookout(app, tz, &system, &items, &schema).await?;
+            let answer = ask_lookout(app, tz, &system, &items, &schema).await;
+            match &answer {
+                Ok(Some(answer)) => crate::purchases::mark(&app.store, source_ref, &items, answer)?,
+                _ => crate::purchases::leave(&app.store, source_ref, &items)?,
+            }
+            let answer = answer?;
             Ok(answer.map(|a| lookout::verdict_from(&a, items.len())))
         };
         let inputs = app

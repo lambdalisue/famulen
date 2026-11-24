@@ -50,6 +50,20 @@ pub(super) async fn keep_finding_models(app: App) {
     }
 }
 
+/// Apart from the other chores, since a model may take long over each mail.
+pub(super) async fn read_purchases(app: App) {
+    let mut tick = tokio::time::interval(CHORE_TICK);
+    loop {
+        tick.tick().await;
+        if let Err(error) = crate::purchases::screen_left(&app).await {
+            tracing::warn!(%error, "could not screen the mail left for what was bought");
+        }
+        if let Err(error) = crate::purchases::read_waiting(&app).await {
+            tracing::warn!(%error, "could not read the mail of what was bought");
+        }
+    }
+}
+
 pub(super) async fn chores(app: App) {
     let mut tick = tokio::time::interval(CHORE_TICK);
     let mut last_calendar = 0_i64;
