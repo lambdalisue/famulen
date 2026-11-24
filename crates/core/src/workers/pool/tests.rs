@@ -305,7 +305,7 @@ async fn work_on_code_is_handed_the_owners_steps_to_finish_it_and_the_secretary_
     let b = bench("pool-finish", Fake::default());
     Settings {
         finishes: vec![Finish {
-            directory: at("/src"),
+            repository: String::new(),
             steps: "Merge it.".into(),
         }],
         ..Settings::default()

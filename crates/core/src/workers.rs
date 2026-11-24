@@ -48,7 +48,8 @@ pub struct Settings {
     /// No run is started while set; those going on go on.
     pub paused: bool,
     /// How the owner wants work on code finished.
-    #[serde(default)]
+    // `finishes` as stored held directories, which name no repository.
+    #[serde(default, rename = "repository_finishes")]
     pub finishes: Vec<Finish>,
 }
 
@@ -212,7 +213,7 @@ mod tests {
             slots: 5,
             paused: true,
             finishes: vec![Finish {
-                directory: String::new(),
+                repository: String::new(),
                 steps: "Review it.".into(),
             }],
         };

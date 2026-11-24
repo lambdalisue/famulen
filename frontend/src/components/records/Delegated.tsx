@@ -160,7 +160,7 @@ export function DelegatedPage(props: { tools: JSX.Element; detail: (id: string) 
           actions={<span class="d-only">{props.tools}</span>}
           note={
             <>
-              手代か Adroit に委ねたタスク。上から順に動く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>
+              手代か外のエージェントに委ねたタスク。上から順に動く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>
               で決める。
             </>
           }

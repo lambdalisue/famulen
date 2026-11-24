@@ -155,9 +155,9 @@ message ListDelegatedResponse {
 
 // How the owner wants delegated work on code finished.
 message WorkerFinish {
-  // Work in this directory or below it, as an absolute path; any when empty.
-  // The closest around the work is the one that counts.
-  string directory = 1;
+  // Work on this repository wherever it is cloned, as host/path or any address
+  // it is cloned by; work on any other when empty.
+  string repository = 1;
   // As Markdown.
   string steps = 2;
 }
@@ -167,8 +167,11 @@ message WorkerSettings {
   int32 slots = 1;
   // No task is started while set; those running go on.
   bool paused = 2;
-  // Handed to every Adroit session that may change code.
+  // Handed to every session that may change code.
   repeated WorkerFinish finishes = 3;
+  // What Famulen brings along, each used unless the owner has one for the same
+  // repository. Not set.
+  repeated WorkerFinish bundled_finishes = 4;
 }
 
 // Delegated tasks: work put on the task list that a pool of workers picks up.
