@@ -83,6 +83,7 @@ impl NotebookService for Api {
     ) -> ServiceResult<FixNotebookResponse> {
         let by = writer(&ctx);
         by.may_write().or_fail()?;
+        let _hold = self.app.notebook.hold().or_fail()?;
         let changed_files = check::fix(&self.app.notebook, &[]).or_fail()?;
         if !changed_files.is_empty() {
             self.app

@@ -350,6 +350,7 @@ impl MemoryService for Api {
         writer(&ctx).may_write().or_fail()?;
         let r = request.to_owned_message();
         let dir = &self.app.memory_dir;
+        let _hold = self.app.notebook.hold().or_fail()?;
         let before = m::read_file(dir, &r.path).unwrap_or_default();
         let text = self
             .app
@@ -390,6 +391,7 @@ impl MemoryService for Api {
         if text.is_empty() {
             return Err(fail("nothing to remember"));
         }
+        let _hold = self.app.notebook.hold().or_fail()?;
         let names = self.app.records.names();
         let text = names.canonical_text(text, "").or_fail()?;
         let text = text.as_str();
@@ -431,6 +433,7 @@ impl MemoryService for Api {
         {
             return Err(fail("name is lowercase letters, digits and -"));
         }
+        let _hold = self.app.notebook.hold().or_fail()?;
         let names = self.app.records.names();
         let before = m::working_memories(&self.app.memory_dir)
             .or_fail()?
@@ -463,6 +466,7 @@ impl MemoryService for Api {
         request: ServiceRequest<'_, ByName>,
     ) -> ServiceResult<Empty> {
         writer(&ctx).may_write().or_fail()?;
+        let _hold = self.app.notebook.hold().or_fail()?;
         if !m::remove_working(&self.app.memory_dir, request.id).or_fail()? {
             return Err(fail(format!("no working memory {}", request.id)));
         }

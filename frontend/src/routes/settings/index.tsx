@@ -1,5 +1,5 @@
 import { createAsync, revalidate } from "@solidjs/router";
-import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FolderPicker from "~/components/FolderPicker";
 import NotebookCheck from "~/components/NotebookCheck";
 import LogSheet from "~/components/logs/LogSheet";
@@ -8,13 +8,13 @@ import RoleModel from "~/components/RoleModel";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act, look, say } from "~/lib/act";
 import { api } from "~/lib/api";
-import { homeQuery, notebookPlaceQuery, slackNamesQuery, writableQuery } from "~/lib/data";
+import { homeQuery, notebookPlaceQuery, notebookSharingQuery, slackNamesQuery, writableQuery } from "~/lib/data";
 import { coveringPlace, isUnder, wholePath } from "~/lib/places";
 import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { iconFile, PORTRAITS, type Portrait } from "~/lib/portrait";
 import { setView } from "~/lib/view";
-import { Button, Callout, EmptyState, Icon, LinkButton, PageHeader, RadioCards, Section, Tag, TextArea, TextField } from "~/components/ui";
+import { Button, Callout, EmptyState, Icon, LinkButton, PageHeader, RadioCards, Section, Switch, Tag, TextArea, TextField } from "~/components/ui";
 
 /** Ways of speaking the owner picks from; the text is what the secretary is told. */
 const TONES = [
@@ -429,6 +429,36 @@ function NotebookSection() {
   );
 }
 
+function SharingSection() {
+  const sharing = createAsync(() => notebookSharingQuery());
+  // Famulen may not know the address the owner opens the console at; the browser does.
+  const [origin, setOrigin] = createSignal("");
+  onMount(() => setOrigin(location.origin));
+  return (
+    <Section
+      title="手帳の共有"
+      label="手帳の共有"
+      note="ほかのマシンの AI が、同じ手帳を Git で読み書きできるようにする。有効なあいだは、このコンソールを開ける端末なら、手帳を履歴ごと読み、心得も含めて書き換えられる。"
+    >
+      <Show when={sharing()}>
+        {(s) => (
+          <>
+            <Switch checked={s().on} onChange={(on) => void act(() => api.settings.setNotebookSharing({ on }))}>
+              ほかのマシンと共有する
+            </Switch>
+            <Show when={s().on}>
+              <span class="sub">ほかのマシンでは、次のように手帳のコピーを作る。あとは読み書きのたびに同期される。</span>
+              <code class="mono" style={{ "overflow-wrap": "anywhere" }}>
+                famulen-notebook clone {s().url || `${origin()}/notebook.git`} notebook
+              </code>
+            </Show>
+          </>
+        )}
+      </Show>
+    </Section>
+  );
+}
+
 export default function Secretary() {
   setView("設定", "秘書");
   const owner = useOwner();
@@ -436,7 +466,7 @@ export default function Secretary() {
     <>
       <PageHeader
         title="秘書"
-        note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と性別と口調、書ける場所、手帳の場所を決める。"
+        note="あなたと話すエージェント。どのチャネルからの頼みにも応じ、手帳を読み書きし、外へ働きかけ、手代に仕事を委ねる。ここでは考えるのに使うモデル、呼び名と性別と口調、書ける場所、手帳の場所と共有を決める。"
       />
       <div class="prefs">
         <RoleModel role={Role.SECRETARY} cap="上限は目安で、超えても会話は止めない。値段のあるモデルは円で、ないモデルは回数で数える。" />
@@ -451,6 +481,7 @@ export default function Secretary() {
         </Show>
         <WritableSection />
         <NotebookSection />
+        <SharingSection />
         <NotebookCheck />
       </div>
       <LogSheet title="秘書のログ">

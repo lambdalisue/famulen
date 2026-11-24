@@ -5,10 +5,12 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::Context as _;
 use chrono::{DateTime, FixedOffset};
+
+use crate::STATE;
 
 /// Who made a change to the notebook.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -85,6 +87,12 @@ fn create(dir: &Path) -> anyhow::Result<()> {
 
 static COMMITTING: Mutex<()> = Mutex::new(());
 
+/// Wait for the commits of this process to be done, and keep others from
+/// starting.
+pub(crate) fn committing() -> MutexGuard<'static, ()> {
+    COMMITTING.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Record every change under `dir` as one commit by `author`, or do nothing
 /// when nothing there changed. Returns the new commit's id.
 pub fn commit_all(dir: &Path, author: &Author, message: &str) -> anyhow::Result<Option<String>> {
@@ -103,7 +111,7 @@ pub fn commit_paths(
 ) -> anyhow::Result<Option<String>> {
     // git keeps one index per repository and refuses a second writer while
     // the first holds `index.lock`, so commits from this process take turns.
-    let _turn = COMMITTING.lock().unwrap_or_else(|p| p.into_inner());
+    let _turn = committing();
     let mut known = Vec::new();
     for path in paths {
         let path = path.as_ref();
@@ -121,6 +129,10 @@ pub fn commit_paths(
         all
     };
     git(dir, &with_paths(&["add", "-A"]))?;
+    // Not left to `.gitignore`, which a copy of the notebook may change.
+    let state = format!(":(top){STATE}");
+    let args = ["rm", "-rq", "--cached", "--ignore-unmatch", "--", &state];
+    git(dir, &args)?;
     let changed = if has_head(dir)? {
         !command(dir, &with_paths(&["diff", "--cached", "--quiet"]))
             .status()
@@ -136,6 +148,8 @@ pub fn commit_paths(
         dir,
         &with_paths(&["commit", "-q", "--no-verify", "-F", "-"]),
     )
+    .env("GIT_COMMITTER_NAME", COMMITTER_NAME)
+    .env("GIT_COMMITTER_EMAIL", COMMITTER_EMAIL)
     .env("GIT_AUTHOR_NAME", &author.name)
     .env("GIT_AUTHOR_EMAIL", &author.email)
     .stdin(std::process::Stdio::piped())
@@ -254,6 +268,15 @@ fn check_rev(commit: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Let a command commit as this tool.
+pub(crate) fn as_tool(command: &mut Command) {
+    for who in ["AUTHOR", "COMMITTER"] {
+        command
+            .env(format!("GIT_{who}_NAME"), COMMITTER_NAME)
+            .env(format!("GIT_{who}_EMAIL"), COMMITTER_EMAIL);
+    }
+}
+
 fn has_head(dir: &Path) -> anyhow::Result<bool> {
     Ok(command(dir, &["rev-parse", "-q", "--verify", "HEAD"])
         .output()
@@ -262,7 +285,7 @@ fn has_head(dir: &Path) -> anyhow::Result<bool> {
         .success())
 }
 
-fn command(dir: &Path, args: &[&str]) -> Command {
+pub(crate) fn command(dir: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     command
         .args(args)

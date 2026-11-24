@@ -13,6 +13,7 @@ mod obsolete;
 mod persona;
 mod records;
 mod roles;
+mod sharing;
 mod status;
 mod support;
 mod tools;

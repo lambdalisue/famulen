@@ -77,7 +77,7 @@ impl Records {
             !service.trim().is_empty() && !handle.trim().is_empty(),
             "an account needs a service and a handle"
         );
-        let _writing = self.writing();
+        let _writing = self.writing()?;
         let target = self.need(PARTIES, party)?.id;
         let wanted = account_id(service, handle);
         let mut was_confirmed = false;
@@ -108,7 +108,7 @@ impl Records {
     /// Answer a guessed account: the same party confirms it, another removes it.
     pub fn answer_account(&self, writer: Writer, account: &str, same: bool) -> anyhow::Result<()> {
         writer.may_write()?;
-        let _writing = self.writing();
+        let _writing = self.writing()?;
         let (mut record, at) = self
             .accounts()?
             .into_iter()

@@ -5,8 +5,10 @@
 #[cfg(test)]
 pub(crate) mod testing;
 
+use crate::store::Store;
+
 pub use famulen_notebook::{
-    Author, MEMORY, Notebook, Page, README, RECORDS, Signature, commit_all, commit_paths,
+    Author, Hold, MEMORY, Notebook, Page, README, RECORDS, Signature, commit_all, commit_paths,
     diff_stat, link_target, log, revert_to,
 };
 
@@ -29,6 +31,21 @@ pub fn open(root: impl Into<std::path::PathBuf>) -> Notebook {
 /// Make the notebook in Famulen's name, committing only what this call made.
 pub fn ensure(notebook: &Notebook) -> anyhow::Result<()> {
     notebook.ensure(&Writer::Secretary.signature())
+}
+
+const SHARED_KEY: &str = "notebook.shared";
+
+/// Whether the owner shares the notebook with copies on other machines.
+pub fn is_shared(store: &Store) -> anyhow::Result<bool> {
+    Ok(store.state(SHARED_KEY)?.is_some())
+}
+
+pub fn set_shared(store: &Store, shared: bool) -> anyhow::Result<()> {
+    if shared {
+        store.set_state(SHARED_KEY, "1")
+    } else {
+        store.clear_state(SHARED_KEY)
+    }
 }
 
 /// Who writes to the notebook. Each change is committed in their name.

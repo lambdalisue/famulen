@@ -522,6 +522,7 @@ impl LookoutService for Api {
                 "要らなかった"
             }
         );
+        let _hold = self.app.notebook.hold().or_fail()?;
         famulen_core::memory::append_episode(
             &self.app.memory_dir,
             chrono::Utc::now()

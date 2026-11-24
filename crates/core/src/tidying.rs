@@ -498,7 +498,7 @@ fn apply(
 ) -> anyhow::Result<Option<Change>> {
     let (kind, id) = (c.record.kind.as_str(), c.record.id.as_str());
     // What was checked is what is written: the owner may edit it meanwhile.
-    let held = records.hold();
+    let held = records.hold()?;
     let now = records.need(kind, id)?;
     anyhow::ensure!(
         fingerprint(&now) == c.fingerprint && !is_recent(records, &now, today) && may_look(&now),
@@ -995,7 +995,7 @@ mod tests {
     fn a_memo_cannot_be_edited_between_its_check_and_its_mark() {
         let b = book("tidy-held");
         let memo = b.add(MEMOS, "牛乳を買う");
-        let held = b.records.hold();
+        let held = b.records.hold().unwrap();
         let (records, id) = (b.records.clone(), memo.id.clone());
         let (sent, done) = std::sync::mpsc::channel();
         let edit = std::thread::spawn(move || {

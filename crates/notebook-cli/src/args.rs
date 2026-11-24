@@ -48,6 +48,16 @@ pub struct Sign {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Make a copy of a shared notebook, kept in sync with it from then on.
+    Clone {
+        /// Where the notebook is shared.
+        url: String,
+        /// The directory to make.
+        directory: PathBuf,
+    },
+    /// Bring in what is new in the shared notebook, and send what was written
+    /// here. Every other command does so by itself.
+    Sync,
     /// Make the notebook, or put back what is missing from it.
     Init,
     /// Tell where the notebook strays from its rules.

@@ -437,6 +437,7 @@ impl Records {
         record: &Record,
         subject: &str,
     ) -> anyhow::Result<()> {
+        let _hold = self.notebook.hold()?;
         let before = self
             .get(&record.kind, &record.id)
             .ok()
@@ -479,6 +480,7 @@ impl Records {
     ) -> anyhow::Result<bool> {
         check_kind(kind)?;
         check_id(id)?;
+        let _hold = self.notebook.hold()?;
         match std::fs::remove_file(self.path(kind, id)) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),

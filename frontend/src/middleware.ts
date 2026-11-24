@@ -1,10 +1,10 @@
 import { createMiddleware } from "@solidjs/start/middleware";
 import { backendUrl } from "./lib/api";
-import { allowedHosts, refuse } from "./lib/guard";
+import { allowedHosts, NOTEBOOK_GIT, refuse } from "./lib/guard";
 
-/** Paths the browser calls that belong to the backend. */
+/** Paths the browser or Git calls that belong to the backend. */
 function relayed(path: string): boolean {
-  return path.startsWith("/famulen.v1.") || path === "/health";
+  return path.startsWith("/famulen.v1.") || path.startsWith(NOTEBOOK_GIT) || path === "/health";
 }
 
 const hosts = allowedHosts(process.env);
@@ -17,6 +17,8 @@ export default createMiddleware([
     if (!relayed(url.pathname)) return next();
     const headers = new Headers(event.req.headers);
     headers.delete("host");
+    // These are about the connection they came on, and fetch refuses them.
+    for (const name of ["connection", "expect", "keep-alive", "transfer-encoding", "upgrade"]) headers.delete(name);
     // Checked here; the backend would take the console's site for another.
     headers.delete("origin");
     // Node's fetch sends a streamed body only with `duplex: "half"`, which

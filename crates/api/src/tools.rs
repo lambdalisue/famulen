@@ -335,6 +335,13 @@ mod tests {
     }
 
     #[test]
+    fn only_the_owner_shares_the_notebook() {
+        let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
+        assert!(tools.iter().all(|t| t.def.name != "set_notebook_sharing"));
+        assert!(tool(&tools, "get_notebook_sharing").read_only);
+    }
+
+    #[test]
     fn only_the_owner_widens_where_the_secretary_may_write() {
         let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
         assert!(tools.iter().all(|t| t.def.name != "add_writable_place"));
