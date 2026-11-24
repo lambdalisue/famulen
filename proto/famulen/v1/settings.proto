@@ -26,6 +26,9 @@ message Persona {
   string own_tone = 4;
   // The icons on the console and on Slack follow it; male until chosen.
   PersonaGender gender = 5;
+  // What could not follow the change just made, such as the Slack app's
+  // icon; only in the answer to UpdatePersona, whose change is kept.
+  repeated string troubles = 6;
 }
 
 message UpdatePersonaRequest {
@@ -36,12 +39,16 @@ message UpdatePersonaRequest {
   optional PersonaGender gender = 5;
 }
 
-// One tile on the home screen.
+// One tile on the home screen, placed on a grid 12 cells wide.
 message Tile {
   // today, approvals, aide, task, memos, due.
   string kind = 1;
-  bool wide = 2;
-  bool tall = 3;
+  // The cell of its top left, from 0.
+  uint32 x = 2;
+  uint32 y = 3;
+  // How many cells it takes: 3 to 12 wide, 3 to 24 tall.
+  uint32 width = 4;
+  uint32 height = 5;
 }
 
 message Home {

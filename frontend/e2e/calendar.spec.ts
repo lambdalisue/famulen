@@ -125,3 +125,20 @@ test("an event opens beside the calendar, which stays", async ({ page, request }
   await page.getByRole("button", { name: "予定を閉じる" }).click();
   await expect(pane(page, "横に開く会")).toHaveCount(0);
 });
+
+test("an event too small for its words says them all under the pointer", async ({ page, request }) => {
+  const title = "長い題名の打ち合わせ：来期の進め方と担当の割り振りと見積もりの確かめ";
+  await record(request, "events", title, { fields: { Start: "2027-01-12 10:00", End: "2027-01-12 10:15", Location: "本社 8 階 会議室 C" } });
+  await visit(page, "/calendar?unit=week&at=2027-01-11", /^カレンダー · 週/);
+  const event = page.locator(".week").getByRole("button", { name: /長い題名/ });
+  await event.hover();
+  const card = page.getByRole("tooltip");
+  await expect(card).toContainText(title);
+  await expect(card).toContainText("1月12日（火） 10:00 – 10:15");
+  await expect(card).toContainText("本社 8 階 会議室 C");
+  await page.mouse.move(5, 5);
+  await expect(card).toHaveCount(0);
+  await event.click();
+  await expect(card).toHaveCount(0);
+  await expect(pane(page, title)).toBeVisible();
+});

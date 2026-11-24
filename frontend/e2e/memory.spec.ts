@@ -103,7 +103,7 @@ test("a memory file written by the owner reads back and shows in its history", a
   await expect(editor).toHaveValue("# 心得\n\n- 返事は短く、結論から");
 
   await page.getByRole("link", { name: "読む", exact: true }).click();
-  await expect(page.locator("article.markdown-body").getByRole("listitem")).toHaveText("返事は短く、結論から");
+  await expect(page.locator("#pane article.markdown-body").getByRole("listitem")).toHaveText("返事は短く、結論から");
 
   await page.getByRole("link", { name: "経緯", exact: true }).click();
   await expect(page.locator(".list .item").first()).toContainText("あなた");
@@ -157,7 +157,7 @@ test.describe("memory drawn as Markdown", () => {
     await call(request, "MemoryService", "WriteFile", { path: "core.md", text });
     await visit(page, "/memory/file?path=core.md", "記憶 · core.md");
 
-    const body = page.locator("article.markdown-body");
+    const body = page.locator("#pane article.markdown-body");
     await expect(body.getByRole("heading", { name: "心得" })).toBeVisible();
     const item = body.getByRole("listitem").first();
     await expect(item.locator("strong")).toHaveText("短く");
@@ -178,7 +178,7 @@ test.describe("memory drawn as Markdown", () => {
       text: "---\nid: e2e-md3\nsummary: 朝は \`お茶\`\nsrc: said\n---\n\n朝は *お茶* 。\n",
     });
     await visit(page, "/memory/file?path=long/semantic/e2e-folded.md", /^記憶/);
-    const body = page.locator("article.markdown-body");
+    const body = page.locator("#pane article.markdown-body");
     await expect(body.locator("em")).toHaveText("お茶");
     await expect(body.getByText("e2e-md3")).toBeHidden();
     await body.getByText("属性", { exact: true }).click();

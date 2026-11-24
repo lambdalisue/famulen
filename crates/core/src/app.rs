@@ -66,16 +66,14 @@ pub struct App {
             Option<Arc<crate::slack::clients::SlackClients<crate::slack::web::GatewaySlack>>>,
         >,
     >,
-    /// What stands beside the secretary's posts on Slack.
-    pub slack_icons: crate::slack::icons::Icons,
+    /// Held while the Slack apps' own icons are set.
+    pub slack_app_icons: crate::slack::app_icon::AppIcons,
+    /// How the secretary's posts on Slack show it.
+    pub slack_looks: crate::slack::looks::Looks,
     /// Where the gateway's receivers are reached from outside, if the owner
     /// made them reachable; calendar changes are asked to be sent there.
     pub receive_url: Option<String>,
 }
-
-/// What the secretary is called until the owner names it: a nickname of
-/// Famulen.
-const DEFAULT_AIDE_NAME: &str = "ファム";
 
 impl App {
     pub fn tz(&self) -> chrono_tz::Tz {
@@ -88,12 +86,7 @@ impl App {
 
     /// The secretary's name, which the owner chooses; ファム until then.
     pub fn aide_name(&self) -> String {
-        self.store
-            .state("persona.name")
-            .ok()
-            .flatten()
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_AIDE_NAME.to_owned())
+        crate::persona::name(&self.store)
     }
 
     /// Register the models this machine offers now. A source that cannot be

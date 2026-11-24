@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { agree, dayFromToday, detail, field, record, row, toast, visit } from "./support";
+import { agree, call, dayFromToday, detail, field, record, row, toast, visit } from "./support";
 
 const deadline = (what: string, days: number) => [{ name: "Deadlines", items: [{ text: what, fields: [{ name: "On", value: dayFromToday(days) }] }] }];
 
@@ -52,6 +52,16 @@ for (const [kind, path, view, add] of [
   });
 }
 
+test("what is being typed as another item stays when the record is read again", async ({ page, request }) => {
+  const r = await record(request, "holdings", "打ちかけの物", { fields: { Status: "owned" } });
+  await visit(page, `/things?id=${r.id}`, "物 · 打ちかけの物");
+  await detail(page).getByRole("button", { name: "＋ 期限" }).click();
+  await detail(page).getByLabel("期限を足す").fill("点検");
+  await call(request, "RecordService", "SaveRecord", { kind: "holdings", id: r.id, title: "読み直した物" });
+  await expect(detail(page)).toContainText("読み直した物");
+  await expect(detail(page).getByLabel("期限を足す")).toHaveValue("点検");
+});
+
 test("a thing says how it was got and several deadlines, and one let go is left out until asked for", async ({ page, request }) => {
   const r = await record(request, "holdings", "譲るカメラ", { fields: { Status: "owned" } });
   await visit(page, `/things?id=${r.id}`, "物 · 譲るカメラ");
@@ -74,6 +84,9 @@ test("a thing says how it was got and several deadlines, and one let go is left 
   await detail(page).getByLabel("期限を足す").fill("保証");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await detail(page).getByLabel("期限を足す").fill("点検");
+  // What is typed while the one before is saved stays.
+  await expect(detail(page).locator(".rec-item")).toHaveText([/保証/]);
+  await expect(detail(page).getByLabel("期限を足す")).toHaveValue("点検");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await expect(detail(page).locator(".rec-item")).toHaveText([/保証/, /点検/]);
 

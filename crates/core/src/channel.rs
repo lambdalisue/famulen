@@ -201,7 +201,7 @@ impl App {
             self.gateway.clone(),
             self.connections.clone(),
             id,
-            self.slack_icons.clone(),
+            self.slack_looks.clone(),
         )
     }
 
@@ -333,6 +333,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .ends_with("/male/avatar-512.png")
         );
+        assert_eq!(seen[1].1["username"], "ミナ");
     }
 
     /// A definition of the owner's own whose receiver suggests the channel,

@@ -116,6 +116,22 @@ pub struct Login {
     pub whoami: Option<WhoAmI>,
     #[serde(default)]
     pub mcp: Option<bool>,
+    /// Tokens traded for just before a tool that carries one, by name.
+    #[serde(default)]
+    pub exchange: BTreeMap<String, Exchange>,
+}
+
+/// A token got by handing over an account value that is spent in doing so:
+/// the answer brings the value to hand over next time.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Exchange {
+    pub post: String,
+    pub form: BTreeMap<String, String>,
+    /// Where in the answer the token is.
+    pub token: String,
+    /// The secret account fields the answer replaces, and where they are.
+    pub renews: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -553,6 +569,22 @@ pub fn seconds(text: &str) -> Option<u64> {
 }
 
 impl Definition {
+    /// Whether the token `name` is traded for at each use.
+    pub fn exchanges(&self, name: &str) -> bool {
+        self.login
+            .as_ref()
+            .is_some_and(|l| l.exchange.contains_key(name))
+    }
+
+    /// Whether a written tool carries a token traded for at each use.
+    fn spends(&self, tool: &HttpTool) -> bool {
+        let usual = self.transport.http.as_ref().and_then(|h| h.auth.as_ref());
+        tool.auth
+            .as_ref()
+            .or(usual)
+            .is_some_and(|a| self.exchanges(a))
+    }
+
     /// Where its `setup` is: a URL as written, or a path beside the
     /// definition's file.
     pub fn setup_place(&self) -> Option<String> {

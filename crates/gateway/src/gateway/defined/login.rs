@@ -21,6 +21,9 @@ const RETRY_SECS: i64 = 900;
 /// How long before they end tokens are asked for again.
 const BEFORE_SECS: i64 = 300;
 
+/// How long a service may take to trade a token.
+const TRADE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The state key a login made from a definition waits under.
 fn pending_key(state: &str) -> String {
     format!("defined-login.{state}")
@@ -122,6 +125,16 @@ impl Gateway {
         let target = self
             .same_account(&def, &oauth.same, &found_values, &id)?
             .unwrap_or(id.clone());
+        // What is set on the connection is not part of the login, and may have
+        // changed while the service was asked.
+        let kept = self.sealed().require(&target)?.secret.account;
+        if target == id {
+            secret.account = kept;
+        } else {
+            for (field, value) in kept {
+                secret.account.entry(field).or_insert(value);
+            }
+        }
         self.sealed().set_secret(&target, &secret)?;
         self.merge_values(&target, found_values)?;
         self.connections.set_status(&target, CONNECTED)?;
@@ -296,6 +309,80 @@ impl Gateway {
         self.refresh_display(id)
     }
 
+    /// The token `name` the definition's exchange trades for, with the values
+    /// its answer renews kept; `None` when no exchange gives that token.
+    pub(super) async fn exchange(
+        &self,
+        id: &str,
+        def: &Definition,
+        name: &str,
+    ) -> anyhow::Result<Option<String>> {
+        if !def.exchanges(name) {
+            return Ok(None);
+        }
+        // Apart from the caller, who may go away: what the service answers
+        // must be kept, for the value handed over is spent.
+        let (g, id, def, name) = (self.clone(), id.to_owned(), def.clone(), name.to_owned());
+        tokio::spawn(async move { g.trade(&id, &def, &name).await })
+            .await?
+            .map(Some)
+    }
+
+    async fn trade(&self, id: &str, def: &Definition, name: &str) -> anyhow::Result<String> {
+        let exchange = def
+            .login
+            .as_ref()
+            .and_then(|l| l.exchange.get(name))
+            .ok_or_else(|| anyhow::anyhow!("{} trades for no {name} token", def.id))?;
+        let one = self
+            .exchanging
+            .lock()
+            .await
+            .entry(id.to_owned())
+            .or_default()
+            .clone();
+        let _one = one.lock().await;
+        let connection = self.sealed().require(id)?;
+        let ctx = self.context(&connection, def, Value::Null, true)?;
+        let form = ctx.render_map(&exchange.form);
+        anyhow::ensure!(
+            form.len() == exchange.form.len(),
+            "{} has no value to trade for the {name} token",
+            connection.id
+        );
+        let answer: Value = self
+            .http
+            .post(&exchange.post)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::USER_AGENT, AGENT)
+            .form(&form)
+            .timeout(TRADE_TIMEOUT)
+            .send()
+            .await?
+            .json()
+            .await?;
+        let found = Context::of(answer);
+        let renewed = found.render_map(&exchange.renews);
+        let token = found.render_text(&exchange.token);
+        // What the answer renews is kept even when the rest cannot be used:
+        // the old value is already spent.
+        if !renewed.is_empty() {
+            // Read again: the owner may have set another value meanwhile.
+            let mut secret = self.sealed().require(id)?.secret;
+            for (field, value) in &renewed {
+                if secret.account.get(field) == connection.secret.account.get(field) {
+                    secret.account.insert(field.clone(), value.clone());
+                }
+            }
+            self.sealed().set_secret(id, &secret)?;
+        }
+        let why = found.render_text("{/error}").unwrap_or_default();
+        let token = token
+            .filter(|_| renewed.len() == exchange.renews.len())
+            .ok_or_else(|| anyhow::anyhow!("{} gave no {name} token: {why}", def.name))?;
+        Ok(token)
+    }
+
     /// Refresh the tokens of connections made from definitions whose login
     /// asks for it, before they expire. Whether any changed.
     pub(in crate::gateway) async fn refresh_defined(&self) -> anyhow::Result<bool> {
@@ -364,6 +451,7 @@ impl Gateway {
             let mut secret = c.secret.clone();
             match answer.and_then(|a| self.take_tokens(&oauth, &a, &mut secret)) {
                 Ok(found) => {
+                    secret.account = self.sealed().require(&c.id)?.secret.account;
                     self.sealed().set_secret(&c.id, &secret)?;
                     self.merge_values(&c.id, found)?;
                     self.connections.set_status(&c.id, CONNECTED)?;

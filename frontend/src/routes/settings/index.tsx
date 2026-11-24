@@ -104,7 +104,7 @@ function PortraitSection(props: { portrait: Portrait }) {
   return (
     <Section
       title="秘書の性別"
-      note="コンソールのアイコンと、Slack で秘書の発言に付くアイコンが替わる。ホーム画面に足したアイコンは端末が覚えているので、足し直すまで替わらないことがある。"
+      note="コンソールのアイコンと、Slack で秘書の発言に付くアイコンが替わる。アプリの設定用トークンを入れてあれば、Slack の一覧のアイコンも替わる。ホーム画面に足したアイコンは端末が覚えているので、足し直すまで替わらないことがある。"
     >
       <RadioCards
         label="秘書の性別"
@@ -116,6 +116,7 @@ function PortraitSection(props: { portrait: Portrait }) {
           setChosen(id);
           void save({ gender }).then((saved) => {
             if (!saved) setChosen(props.portrait);
+            else if (saved.troubles.length > 0) say(`保存した。${saved.troubles.join("。")}`, true);
           });
         }}
       />
