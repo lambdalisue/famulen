@@ -11,7 +11,7 @@ use chrono::{DateTime, Duration, Utc};
 use crate::store::Store;
 
 /// How long a channel stays attended when the owner has not said otherwise.
-pub const DEFAULT_MINUTES: u32 = 10;
+pub const DEFAULT_MINUTES: u32 = 60;
 
 const LENGTH_KEY: &str = "channel.attention_minutes";
 /// What was said in an attended channel but not to the secretary, kept for
@@ -150,12 +150,19 @@ mod tests {
     }
 
     #[test]
-    fn ten_minutes_unless_the_owner_chose_otherwise() {
+    fn an_hour_unless_the_owner_chose_otherwise() {
         let store = Store::open_in_memory().unwrap();
-        assert_eq!(minutes(&store).unwrap(), 10);
+        assert_eq!(minutes(&store).unwrap(), 60);
         attend(&store, "w1", "C1", at(0)).unwrap();
-        assert!(attending(&store, "w1", "C1", at(9)).unwrap());
-        assert!(!attending(&store, "w1", "C1", at(10)).unwrap());
+        assert!(attending(&store, "w1", "C1", at(59)).unwrap());
+        assert!(!attending(&store, "w1", "C1", at(60)).unwrap());
+    }
+
+    #[test]
+    fn the_length_the_owner_chose_stands_over_the_default() {
+        let store = Store::open_in_memory().unwrap();
+        set_minutes(&store, 10).unwrap();
+        assert_eq!(minutes(&store).unwrap(), 10);
     }
 
     #[test]
@@ -184,6 +191,7 @@ mod tests {
     #[test]
     fn what_others_said_is_taken_once_and_dropped_when_it_lapses() {
         let store = Store::open_in_memory().unwrap();
+        set_minutes(&store, 10).unwrap();
         attend(&store, "w1", "C1", at(0)).unwrap();
         remember(&store, "w1", "C1", "<@U2>: 今どこ？").unwrap();
         remember(&store, "w1", "C1", "<@U3>: 会議室です").unwrap();
