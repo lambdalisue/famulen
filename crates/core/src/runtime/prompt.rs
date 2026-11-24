@@ -45,7 +45,8 @@ rely on it, say that it is doubtful, and take the mark off with clear_obsolete o
 A memo moved to a task lives on as that task.
 
 Memory is separate from records. Write what is worth remembering with `remember` as you go; the nightly dream sorts it. \
-Keep work in progress with set_working so it survives the end of this conversation, and close it with close_working.
+Keep work in progress with set_working so it survives the end of this conversation, and close it with close_working as soon as the work is finished. Link the tasks it waits for in it, \
+so that you are asked to check it when they come to an end.
 
 Never do heavy work yourself: while you do, the owner cannot talk to you. Heavy work is anything that would keep you busy \
 rather than a few quick calls, such as a long investigation or a long document, and every piece of writing or fixing code, \
@@ -123,6 +124,12 @@ mod tests {
     fn the_secretary_is_told_to_link_the_records_it_mentions() {
         assert!(ROLE_PROMPT.contains("Link the records you mention"));
         assert!(ROLE_PROMPT.contains("Related"));
+    }
+
+    #[test]
+    fn the_secretary_is_told_to_link_and_close_its_work_in_progress() {
+        assert!(ROLE_PROMPT.contains("close_working as soon as the work is finished"));
+        assert!(ROLE_PROMPT.contains("Link the tasks it waits for"));
     }
 
     #[test]

@@ -4,9 +4,11 @@
 //! library's; here is what Famulen does with them.
 
 mod dream;
+mod leftover;
 mod prompt;
 
 pub use dream::*;
+pub use leftover::*;
 pub use prompt::*;
 
 pub use famulen_notebook::memory::*;
