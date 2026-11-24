@@ -49,7 +49,7 @@
           # github:lambdalisue/nix-github-release.
           version = nix-github-release.lib.version { inherit self; };
           build = {
-            pname = "famulen";
+            pname = "famulen-cli";
             # Cargo.toml's placeholder, so the dependency layer stays cached
             # across releases; the package itself is stamped with the version.
             version = "0.0.0";
@@ -59,26 +59,24 @@
                 ./Cargo.toml
                 ./Cargo.lock
                 ./crates
-                ./proto
               ];
             };
             strictDeps = true;
-            # The API crate builds its descriptor set from proto/ with buf.
-            nativeBuildInputs = [ pkgs.buf ];
-            BUF_CACHE_DIR = "/tmp/buf-cache";
+            # The commands only: the backend is run from the checkout or as a container.
+            cargoExtraArgs = "--locked -p famulen-notebook-cli -p famulen-gateway-cli";
             buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
             # The tests run in CI and with `just test`.
             doCheck = false;
           };
-          famulen = craneLib.buildPackage (
+          famulen-cli = craneLib.buildPackage (
             nix-github-release.lib.stampCargo { inherit pkgs version; } (
               build // { cargoArtifacts = craneLib.buildDepsOnly build; }
             )
           );
         in
         {
-          inherit famulen;
-          default = famulen;
+          inherit famulen-cli;
+          default = famulen-cli;
         }
       );
 
