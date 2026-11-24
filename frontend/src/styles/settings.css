@@ -159,3 +159,11 @@
   .finish-split.open > .finish-list, .finish-close { display: none; }
   .finish-back { display: inline-flex; }
 }
+
+.steps { list-style: none; display: flex; flex-wrap: wrap; gap: 6px var(--s4); margin: 0; padding: 0; font-size: var(--t-base); color: var(--muted); }
+.steps li { display: inline-flex; align-items: center; gap: 6px; }
+.steps li.now { color: var(--ink); font-weight: 600; }
+.step-no { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--control); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.steps li.now .step-no { border-color: var(--accent); background: var(--accent-soft); }
+.steps li.done .step-no { background: var(--line2); }
+.step-list { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 6px; list-style: decimal; }

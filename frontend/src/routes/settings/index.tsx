@@ -4,6 +4,7 @@ import FolderPicker from "~/components/FolderPicker";
 import NotebookCheck from "~/components/NotebookCheck";
 import LogSheet from "~/components/logs/LogSheet";
 import SecretaryLog from "~/components/logs/SecretaryLog";
+import SlackIconSteps from "~/components/SlackIconSteps";
 import RoleModel from "~/components/RoleModel";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act, look, say } from "~/lib/act";
@@ -104,7 +105,7 @@ function PortraitSection(props: { portrait: Portrait }) {
   return (
     <Section
       title="秘書の性別"
-      note="コンソールのアイコンと、Slack で秘書の発言に付くアイコンが替わる。アプリの設定用トークンを入れてあれば、Slack の一覧のアイコンも替わる。ホーム画面に足したアイコンは端末が覚えているので、足し直すまで替わらないことがある。"
+      note="コンソールのアイコンと、Slack で秘書の発言に付くアイコンが替わる。ホーム画面に足したアイコンは端末が覚えているので、足し直すまで替わらないことがある。"
     >
       <RadioCards
         label="秘書の性別"
@@ -120,6 +121,7 @@ function PortraitSection(props: { portrait: Portrait }) {
           });
         }}
       />
+      <SlackIconSteps portrait={props.portrait} />
     </Section>
   );
 }
