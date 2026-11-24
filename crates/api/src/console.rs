@@ -2,9 +2,11 @@
 
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult, ServiceStream};
 use famulen_core::approvals::{self, Answer};
+use famulen_core::connections::Connection;
 use famulen_core::console_log::{self, Event, Who};
 use famulen_core::input::{Input, Sender, Source};
 use famulen_core::store::StoredInput;
+use famulen_core::wording;
 use famulen_core::workgroups::ALL;
 use futures::StreamExt;
 use serde_json::json;
@@ -32,6 +34,27 @@ fn message(m: &console_log::Message) -> ConsoleMessage {
         origin: meta("origin"),
         about: meta("about"),
         open: meta("open"),
+        ..Default::default()
+    }
+}
+
+/// Where a held call is made, with the account, which only the console tells.
+fn place(tool: &str, connection: Option<&Connection>) -> String {
+    let service = wording::place(tool, connection);
+    match connection.map(|c| c.account.as_str()) {
+        Some(account) if !account.is_empty() && account != service => {
+            format!("{service} · {account}")
+        }
+        _ => service,
+    }
+}
+
+fn approval_given(given: wording::Given) -> ApprovalGiven {
+    ApprovalGiven {
+        name: given.name,
+        text: given.text,
+        code: given.code,
+        rows: given.rows.into_iter().map(approval_given).collect(),
         ..Default::default()
     }
 }
@@ -100,7 +123,16 @@ impl Api {
             .rev()
             .map(|r| {
                 let shown: serde_json::Value = serde_json::from_str(&r.input).unwrap_or_default();
+                let connection = self.app.permissions.connection_of(&r.tool);
+                let decided = shown.get("decides").unwrap_or(&shown);
                 Approval {
+                    deed: wording::deed(&r.tool, connection.as_ref()),
+                    place: place(&r.tool, connection.as_ref()),
+                    given: wording::given(decided)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(approval_given)
+                        .collect(),
                     once: approvals::once(&self.app.permissions, &r.tool),
                     questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
                         .into_iter()

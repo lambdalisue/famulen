@@ -238,8 +238,8 @@ impl Notices {
     }
 
     fn deed(&self, ticket: &Ticket) -> anyhow::Result<String> {
-        let place = self.permissions.connection_name(&ticket.connection)?;
-        let deed = words::deed(&ticket.connection, &ticket.tool, place.as_deref());
+        let connection = self.permissions.connection(&ticket.connection);
+        let deed = words::deed(&ticket.connection, &ticket.tool, connection.as_ref());
         let asked = crate::approvals::asks_questions(&self.permissions, ticket);
         Ok(if asked {
             "あなたの答えを求めています".into()

@@ -36,6 +36,7 @@ pub mod store;
 pub mod tidying;
 pub mod told;
 pub mod triage;
+pub mod wording;
 pub mod workers;
 pub mod workgroups;
 pub mod writable;

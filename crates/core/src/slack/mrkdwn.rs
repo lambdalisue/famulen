@@ -261,7 +261,7 @@ fn entity(text: &str) -> Option<&'static str> {
 }
 
 /// The three characters Slack reads as its own.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
     while let Some(c) = rest.chars().next() {
