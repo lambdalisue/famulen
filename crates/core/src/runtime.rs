@@ -19,7 +19,6 @@ pub use prompt::*;
 pub use receive::*;
 pub use watch::*;
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +27,7 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::app::App;
 use crate::claude::session::InFlight;
-use crate::config::Config;
+use crate::config::{ApiConfig, Config};
 use crate::hub::OwnTools;
 use crate::input::Input;
 use crate::notebook_place;
@@ -42,8 +41,8 @@ const RESTART_AFTER: Duration = Duration::from_secs(5);
 pub trait Surface: Send + Sync + 'static {
     /// The secretary's own tools, answering through the API.
     fn tools(&self, app: &App) -> Arc<dyn OwnTools>;
-    /// Serve the API at `listen` until it stops.
-    fn serve(&self, app: App, listen: SocketAddr) -> BoxFuture<'static, anyhow::Result<()>>;
+    /// Serve the API where `at` says until it stops.
+    fn serve(&self, app: App, at: ApiConfig) -> BoxFuture<'static, anyhow::Result<()>>;
 }
 
 /// Why [`run`] came to an end without an error.
@@ -59,7 +58,7 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
 
     let listen = config.api.listen;
     tokio::spawn({
-        let serving = surface.serve(app.clone(), listen);
+        let serving = surface.serve(app.clone(), config.api.clone());
         async move {
             if let Err(error) = serving.await {
                 tracing::error!(%error, "the API stopped");

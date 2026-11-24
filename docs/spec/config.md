@@ -36,6 +36,7 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 | `FAMULEN_DATA_DIR` | `data_dir` | データの置き場所 | `$XDG_DATA_HOME/famulen`（`XDG_DATA_HOME` がなければ `~/.local/share/famulen`） |
 | `FAMULEN_NOTEBOOK_DIR` | `notebook_dir` | コンソールで決めるまでの、手帳の既定の場所。`~/` から書ける | データの置き場所の `notebook/` |
 | `FAMULEN_LISTEN` | `[api] listen` | API の待ち受け先 | `127.0.0.1:7790` |
+| `FAMULEN_API_HOSTS` | `[api] hosts` | API がほかに答えてよいホスト名（カンマ区切り）。localhost と待ち受け先の番地には、いつも答える | なし |
 | `FAMULEN_RECEIVE_LISTEN` | （書けない） | [ゲートウェイ](gateway.md#受け口と宛先)の HTTP の受け口の待ち受け先。なければ HTTP の受け口は開かない | なし |
 | `FAMULEN_RECEIVE_URL` | （書けない） | ゲートウェイの受け口に外から届く URL（受け口の番地を Tailscale Funnel などで外に出したとき） | なし |
 | `FAMULEN_CONSOLE_URL` | `console_url` | 主人がコンソールを開く URL。ログインの戻り先になる | なし |
@@ -62,6 +63,7 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 - データの置き場所の既定は `XDG_DATA_HOME`、なければホームディレクトリの下になる
 - 手帳の既定の場所はデータの置き場所の外にもでき、`~` から書ける
 - API の待ち受け先は環境変数でも決められ、アドレスでない値は誤りになる
+- API は、localhost と待ち受け先の番地と設定したホスト名以外の Host と、ほかのサイトからの呼び出しを断る
 - アプリの値が一つでも欠けていれば、そのアプリのログインは登録の手順を示して断られる
 - 設定ファイルの知らない項目は誤りになる
 - 最初に足したワークスペースがメインになり、メインは選び直せ、メインを外すと次のものがメインになる

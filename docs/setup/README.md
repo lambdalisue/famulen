@@ -32,4 +32,4 @@ Google や Slack、GitHub のように、つなぐ側のアプリでしかログ
 docker compose up -d --build
 ```
 
-コンソールは `http://127.0.0.1:3000/` で開く。ほかの端末から開くときは、Tailscale Serve などで https に包み、その URL を `FAMULEN_CONSOLE_URL` に入れる。そのほかのホスト名でも開くなら、`FAMULEN_CONSOLE_HOSTS` にカンマ区切りで書く。書いていないホスト名で届いた要求は、コンソールが断る。
+コンソールは `http://127.0.0.1:3000/` で開く。ほかの端末から開くときは、Tailscale Serve などで https に包み、その URL を `FAMULEN_CONSOLE_URL` に入れる。そのほかのホスト名でも開くなら、`FAMULEN_CONSOLE_HOSTS` にカンマ区切りで書く。書いていないホスト名で届いた要求は、コンソールが断る。API も同じで、コンソールの `FAMULEN_API_URL` に localhost と待ち受け先の番地のほかの名前を使うなら、その名前を本体の `FAMULEN_API_HOSTS` に書く（`compose.yaml` では書いてある）。

@@ -33,4 +33,7 @@ bin = "claude"
 # Where the API listens. It has no login: keep it where only the console
 # reaches it. FAMULEN_LISTEN wins over this.
 listen = "127.0.0.1:7790"
+# The names it answers to besides localhost and the address above.
+# FAMULEN_API_HOSTS wins over this.
+# hosts = ["famulen.example.ts.net"]
 

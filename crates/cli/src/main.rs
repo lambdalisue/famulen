@@ -2,9 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
+use famulen_api::guard::{Hosts, guarded};
 use famulen_api::{Api, tools::ApiTools};
 use famulen_core::app::App;
-use famulen_core::config::{Config, DATA_DIR_ENV, Defaults, LISTEN_ENV, NOTEBOOK_DIR_ENV};
+use famulen_core::config::{
+    ApiConfig, Config, DATA_DIR_ENV, Defaults, LISTEN_ENV, NOTEBOOK_DIR_ENV,
+};
 use famulen_core::hub::OwnTools;
 use famulen_core::runtime::{self, Ended, Surface};
 use futures::future::BoxFuture;
@@ -104,15 +107,12 @@ impl Surface for ApiSurface {
             .expect("the API's tools are built from its own definition")
     }
 
-    fn serve(
-        &self,
-        app: App,
-        listen: std::net::SocketAddr,
-    ) -> BoxFuture<'static, anyhow::Result<()>> {
+    fn serve(&self, app: App, at: ApiConfig) -> BoxFuture<'static, anyhow::Result<()>> {
         Box::pin(async move {
-            let listener = tokio::net::TcpListener::bind(listen).await?;
-            tracing::info!(%listen, "API listening");
-            axum::serve(listener, Api::new(app).axum()).await?;
+            let listener = tokio::net::TcpListener::bind(at.listen).await?;
+            tracing::info!(listen = %at.listen, "API listening");
+            let hosts = Hosts::new(at.listen, &at.hosts);
+            axum::serve(listener, guarded(Api::new(app).axum(), hosts)).await?;
             Ok(())
         })
     }
