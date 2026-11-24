@@ -105,6 +105,17 @@ pub fn recent(store: &Store, limit: usize) -> anyhow::Result<Vec<Request>> {
     Ok(requests)
 }
 
+/// Whether a request put to the owner waits no more.
+pub fn answered(store: &Store, id: i64) -> anyhow::Result<bool> {
+    let status: Option<String> = store
+        .conn()
+        .query_row("SELECT status FROM approvals WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    Ok(status.is_some_and(|s| s != "pending"))
+}
+
 /// Whether a Slack action belongs to an approval.
 pub fn is_approval_action(action: &Action) -> bool {
     action.action_id.starts_with(ACTION_PREFIX) || action.action_id.starts_with(asking::PREFIX)
@@ -135,6 +146,7 @@ fn ticket_tool(ticket: &Ticket) -> String {
 pub struct Approvals<S> {
     slack: Option<SlackClients<S>>,
     console: Option<crate::console_log::ConsoleLog>,
+    notices: Option<crate::notices::Notices>,
     store: Store,
     permissions: Permissions,
     /// The owner's ID in each workspace.
@@ -151,6 +163,7 @@ impl<S: Slack> Approvals<S> {
         Self {
             slack,
             console: None,
+            notices: None,
             store,
             permissions,
             owners,
@@ -161,6 +174,26 @@ impl<S: Slack> Approvals<S> {
     pub fn with_console(mut self, console: crate::console_log::ConsoleLog) -> Self {
         self.console = Some(console);
         self
+    }
+
+    /// Tell the owner's devices when a request is asked.
+    pub fn with_notices(mut self, notices: crate::notices::Notices) -> Self {
+        self.notices = Some(notices);
+        self
+    }
+
+    /// The devices are told aside: a push service that is slow keeps neither
+    /// Slack nor the next request waiting.
+    fn tell_devices(&self, ticket: &Ticket) {
+        let Some(notices) = self.notices.clone() else {
+            return;
+        };
+        let ticket = ticket.clone();
+        tokio::spawn(async move {
+            if let Err(error) = notices.tell(&ticket).await {
+                tracing::warn!(%error, id = ticket.id, "could not tell the devices of a request");
+            }
+        });
     }
 
     fn tell_console(&self) {
@@ -182,6 +215,7 @@ impl<S: Slack> Approvals<S> {
             return Ok(());
         }
         self.tell_console();
+        self.tell_devices(ticket);
         let Some(slack) = &self.slack else {
             return Ok(());
         };
@@ -594,6 +628,16 @@ pub fn once(permissions: &Permissions, tool: &str) -> bool {
     })
 }
 
+/// Whether what a request shows may hold a secret, or words from elsewhere.
+pub fn may_show_secret(ticket: &Ticket) -> bool {
+    exposure::kept_to_dm(ticket)
+}
+
+/// Whether the owner answers questions in a request instead of approving it.
+pub fn asks_questions(permissions: &Permissions, ticket: &Ticket) -> bool {
+    !questions(permissions, &ticket_tool(ticket), &ticket.shown).is_empty()
+}
+
 /// The questions the owner answers in a request instead of approving it.
 pub fn questions(permissions: &Permissions, tool: &str, shown: &Value) -> Vec<Question> {
     famulen_gateway::permissions::split_tool(tool)
@@ -794,6 +838,24 @@ mod tests {
 
     fn input() -> Value {
         json!({ "to": "a@example.com", "body": "hi" })
+    }
+
+    #[tokio::test]
+    async fn the_owners_devices_are_told_once_of_a_request() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let (notices, kept) =
+            crate::notices::testing::notices(approvals.store.clone(), permissions.clone());
+        notices
+            .add(&crate::notices::testing::device("phone"), "iPhone")
+            .unwrap();
+        let approvals = approvals.with_notices(notices);
+        request(&approvals, &permissions).await;
+        approvals.present_held().await.unwrap();
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(kept.0.lock().unwrap().len(), 1);
     }
 
     /// Have the call held and put to the owner, as a turn would.

@@ -123,6 +123,10 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         crate::gateway::ANY,
         crate::gateway::ANY,
     )?;
+    let permissions = Permissions::new(store.clone(), gateway.clone())
+        .with_memory_dir(config.memory_dir())
+        .with_notebook_dir(config.notebook_dir())
+        .with_sealed(sealed_places(config)?, config.workdir());
     let app = App {
         store: store.clone(),
         records: records.clone(),
@@ -130,10 +134,8 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         calendars: calendars.clone(),
         connections: connections.clone(),
         console: console.clone(),
-        permissions: Permissions::new(store.clone(), gateway.clone())
-            .with_memory_dir(config.memory_dir())
-            .with_notebook_dir(config.notebook_dir())
-            .with_sealed(sealed_places(config)?, config.workdir()),
+        notices: crate::notices::Notices::new(store.clone(), permissions.clone()),
+        permissions,
         models: Models::new(store.clone()).with_gateway(gateway.clone()),
         workers: crate::workers::Workers::new(
             store.clone(),

@@ -8,6 +8,7 @@ use crate::permissions::Permission;
 
 use super::judge::{Call, Outcome, Ticket, Verdict, is_held_entry};
 use super::model_keys::model_of;
+use super::push::is_push_entry;
 use super::secrets::connection_of;
 use super::{Gateway, Vault, VaultEntry};
 
@@ -53,7 +54,7 @@ impl Gateway {
             .vault_or_refuse()?
             .list()?
             .into_iter()
-            .filter(|e| !is_held_entry(&e.name))
+            .filter(|e| !is_held_entry(&e.name) && !is_push_entry(&e.name))
             .collect())
     }
 
@@ -126,7 +127,10 @@ impl Gateway {
 
     fn describe_checked(&self, actor: &str, name: &str, description: &str) -> anyhow::Result<()> {
         let vault = self.vault_or_refuse()?;
-        anyhow::ensure!(!is_held_entry(name), "no secret {name}");
+        anyhow::ensure!(
+            !is_held_entry(name) && !is_push_entry(name),
+            "no secret {name}"
+        );
         vault.describe(name, description, actor)
     }
 
@@ -216,6 +220,7 @@ impl Gateway {
         purpose: &str,
     ) -> anyhow::Result<()> {
         let vault = self.vault_or_refuse()?;
+        anyhow::ensure!(!is_push_entry(name), "{name} is the gateway's own");
         if let Some(model) = model_of(name) {
             let entry = vault.get(name)?.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -265,6 +270,7 @@ impl Gateway {
 
     fn delete_checked(&self, name: &str) -> anyhow::Result<()> {
         let vault = self.vault_or_refuse()?;
+        anyhow::ensure!(!is_push_entry(name), "{name} is the gateway's own");
         if let Some(model) = model_of(name) {
             anyhow::bail!(
                 "{name} is the key of model {model}; remove the model to take its key out"

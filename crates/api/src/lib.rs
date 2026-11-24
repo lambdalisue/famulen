@@ -17,6 +17,7 @@ mod lookout;
 mod memory;
 mod models;
 mod notebook;
+mod notices;
 mod paging;
 mod permissions;
 mod records;
@@ -87,6 +88,7 @@ impl Api {
         let router = ChannelServiceExt::register(api.clone(), router);
         let router = LookoutServiceExt::register(api.clone(), router);
         let router = NotebookServiceExt::register(api.clone(), router);
+        let router = NoticeServiceExt::register(api.clone(), router);
         let router = WorkerServiceExt::register(api.clone(), router);
         let router = VaultServiceExt::register(api.clone(), router);
         let router = GatewayLogServiceExt::register(api.clone(), router);

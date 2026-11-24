@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+
+// How much of a request a notice tells.
+enum NoticeDetail {
+  NOTICE_DETAIL_UNSPECIFIED = 0;
+  // That one waits.
+  NOTICE_DETAIL_NUMBER = 1;
+  // What it would do, and where.
+  NOTICE_DETAIL_DEED = 2;
+  // Also the values of the call.
+  NOTICE_DETAIL_VALUES = 3;
+}
+
+// A browser notices are sent to.
+message NoticeDevice {
+  int64 id = 1;
+  string name = 2;
+  // Unix seconds.
+  int64 added_at = 3;
+  // Why the last notice did not go; empty when it did.
+  string failed = 4;
+  // It is the one that asks.
+  bool here = 5;
+}
+
+message GetNoticesRequest {
+  // Where the browser that asks takes messages; empty when it takes none.
+  string endpoint = 1;
+}
+
+message Notices {
+  // The key browsers subscribe with; empty when there is no vault to keep it.
+  string key = 1;
+  NoticeDetail detail = 2;
+  repeated NoticeDevice devices = 3;
+}
+
+message AddNoticeDeviceRequest {
+  // As the browser gave them on subscribing.
+  string endpoint = 1;
+  string p256dh = 2;
+  string auth = 3;
+  string name = 4;
+}
+
+message NoticeDeviceRequest {
+  int64 id = 1;
+}
+
+message SetNoticeDetailRequest {
+  NoticeDetail detail = 1;
+}
+
+service NoticeService {
+  rpc GetNotices(GetNoticesRequest) returns (Notices) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  rpc AddNoticeDevice(AddNoticeDeviceRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc RemoveNoticeDevice(NoticeDeviceRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Send a notice of nothing, so that the owner sees it arrive.
+  rpc TryNoticeDevice(NoticeDeviceRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  rpc SetNoticeDetail(SetNoticeDetailRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+}

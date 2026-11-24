@@ -8,6 +8,7 @@ import { ConsoleService } from "~/gen/famulen/v1/console_pb";
 import { WorkgroupService } from "~/gen/famulen/v1/workgroups_pb";
 import { MemoryService } from "~/gen/famulen/v1/memory_pb";
 import { NotebookService } from "~/gen/famulen/v1/notebook_pb";
+import { NoticeService } from "~/gen/famulen/v1/notices_pb";
 import { RecordService } from "~/gen/famulen/v1/records_pb";
 import { ChannelService, ConnectionService } from "~/gen/famulen/v1/services_pb";
 import {
@@ -86,5 +87,6 @@ export const api = {
   memory: client(MemoryService),
   vault: client(VaultService),
   gatewayLog: client(GatewayLogService),
+  notices: client(NoticeService),
   workers: client(WorkerService),
 };
