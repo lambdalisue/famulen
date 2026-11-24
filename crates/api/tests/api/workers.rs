@@ -188,6 +188,33 @@ async fn the_owner_bounds_and_pauses_the_pool_and_the_secretary_has_no_tool_for_
 }
 
 #[tokio::test]
+async fn the_owner_says_how_work_on_code_is_finished() {
+    let dir = temp();
+    let api = open(&dir);
+    let finishes = json!([{ "steps": "1. レビューする" }]);
+    call(
+        &api,
+        "WorkerService/SetWorkerSettings",
+        json!({ "slots": 2, "finishes": finishes }),
+    )
+    .await;
+    let s = call(&api, "WorkerService/GetWorkerSettings", json!({})).await;
+    assert_eq!(s["finishes"], finishes);
+    for bad in [
+        json!({ "steps": " " }),
+        json!({ "directory": "src", "steps": "x" }),
+    ] {
+        let (status, _) = try_call(
+            &api,
+            "WorkerService/SetWorkerSettings",
+            json!({ "slots": 2, "finishes": [bad] }),
+        )
+        .await;
+        assert_ne!(status, 200, "{bad}");
+    }
+}
+
+#[tokio::test]
 async fn the_delegated_tasks_of_one_workgroup_or_one_task_alone_are_listed() {
     let dir = temp();
     let api = open(&dir);

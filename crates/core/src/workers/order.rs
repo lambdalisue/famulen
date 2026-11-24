@@ -109,6 +109,9 @@ pub struct Order {
     pub permissions: String,
     pub tools: Vec<String>,
     pub files: Vec<String>,
+    /// The owner's steps that finish it. Decided when a run is made.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub finish: String,
 }
 
 impl Order {
@@ -161,6 +164,7 @@ impl Order {
             permissions: text("Permissions"),
             tools: list("Tools"),
             files: list("Files").iter().map(|f| file_of(f)).collect(),
+            finish: String::new(),
         };
         order.check()?;
         Ok(order)
@@ -172,6 +176,7 @@ impl Order {
             code: String::new(),
             title: String::new(),
             scopes: Vec::new(),
+            finish: String::new(),
             ..self.clone()
         };
         let digest = Sha256::digest(serde_json::to_vec(&same)?);

@@ -10,7 +10,7 @@ use crate::notebook::testing::TempDir;
 use crate::paths::at;
 use crate::records::{Patch, log_lines};
 use crate::workers::order::tests::delegated;
-use crate::workers::{Order, Settings, WORKER};
+use crate::workers::{Finish, Order, Settings, WORKER};
 
 type Meanwhile = Box<dyn FnOnce(&App) + Send>;
 
@@ -145,14 +145,19 @@ impl Bench {
     fn slots(&self, slots: u32) {
         Settings {
             slots,
-            paused: false,
+            ..Settings::default()
         }
         .save(&self.app.store)
         .unwrap();
     }
 
     fn pause(&self, paused: bool) {
-        Settings { slots: 2, paused }.save(&self.app.store).unwrap();
+        Settings {
+            paused,
+            ..Settings::default()
+        }
+        .save(&self.app.store)
+        .unwrap();
     }
 
     /// The time until a failed start is tried again has passed.
@@ -283,8 +288,8 @@ async fn nothing_starts_while_the_pool_is_paused_and_what_runs_goes_on() {
     let a = b.agent("a");
     b.pool.tick().await.unwrap();
     Settings {
-        slots: 2,
         paused: true,
+        ..Settings::default()
     }
     .save(&b.app.store)
     .unwrap();
@@ -293,6 +298,47 @@ async fn nothing_starts_while_the_pool_is_paused_and_what_runs_goes_on() {
     b.pool.tick().await.unwrap();
     assert_eq!(b.fake.begun(), ["a"]);
     assert_eq!(b.status(&a), "done");
+}
+
+#[tokio::test]
+async fn work_on_code_is_handed_the_owners_steps_to_finish_it_and_the_secretary_checks_them() {
+    let b = bench("pool-finish", Fake::default());
+    Settings {
+        finishes: vec![Finish {
+            directory: at("/src"),
+            steps: "Merge it.".into(),
+        }],
+        ..Settings::default()
+    }
+    .save(&b.app.store)
+    .unwrap();
+    b.adroit("直す");
+    b.agent("調べる");
+    b.pool.tick().await.unwrap();
+    let finishes: Vec<String> = b
+        .app
+        .workers
+        .runs
+        .open()
+        .unwrap()
+        .into_iter()
+        .map(|r| r.order.finish)
+        .collect();
+    assert_eq!(finishes, ["Merge it.", ""]);
+
+    b.fake.look_as("直す", Looked::Done("マージした".into()));
+    b.fake.look_as("調べる", Looked::Done("書いた".into()));
+    b.app.workers.heard_of("s1").unwrap();
+    b.pool.tick().await.unwrap();
+    let told = b.told();
+    assert_eq!(told.len(), 2);
+    for Input { text, .. } in told {
+        assert_eq!(
+            text.contains("steps to finish it"),
+            text.contains("マージした"),
+            "{text}"
+        );
+    }
 }
 
 #[tokio::test]

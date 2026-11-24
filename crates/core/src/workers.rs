@@ -6,6 +6,7 @@ pub mod adroit;
 mod agent;
 mod bounds;
 mod dispatch;
+mod finish;
 mod order;
 mod pool;
 mod queue;
@@ -13,6 +14,7 @@ mod runners;
 mod runs;
 
 pub use dispatch::*;
+pub use finish::*;
 pub use order::*;
 pub use pool::{Pool, run};
 pub use queue::*;
@@ -37,12 +39,15 @@ const SETTINGS_KEY: &str = "setting.workers";
 pub const MOST_SLOTS: u32 = 20;
 
 /// How the owner lets the pool work.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     /// How many runs go on at once.
     pub slots: u32,
     /// No run is started while set; those going on go on.
     pub paused: bool,
+    /// How the owner wants work on code finished.
+    #[serde(default)]
+    pub finishes: Vec<Finish>,
 }
 
 impl Default for Settings {
@@ -50,6 +55,7 @@ impl Default for Settings {
         Self {
             slots: 2,
             paused: false,
+            finishes: Vec::new(),
         }
     }
 }
@@ -67,6 +73,7 @@ impl Settings {
             (1..=MOST_SLOTS).contains(&self.slots),
             "1 to {MOST_SLOTS} tasks run at once"
         );
+        check_finishes(&self.finishes)?;
         store.set_state(SETTINGS_KEY, serde_json::to_string(self)?)
     }
 }
@@ -191,7 +198,7 @@ mod tests {
             assert!(
                 Settings {
                     slots,
-                    paused: false
+                    ..Settings::default()
                 }
                 .save(&store)
                 .is_err()
@@ -200,6 +207,10 @@ mod tests {
         let chosen = Settings {
             slots: 5,
             paused: true,
+            finishes: vec![Finish {
+                directory: String::new(),
+                steps: "Review it.".into(),
+            }],
         };
         chosen.save(&store).unwrap();
         assert_eq!(Settings::load(&store).unwrap(), chosen);
