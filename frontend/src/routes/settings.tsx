@@ -14,6 +14,7 @@ export const NAV: [string, [string, string, string][]][] = [
       ["/settings/lookout", "見張り", icons.eye],
       ["/settings/roles/triage", "トリアージ", icons.arrowsSplit],
       ["/settings/roles/assess", "見極め", icons.shieldCheck],
+      ["/settings/roles/worker", "手代", icons.robot],
     ],
   ],
   [

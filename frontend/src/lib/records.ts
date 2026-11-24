@@ -7,6 +7,7 @@ export type { Field, FieldType, LinkAccountRequest, Rec, RecordItem, RecordKind 
 
 export const OWNER = "owner";
 export const SECRETARY = "secretary";
+export const WORKER = "worker";
 
 /** The field every kind has: the records it has to do with. */
 export const RELATED = "Related";
@@ -100,6 +101,17 @@ const NAMES: { [name: string]: string } = {
   Parent: "親のタスク",
   "Blocked by": "これが済むまで待つ",
   Related: "関わるもの",
+  Delegation: "委ね方",
+  Runner: "委託先",
+  Connection: "つなぎ先",
+  Directory: "ディレクトリ",
+  Worktree: "新しいワークツリー",
+  Base: "もとの版",
+  Agent: "エージェント",
+  "Agent model": "モデル",
+  Permissions: "権限",
+  Tools: "渡す道具",
+  Files: "渡す手帳のファイル",
   Schedule: "いつ",
   Timezone: "タイムゾーン",
   Until: "終わり",
@@ -211,6 +223,11 @@ const CHOICES: { [value: string]: string } = {
   once: "一度だけ",
   owner: "あなた",
   secretary: "秘書",
+  worker: "委託",
+  adroit: "Adroit",
+  agent: "手代",
+  default: "ふつう",
+  read_only: "読むだけ",
   yes: "はい",
   no: "いいえ",
 };

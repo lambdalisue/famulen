@@ -32,7 +32,7 @@ pub(super) struct SessionLinks {
 /// The workgroup an input belongs to.
 pub(super) fn workgroup_of(workgroups: &Workgroups, input: &Input) -> String {
     match &input.source {
-        Source::Console { workgroup, .. } => workgroup.clone(),
+        Source::Console { workgroup, .. } | Source::Worker { workgroup, .. } => workgroup.clone(),
         Source::Slack { workspace, .. } => workgroups
             .workgroup_for_channel(format!("slack:{workspace}"))
             .unwrap_or_else(|_| ALL.to_owned()),

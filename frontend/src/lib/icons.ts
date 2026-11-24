@@ -50,6 +50,7 @@ export { default as plugConnected } from "@tabler/icons/outline/plug-connected.s
 export { default as plus } from "@tabler/icons/outline/plus.svg?raw";
 export { default as refresh } from "@tabler/icons/outline/refresh.svg?raw";
 export { default as repeat } from "@tabler/icons/outline/repeat.svg?raw";
+export { default as robot } from "@tabler/icons/outline/robot.svg?raw";
 export { default as search } from "@tabler/icons/outline/search.svg?raw";
 export { default as send } from "@tabler/icons/outline/send.svg?raw";
 export { default as settings } from "@tabler/icons/outline/settings.svg?raw";

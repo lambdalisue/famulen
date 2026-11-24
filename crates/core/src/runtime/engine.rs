@@ -162,7 +162,7 @@ pub(super) fn start_engine(
 
 /// The secretary's executable, model and effort: the agent CLI assigned to
 /// the role and the effort chosen with it, else the settings.
-fn secretary(
+pub(crate) fn secretary(
     app: &App,
     effective: &Effective,
 ) -> (String, Option<String>, Option<String>, ModelSpec) {

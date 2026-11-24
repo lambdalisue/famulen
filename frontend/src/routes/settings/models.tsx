@@ -17,6 +17,7 @@ const ROLE_PAGES: Record<Role, string> = {
   [Role.LOOKOUT]: "/settings/lookout",
   [Role.TRIAGE]: "/settings/roles/triage",
   [Role.ASSESS]: "/settings/roles/assess",
+  [Role.WORKER]: "/settings/roles/worker",
 };
 
 /** The list, parted by where the models come from. */

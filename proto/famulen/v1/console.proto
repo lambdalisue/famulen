@@ -156,11 +156,11 @@ message InputItem {
   int64 id = 1;
   // Unix seconds, when it arrived.
   int64 at = 2;
-  // Where it came from: console, slack, schedule, wake, approval, arrival or
-  // lookout.
+  // Where it came from: console, slack, schedule, wake, approval, arrival,
+  // lookout or worker.
   string source = 3;
   // More about where: the routine's name, the lookout's source, the Slack
-  // channel, the connection something arrived on. Empty when there is nothing more.
+  // channel, the connection something arrived on, the delegated task. Empty when there is nothing more.
   string detail = 4;
   // owner, other or system.
   string sender = 5;

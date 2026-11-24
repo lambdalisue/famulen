@@ -211,6 +211,34 @@ impl Gateway {
         server: &str,
         message: &Value,
     ) -> Option<Value> {
+        let by = Call {
+            actor: actor.to_owned(),
+            ask,
+            ..Call::default()
+        };
+        self.serve(by, server, message).await
+    }
+
+    /// [`Self::handle`] for an `actor` who cannot wait for the owner's answer:
+    /// a call that would be held is refused instead.
+    pub async fn handle_unasked(
+        &self,
+        actor: &str,
+        ask: Option<String>,
+        server: &str,
+        message: &Value,
+    ) -> Option<Value> {
+        let by = Call {
+            actor: actor.to_owned(),
+            ask,
+            never_ask: true,
+            ..Call::default()
+        };
+        self.serve(by, server, message).await
+    }
+
+    /// Answer one JSON-RPC message; its tool calls are judged as `by` says.
+    async fn serve(&self, by: Call, server: &str, message: &Value) -> Option<Value> {
         let id = message.get("id").cloned()?;
         let method = message
             .get("method")
@@ -218,7 +246,7 @@ impl Gateway {
             .unwrap_or_default();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let result = match self.sealed().get(server) {
-            Ok(Some(connection)) => self.answer(actor, ask, &connection, method, &params).await,
+            Ok(Some(connection)) => self.answer(by, &connection, method, &params).await,
             Ok(None) => {
                 Err(json!({ "code": -32602, "message": format!("no connection {server}") }))
             }
@@ -232,8 +260,7 @@ impl Gateway {
 
     async fn answer(
         &self,
-        actor: &str,
-        ask: Option<String>,
+        by: Call,
         connection: &Connection,
         method: &str,
         params: &Value,
@@ -258,8 +285,10 @@ impl Gateway {
                     .unwrap_or_default();
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 let call = Call {
-                    ask,
-                    ..Call::new(actor, &connection.id, name, arguments)
+                    connection: connection.id.clone(),
+                    tool: name.to_owned(),
+                    input: arguments,
+                    ..by
                 };
                 Ok(match self.call(&call).await {
                     Ok(Outcome::Done(result)) => result_value(&result),

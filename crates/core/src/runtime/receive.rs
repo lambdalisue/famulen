@@ -64,6 +64,9 @@ pub(super) fn receive(
     app.gateway.register_destination(
         SECRETARY,
         Arc::new(move |a: Arrival| {
+            if let Err(error) = of_a_delegated_task(&told_app, &a) {
+                tracing::warn!(connection = %a.connection, %error, "could not tell the worker pool what arrived");
+            }
             if let Err(error) = crate::told::tell(&told_app, &a) {
                 tracing::warn!(connection = %a.connection, %error, "could not tell the secretary what arrived");
             }
@@ -98,10 +101,26 @@ pub(super) fn receive(
     sync_receivers(app)
 }
 
+/// Whether what arrived is of a session that runs a delegated task. The pool
+/// is told, and tells the secretary itself how the task ended.
+fn of_a_delegated_task(app: &App, arrival: &Arrival) -> anyhow::Result<bool> {
+    let adroit = app
+        .connections
+        .get(&arrival.connection)?
+        .is_some_and(|c| crate::workers::adroit::is_adroit(&c));
+    match arrival.payload["id"].as_str() {
+        Some(session) if adroit => app.workers.heard_of(session),
+        _ => Ok(false),
+    }
+}
+
 /// Hand what arrived to the lookout, as heard from its connection: a Gmail
 /// notice is read into the mail it tells of; anything else is heard as it
 /// came.
 async fn watched(app: &App, arrival: &Arrival) -> anyhow::Result<()> {
+    if of_a_delegated_task(app, arrival)? {
+        return Ok(());
+    }
     let google = app
         .connections
         .get(&arrival.connection)?

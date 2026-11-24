@@ -144,7 +144,7 @@ impl Api {
         }
     }
 
-    fn whole(&self, kind: &str, id: &str) -> anyhow::Result<Record> {
+    pub(crate) fn whole(&self, kind: &str, id: &str) -> anyhow::Result<Record> {
         let records = &self.app.records;
         let r = records.need(kind, id)?;
         let mut names = Names::default();
@@ -225,7 +225,7 @@ fn field_type(name: &str, ty: &core::FieldType) -> FieldType {
     }
 }
 
-fn in_workgroup(workgroups: &[String], workgroup: &str) -> bool {
+pub(crate) fn in_workgroup(workgroups: &[String], workgroup: &str) -> bool {
     workgroup.is_empty() || workgroup == ALL || core::Records::in_workgroup(workgroups, workgroup)
 }
 
@@ -381,6 +381,9 @@ impl RecordService for Api {
             && !core::is_over(&saved);
         if handed && by == Writer::Owner {
             self.hand_to_secretary(&saved).or_fail()?;
+        }
+        if r.kind == TASKS {
+            famulen_core::workers::written(&self.app, &saved, by).or_fail()?;
         }
         if r.kind == ROUTINES {
             // Its next run is worked out now, not when it would have come due.

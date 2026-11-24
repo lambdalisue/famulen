@@ -4,7 +4,7 @@ import { createEffect, createSignal, For, Match, Show, Switch as Cases } from "s
 import Icon from "~/components/Icon";
 import { personaQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { choiceOf, dateText, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY } from "~/lib/records";
+import { choiceOf, dateText, type Field, type FieldType, linkOf, linkTo, moneyText, OWNER, SECRETARY, WORKER } from "~/lib/records";
 import RecordChip from "./links/RecordChip";
 import RecordPicker from "./RecordPicker";
 
@@ -195,6 +195,7 @@ export default function FieldEdit(props: { type: FieldType; label: string; field
           >
             <option value={OWNER}>あなた</option>
             <option value={SECRETARY}>{persona()?.name || "秘書"}</option>
+            <option value={WORKER}>{choiceOf(WORKER)}</option>
             <Show when={linkOf(value())}>{(l) => <option value="other">{l().title}</option>}</Show>
           </select>
           <RecordPicker label="相手に任せる" kinds={["parties"]} onPick={(r) => props.onSave(one(linkTo(r)))} />

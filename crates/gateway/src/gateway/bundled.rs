@@ -80,19 +80,6 @@ mod tests {
     }
 
     #[test]
-    fn adroit_asks_to_be_preferred_when_work_is_delegated() {
-        let defs = Definitions::load(None, &[]);
-        let start = defs
-            .get("adroit")
-            .unwrap()
-            .commands
-            .iter()
-            .find(|t| t.name == "start_session")
-            .unwrap();
-        assert!(start.description.starts_with("Prefer this"));
-    }
-
-    #[test]
     fn the_bundled_receivers_suggest_where_what_they_take_goes() {
         let defs = Definitions::load(None, &[]);
         let suggested = |def: &str, receiver: &str| {

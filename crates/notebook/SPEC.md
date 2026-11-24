@@ -239,6 +239,7 @@ sections:
 - 文字列は型で、`text`・`number`・`flag`（`yes`・`no`）・`date`（`YYYY-MM-DD`）・`date-or-minute`（`YYYY-MM-DD` か `YYYY-MM-DD HH:MM`）・`money`（額と [ISO 4217](https://www.iso.org/iso-4217-currency-codes.html) の通貨。`398000 JPY`）・`url`・`list`（言葉の並び）・`link`（wiki リンク）・`links`（wiki リンクの並び。`link:tasks` のように、指す種類を決められる）・`any`（形を問わない）のどれか。`text` には wiki リンクも書ける。
 - `body: free` と書いた種類は、メモと同じく、題名の下が `Related` のほかすべて本文になる。
 - 欄は、書いていなくてもよい。`code` を書かなければ、ディレクトリ名が code の語になる。
+- 標準の種類の欄と節は、`README.md` に書かれていなくても使える。
 - 宣言のない種類も、メタデータと `Related`・`Details`・`Notes`・`Log` だけで使える。
 
 ### 標準の種類
@@ -263,13 +264,46 @@ sections:
 | 欄 | 中身 |
 | --- | --- |
 | `Status` | `pending`（まだ）・`in_progress`（進めている）・`waiting`（待っている）・`done`（済んだ）・`cancelled`（やめた） |
-| `Assignee` | 誰がやるか。`owner`（持ち主）、`secretary`（AI の補佐役）、相手へのリンク |
+| `Assignee` | 誰がやるか。`owner`（持ち主）、`secretary`（AI の補佐役）、`worker`（ほかのエージェントに委ねる）、相手へのリンク |
 | `Priority` | `high`・`normal`・`low`。なければ `normal` |
 | `Start`・`Due` | 始める日時と期日 |
 | `Finished` | 済んだか、やめた日時 |
 | `Waiting for` | 何を待っているか |
 | `Parent` | 親のタスクへのリンク |
 | `Blocked by` | これが済むまで進められないタスクへのリンクの並び |
+
+`Assignee` が `worker` のタスクは、`Notes` に頼みを書き、`Delegation` の節にどう委ねるかを書く。
+
+| `Delegation` の欄 | 中身 |
+| --- | --- |
+| `Runner` | 何に委ねるか。`adroit`（Adroit のセッション）か `agent`（道具を絞ったエージェント）。書かれていなければ委ねない |
+| `Connection` | Adroit のつなぎ先。一つしかなければ書かなくてよい |
+| `Directory` | 働くディレクトリの絶対パス。`adroit` には要る |
+| `Worktree`・`Base` | 新しいワークツリーで働くか、その元の版 |
+| `Agent`・`Agent model` | セッションのエージェントとモデル |
+| `Permissions` | `default` か `read_only` |
+| `Tools` | `agent` に渡す道具の名前の並び |
+| `Files` | `agent` に読ませる手帳のファイルの並び。手帳の根からのパスか wiki リンク |
+
+`Directory`・`Tools`・`Files` は `agent` に、`Connection`・`Directory`・`Worktree`・`Base`・`Agent`・`Agent model`・`Permissions` は `adroit` に効く。
+
+```markdown
+# ログインの失敗を直す
+
+- Status: pending
+- Assignee: worker
+- Priority: high
+
+## Delegation
+
+- Runner: adroit
+- Directory: /home/me/src/api
+- Worktree: yes
+
+## Notes
+
+ログインが二度目に失敗する。原因を調べて直し、テストを足す。push はしない。
+```
 
 ```markdown
 # 見積もりの返事をまとめる

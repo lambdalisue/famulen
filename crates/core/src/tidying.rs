@@ -24,7 +24,7 @@ use crate::memory::{self, Change, Op};
 use crate::notebook::Writer;
 use crate::records::{
     CALENDARS, CONFIRM_SOURCE, CONTRACTS, EVENTS, HOLDINGS, Held, MEMOS, PARTIES, Patch, ROUTINES,
-    Record, Records, TASKS, is_over, linked,
+    Record, Records, TASKS, is_delegated, is_over, linked,
 };
 use crate::store::Store;
 
@@ -272,6 +272,7 @@ fn may_look(record: &Record) -> bool {
         && record.meta.text("google").is_none()
         && !asks
         && !(record.kind == TASKS && is_over(record))
+        && !is_delegated(record)
         && !matches!(status.as_deref(), Some("released" | "ended"))
 }
 
@@ -613,6 +614,11 @@ fn put_into(held: &Held<'_>, memo: &Record, task: &Record) -> anyhow::Result<Rec
             labels.push(label);
         }
     }
+    anyhow::ensure!(
+        !is_delegated(task) || log.is_empty() && labels == task.labels(),
+        "{} is delegated and no chore's to change",
+        task.title()
+    );
     let patch = Patch {
         log,
         labels: Some(labels),
@@ -1150,6 +1156,24 @@ mod tests {
         let (_, prompt) = b.tidy_seeing(later(20), answer(&[])).await;
         assert!(prompt.contains("# 過ぎた"), "{prompt}");
         assert!(!prompt.contains("# まだ"), "{prompt}");
+    }
+
+    #[test]
+    fn a_delegated_task_is_the_owners_and_the_workers_and_not_looked_at() {
+        let b = book("tidying-delegated");
+        let task = b.add(TASKS, "直す");
+        assert!(may_look(&task));
+        let delegated = b
+            .records
+            .change(
+                ME,
+                TASKS,
+                &task.id,
+                Patch::default().with("Assignee", crate::workers::WORKER),
+            )
+            .unwrap();
+        assert!(!may_look(&delegated));
+        assert!(b.records.open_task_titled("直す", &[]).unwrap().is_none());
     }
 
     #[tokio::test]

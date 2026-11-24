@@ -1109,6 +1109,7 @@ dependencies = [
  "reqwest",
  "rrule",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "serde_norway",

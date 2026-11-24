@@ -48,6 +48,34 @@ pub struct Options {
     pub plugin_dir: Option<PathBuf>,
 }
 
+/// The settings that run shell commands in Claude Code's sandbox, which can
+/// neither read nor write `sealed`, and write only in `writable` beyond the
+/// working directory.
+pub(crate) fn sandbox_settings(sealed: &[PathBuf], writable: &[PathBuf]) -> Value {
+    let shown = |p: &PathBuf| p.display().to_string();
+    // denyWrite already wins inside allowWrite; leaving such places out keeps
+    // the settings from even naming a sealed place as writable.
+    let writable: Vec<String> = writable
+        .iter()
+        .filter(|w| !sealed.iter().any(|s| crate::paths::may_be_under(w, s)))
+        .map(shown)
+        .collect();
+    let sealed: Vec<String> = sealed.iter().map(shown).collect();
+    // Every shell command still asks famulen; the sandbox only bounds what an
+    // allowed one can touch, and refuses to run unsandboxed.
+    serde_json::json!({ "sandbox": {
+        "enabled": true,
+        "failIfUnavailable": true,
+        "allowUnsandboxedCommands": false,
+        "autoAllowBashIfSandboxed": false,
+        "filesystem": {
+            "denyRead": sealed,
+            "denyWrite": sealed,
+            "allowWrite": writable,
+        },
+    } })
+}
+
 impl Options {
     /// The arguments Claude Code is started with.
     ///
@@ -71,6 +99,12 @@ impl Options {
         ]
         .map(String::from)
         .into();
+        // Work is delegated through tasks; the model is not even offered a tool
+        // that starts an agent. The `=` form ends the list of names.
+        args.push(format!(
+            "--disallowedTools={}",
+            crate::permissions::LAUNCHERS.join(",")
+        ));
         args.push("--mcp-config".into());
         let mut config = hub::mcp_config();
         for id in &self.connections {
@@ -80,33 +114,8 @@ impl Options {
         }
         args.push(config.to_string());
         if !self.sealed.is_empty() {
-            let shown = |p: &PathBuf| p.display().to_string();
-            let sealed: Vec<String> = self.sealed.iter().map(shown).collect();
-            // denyWrite already wins inside allowWrite; leaving such places
-            // out keeps the settings from even naming a sealed place as writable.
-            let writable: Vec<String> = self
-                .writable
-                .iter()
-                .filter(|w| !self.sealed.iter().any(|s| crate::paths::may_be_under(w, s)))
-                .map(shown)
-                .collect();
-            // Every shell command still asks famulen; the sandbox only bounds
-            // what an allowed one can touch, and refuses to run unsandboxed.
             args.push("--settings".into());
-            args.push(
-                serde_json::json!({ "sandbox": {
-                    "enabled": true,
-                    "failIfUnavailable": true,
-                    "allowUnsandboxedCommands": false,
-                    "autoAllowBashIfSandboxed": false,
-                    "filesystem": {
-                        "denyRead": sealed,
-                        "denyWrite": sealed,
-                        "allowWrite": writable,
-                    },
-                } })
-                .to_string(),
-            );
+            args.push(sandbox_settings(&self.sealed, &self.writable).to_string());
         }
         args.push("--append-system-prompt".into());
         args.push(self.system_prompt.clone());
@@ -341,6 +350,7 @@ fn on_inbound<S: Slack + 'static>(
             session_id,
             is_error,
             usage,
+            ..
         } => {
             if let Some((models, spec)) = &services.usage
                 && let Err(error) = models.record(crate::models::Role::Secretary, spec, &usage)
@@ -444,11 +454,16 @@ fn answer<S: Slack + 'static>(
                         tracing::warn!(%error, %server_name, "could not read the workgroup; asking");
                         Some("the workgroup could not be read".into())
                     });
+                let permissions = services.permissions.clone();
                 tokio::spawn(async move {
                     let _guard = guard;
-                    let response = gateway
-                        .handle(crate::permissions::SECRETARY, ask, &server_name, &message)
-                        .await;
+                    let response = match permissions.refused_launch(&server_name, &message) {
+                        Some(refused) => Some(refused),
+                        None => gateway
+                            .handle(crate::permissions::SECRETARY, ask, &server_name, &message)
+                            .await
+                            .map(|r| permissions.without_launchers(&server_name, r)),
+                    };
                     let _ = tx.send(protocol::mcp_response(&request_id, response));
                 });
             }
@@ -735,6 +750,17 @@ mod tests {
     #[test]
     fn without_sealed_places_no_sandbox_is_asked_for() {
         assert_eq!(value_after(&options(None).args(), "--settings"), None);
+    }
+
+    #[test]
+    fn the_model_is_offered_no_tool_that_starts_an_agent() {
+        let args = options(None).args();
+        let denied = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--disallowedTools="))
+            .unwrap();
+        assert!(denied.split(',').any(|t| t == "Task"), "{denied}");
+        assert!(denied.split(',').any(|t| t == "Agent"), "{denied}");
     }
 
     #[test]

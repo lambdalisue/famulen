@@ -8,6 +8,7 @@ use tokio::sync::Notify;
 use super::dream::DREAMING_KEY;
 use crate::app::App;
 use crate::calendars::Calendars;
+use crate::claude::skills::claude_dir;
 use crate::config::Config;
 use crate::connections::Connections;
 use crate::console_log::ConsoleLog;
@@ -33,6 +34,38 @@ pub(super) fn sealed_places(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         config.gateway_dir(),
         std::env::current_dir()?.join(".env"),
     ])
+}
+
+/// Claude Code's own directory on this system.
+fn claudes() -> Option<PathBuf> {
+    claude_dir(|name| match name {
+        "HOME" => Some(crate::sealed::home()?.display().to_string()),
+        _ => std::env::var(name).ok(),
+    })
+}
+
+/// Where Claude Code keeps what was said, in its own directory.
+const SAID: &[&str] = &["projects", "history.jsonl", "file-history", "todos"];
+
+/// Where no tool of an agent doing a delegated task may reach, on top of
+/// that: the notebook, of which it reads only what it was handed, and what
+/// Famulen keeps of the secretary.
+fn sealed_from_workers(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
+    let mut places = sealed_places(config)?;
+    places.push(config.notebook_dir());
+    places.push(config.workdir());
+    let database = config.database_path();
+    for suffix in ["", "-wal", "-shm"] {
+        let mut path = database.clone().into_os_string();
+        path.push(suffix);
+        places.push(path.into());
+    }
+    // What was said to the secretary and to other workers. The rest of the
+    // directory is read by the model CLI's own shell.
+    if let Some(claude) = claudes() {
+        places.extend(SAID.iter().map(|name| claude.join(name)));
+    }
+    Ok(places)
 }
 
 pub(super) fn open(config: Config) -> anyhow::Result<(Config, App)> {
@@ -83,6 +116,13 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         crate::gateway::ANY,
         crate::gateway::ANY,
     )?;
+    // Which tools a run is handed is kept by the run; its calls are judged
+    // like any other's.
+    gateway.grant(
+        crate::permissions::WORKER,
+        crate::gateway::ANY,
+        crate::gateway::ANY,
+    )?;
     let app = App {
         store: store.clone(),
         records: records.clone(),
@@ -95,6 +135,11 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
             .with_notebook_dir(config.notebook_dir())
             .with_sealed(sealed_places(config)?, config.workdir()),
         models: Models::new(store.clone()).with_gateway(gateway.clone()),
+        workers: crate::workers::Workers::new(
+            store.clone(),
+            config.data_dir.join("workers"),
+            sealed_from_workers(config)?,
+        ),
         lookout: lookout.clone(),
         triage: crate::triage::Triage::new(store.clone()),
         journal: Journal::new(store.clone()),
@@ -153,5 +198,20 @@ pub(crate) mod testing {
         )
         .unwrap();
         open_app(&config).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::notebook::testing::TempDir;
+
+    #[test]
+    fn what_was_said_in_other_sessions_is_sealed_from_workers() {
+        let dir = TempDir::new("sealed-said");
+        let app = crate::runtime::testing::app(dir.path());
+        let claude = super::claudes().unwrap();
+        for said in ["projects", "history.jsonl"] {
+            assert!(app.workers.sealed.contains(&claude.join(said)), "{said}");
+        }
     }
 }

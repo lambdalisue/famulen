@@ -9,14 +9,17 @@
 //! A skill's `allowed-tools` lets the tools it names run without asking,
 //! and its `hooks` run commands without asking at all, so both are left out
 //! of every copy: every tool call a skill leads to is still put to Famulen.
+//! A skill's `context` and `agent` would run it in an agent of its own, which
+//! the secretary may not start, so they are left out too.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// Frontmatter keys that would let something run without Famulen's answer.
-const GRANTS: &[&str] = &["allowed-tools", "hooks"];
+/// Frontmatter keys that would let something run without Famulen's answer, or
+/// run the skill in an agent of its own.
+const GRANTS: &[&str] = &["allowed-tools", "hooks", "context", "agent"];
 
 /// Where the copies of the owner's own skills go, under the working directory.
 pub const SKILLS_DIR: &str = ".claude/skills";
@@ -35,15 +38,18 @@ pub struct Sources {
     pub skill_dirs: Vec<PathBuf>,
 }
 
+/// Where Claude Code keeps what is its own, as `env` gives it.
+pub(crate) fn claude_dir(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let given = |name| env(name).filter(|d| !d.is_empty()).map(PathBuf::from);
+    given("CLAUDE_CONFIG_DIR").or_else(|| Some(given("HOME")?.join(".claude")))
+}
+
 impl Sources {
     /// The owner's as `env` gives them: `$CLAUDE_CONFIG_DIR` or
     /// `~/.claude`, and `~/.agents/skills`.
     pub fn from_env(env: impl Fn(&str) -> Option<String>) -> Option<Self> {
         let home = env("HOME").filter(|h| !h.is_empty()).map(PathBuf::from);
-        let claude_dir = env("CLAUDE_CONFIG_DIR")
-            .filter(|d| !d.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| home.as_ref().map(|h| h.join(".claude")))?;
+        let claude_dir = claude_dir(&env)?;
         Some(Self {
             claude_dir,
             skill_dirs: home
@@ -160,6 +166,7 @@ fn symlink(original: &Path, link: &Path) -> std::io::Result<()> {
 /// `skill` with the frontmatter keys in [`GRANTS`] left out, values that
 /// run over several lines included. The rest is kept as written.
 pub fn without_grants(skill: &str) -> String {
+    let skill = skill.trim_start_matches('\u{feff}');
     let mut lines = skill.split_inclusive('\n');
     let Some(first) = lines.next() else {
         return String::new();
@@ -170,15 +177,29 @@ pub fn without_grants(skill: &str) -> String {
     let mut out = String::from(first);
     let mut in_frontmatter = true;
     let mut dropping = false;
+    // How far the keys are indented: YAML lets all of them be.
+    let mut indent = None;
     for line in lines {
         if in_frontmatter {
             if line.trim_end() == "---" {
                 in_frontmatter = false;
             } else {
-                let continues = line.starts_with([' ', '\t', '-']) || line.trim().is_empty();
+                let text = line.trim_start_matches([' ', '\t']);
+                let depth = line.len() - text.len();
+                let blank = text.trim().is_empty() || text.starts_with('#');
+                if !blank && indent.is_none() {
+                    indent = Some(depth);
+                }
+                let continues =
+                    blank || indent.is_some_and(|keys| depth > keys) || text.starts_with('-');
                 if !continues {
-                    let key = line.split(':').next().unwrap_or_default().trim();
-                    dropping = GRANTS.contains(&key);
+                    let key = text.split(':').next().unwrap_or_default();
+                    let key = key.trim().trim_matches(['"', '\'']);
+                    // Ways to write a key that are not read here.
+                    let odd = text.starts_with(['{', '?', ':', '&', '!'])
+                        || key == "<<"
+                        || key.contains('\\');
+                    dropping = odd || GRANTS.iter().any(|g| g.eq_ignore_ascii_case(key));
                 }
                 if dropping {
                     continue;
@@ -249,6 +270,34 @@ mod tests {
         assert_eq!(
             without_grants(skill),
             "---\nname: notes\ndescription: Keep notes\nmodel: opus\n---\nUse `allowed-tools: x` in prose.\nhooks: are fine here\n"
+        );
+    }
+
+    #[test]
+    fn what_runs_a_skill_in_an_agent_of_its_own_is_left_out_however_it_is_written() {
+        for skill in [
+            "---\nname: x\ncontext: fork\nagent: Explore\n---\nbody\n",
+            "---\nname: x\n\"context\": fork\n'agent' : Explore\n---\nbody\n",
+            "\u{feff}---\nname: x\ncontext: fork\n---\nbody\n",
+            "---\nname: x\n<<: {context: fork}\n? context\n: fork\n---\nbody\n",
+        ] {
+            let kept = without_grants(skill);
+            assert!(
+                !kept.contains("fork") && !kept.contains("Explore"),
+                "{kept}"
+            );
+            assert!(
+                kept.contains("name: x") && kept.ends_with("body\n"),
+                "{kept}"
+            );
+        }
+        assert_eq!(
+            without_grants("---\n  name: x\n  context: fork\n  hooks:\n    a: b\n---\nbody\n"),
+            "---\n  name: x\n---\nbody\n"
+        );
+        assert_eq!(
+            without_grants("---\n{name: x, context: fork}\n---\nb\n"),
+            "---\n---\nb\n"
         );
     }
 

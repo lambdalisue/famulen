@@ -175,7 +175,8 @@ enum ModelKind {
 enum AgentCli {
   AGENT_CLI_UNSPECIFIED = 0;
   AGENT_CLI_CLAUDE_CODE = 1;
-  // It serves every role an agent CLI can but the secretary.
+  // It serves every role an agent CLI can but the secretary and
+  // the worker, whose tool calls are judged.
   AGENT_CLI_CODEX = 2;
 }
 
@@ -192,6 +193,8 @@ enum Role {
   // Assessing: whether a call the auto permission leaves to a model may run
   // without asking the owner.
   ROLE_ASSESS = 5;
+  // A worker: one session for each task delegated to an agent.
+  ROLE_WORKER = 6;
 }
 
 message Model {

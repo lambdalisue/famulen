@@ -25,6 +25,8 @@ pub enum Inbound {
     Result {
         session_id: String,
         is_error: bool,
+        /// What the model wrote last.
+        text: String,
         usage: crate::models::Usage,
     },
     /// Anything else (assistant messages, tool results, rate limits, ...).
@@ -87,6 +89,7 @@ pub fn parse_line(line: &str) -> anyhow::Result<Inbound> {
                 .get("is_error")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            text: str_field(&value, "result").unwrap_or_default().to_owned(),
             usage: turn_usage(&value),
         },
         _ => Inbound::Other(value),
@@ -302,6 +305,7 @@ mod tests {
             Inbound::Result {
                 session_id: "s1".into(),
                 is_error: false,
+                text: String::new(),
                 usage: crate::models::Usage {
                     input_tokens: None,
                     output_tokens: None,

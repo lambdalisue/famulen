@@ -1,0 +1,207 @@
+//! The worker pool: delegated tasks are picked up in order of priority, a few
+//! at a time, and each is run by an agent or by an Adroit session. The pool
+//! is a plain program; no model decides what runs next.
+
+pub mod adroit;
+mod agent;
+mod bounds;
+mod dispatch;
+mod order;
+mod pool;
+mod queue;
+mod runners;
+mod runs;
+
+pub use dispatch::*;
+pub use order::*;
+pub use pool::{Pool, run};
+pub use queue::*;
+pub use runners::{Began, Looked, Runners};
+pub use runs::*;
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
+
+use crate::sealed::forms;
+use crate::store::Store;
+
+/// `Assignee` of a delegated task, and who the pool is to the gateway.
+pub const WORKER: &str = crate::permissions::WORKER;
+
+const SETTINGS_KEY: &str = "setting.workers";
+/// The most runs the owner may let go on at once.
+pub const MOST_SLOTS: u32 = 20;
+
+/// How the owner lets the pool work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Settings {
+    /// How many runs go on at once.
+    pub slots: u32,
+    /// No run is started while set; those going on go on.
+    pub paused: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            slots: 2,
+            paused: false,
+        }
+    }
+}
+
+impl Settings {
+    pub fn load(store: &Store) -> anyhow::Result<Self> {
+        Ok(match store.state(SETTINGS_KEY)? {
+            Some(json) => serde_json::from_str(&json)?,
+            None => Self::default(),
+        })
+    }
+
+    pub fn save(&self, store: &Store) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            (1..=MOST_SLOTS).contains(&self.slots),
+            "1 to {MOST_SLOTS} tasks run at once"
+        );
+        store.set_state(SETTINGS_KEY, serde_json::to_string(self)?)
+    }
+}
+
+/// What the rest of Famulen shares with the pool.
+#[derive(Clone)]
+pub struct Workers {
+    pub runs: Runs,
+    /// Where an agent works, one directory for each run.
+    pub(crate) dir: PathBuf,
+    /// Where no agent's tool may reach, on top of what is sealed for the
+    /// secretary: the notebook and Famulen's own data.
+    pub(crate) sealed: Vec<PathBuf>,
+    poke: Arc<Notify>,
+    /// Adroit sessions something was told of, to be looked at at once.
+    heard: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Workers {
+    pub fn new(store: Store, dir: PathBuf, sealed: Vec<PathBuf>) -> Self {
+        Self {
+            runs: Runs::new(store),
+            dir,
+            sealed,
+            poke: Arc::default(),
+            heard: Arc::default(),
+        }
+    }
+
+    /// Have the pool look at its tasks now.
+    pub fn poke(&self) {
+        self.poke.notify_one();
+    }
+
+    async fn poked(&self) {
+        self.poke.notified().await;
+    }
+
+    /// Something was told of an Adroit session. Whether a run is or was on it:
+    /// one that is over is not the lookout's to tell of either.
+    pub fn heard_of(&self, session: &str) -> anyhow::Result<bool> {
+        let run = self.runs.of_session(session)?;
+        if run == Some(true) {
+            self.heard
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(session.to_owned());
+            self.poke();
+        }
+        Ok(run.is_some())
+    }
+
+    /// Refuse a directory around or inside what is kept from agents, or where
+    /// runs keep theirs.
+    pub fn may_work_in(&self, directory: &Path) -> anyhow::Result<()> {
+        let of = forms(directory);
+        let overlaps = |place: &&PathBuf| {
+            forms(place)
+                .iter()
+                .any(|p| of.iter().any(|d| p.starts_with(d) || d.starts_with(p)))
+        };
+        if let Some(place) = self.sealed.iter().chain([&self.dir]).find(overlaps) {
+            anyhow::bail!(
+                "no agent works in {}: {} is kept from it",
+                directory.display(),
+                place.display()
+            );
+        }
+        Ok(())
+    }
+
+    /// Remove what runs of an earlier process left behind.
+    pub(crate) fn sweep(&self) {
+        std::fs::remove_dir_all(&self.dir).ok();
+    }
+
+    /// Whether `session` was told of since the last time this was asked.
+    fn take_heard(&self, session: &str) -> bool {
+        self.heard
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(session)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_agent_is_not_given_a_directory_around_or_inside_what_is_kept_from_it() {
+        let workers = Workers::new(
+            Store::open_in_memory().unwrap(),
+            "/data/workers".into(),
+            vec!["/data/notebook".into()],
+        );
+        for directory in [
+            "/data",
+            "/data/notebook/memory",
+            "/data/workers",
+            "/data/workers/3",
+            "/",
+        ] {
+            assert!(
+                workers.may_work_in(Path::new(directory)).is_err(),
+                "{directory}"
+            );
+        }
+        for directory in ["/src", "/data/notebook-of-others"] {
+            assert!(
+                workers.may_work_in(Path::new(directory)).is_ok(),
+                "{directory}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_few_tasks_run_at_once_until_the_owner_says_otherwise() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(Settings::load(&store).unwrap(), Settings::default());
+        for slots in [0, MOST_SLOTS + 1] {
+            assert!(
+                Settings {
+                    slots,
+                    paused: false
+                }
+                .save(&store)
+                .is_err()
+            );
+        }
+        let chosen = Settings {
+            slots: 5,
+            paused: true,
+        };
+        chosen.save(&store).unwrap();
+        assert_eq!(Settings::load(&store).unwrap(), chosen);
+    }
+}

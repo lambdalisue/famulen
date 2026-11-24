@@ -112,6 +112,18 @@ test("a memory file written by the owner reads back and shows in its history", a
   await expect(page.getByText("返事は短く、結論から")).toBeVisible();
 });
 
+test("what is being written stays when something else changes meanwhile", async ({ page, request }) => {
+  await visit(page, "/memory/file?path=core.md&mode=write", "記憶 · core.md");
+  const editor = page.getByLabel("core.md を書く");
+  await editor.fill("# 心得\n\n- 書きかけ");
+  const loaded = page.waitForResponse((r) => r.url().includes("MemoryService/ReadFile"));
+  await record(request, "memos", "ほかで足した");
+  await loaded;
+  await expect(editor).toHaveValue("# 心得\n\n- 書きかけ");
+  await editor.press("Tab");
+  await expect(toast(page)).toHaveText("保存した");
+});
+
 test.describe("memory drawn as Markdown", () => {
   test("a memory file is drawn with the attributes of its items set apart, and written as plain text", async ({
     page,

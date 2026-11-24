@@ -111,16 +111,19 @@ pub enum Role {
     Triage,
     /// Weighs the calls the auto permission leaves to a model.
     Assess,
+    /// Does one delegated task.
+    Worker,
     Voice,
 }
 
 impl Role {
-    pub const ALL: [Role; 6] = [
+    pub const ALL: [Role; 7] = [
         Role::Secretary,
         Role::Dream,
         Role::Lookout,
         Role::Triage,
         Role::Assess,
+        Role::Worker,
         Role::Voice,
     ];
 
@@ -131,7 +134,7 @@ impl Role {
             Role::Secretary | Role::Lookout => Some("medium"),
             Role::Dream => Some("xhigh"),
             Role::Triage | Role::Assess => Some("low"),
-            Role::Voice => None,
+            Role::Worker | Role::Voice => None,
         }
     }
 
@@ -143,6 +146,7 @@ impl Role {
             Role::Lookout => "見張り",
             Role::Triage => "トリアージ",
             Role::Assess => "見極め",
+            Role::Worker => "手代",
             Role::Voice => "声の聞き取り",
         }
     }
@@ -152,7 +156,7 @@ impl Role {
     pub fn allowed_kinds(self) -> &'static [ModelKind] {
         use ModelKind::*;
         match self {
-            Role::Secretary => &[AgentCli],
+            Role::Secretary | Role::Worker => &[AgentCli],
             Role::Dream => &[AgentCli, Local, Api],
             Role::Lookout => &[AgentCli, Local, Api],
             Role::Triage => &[Judge, AgentCli, Local, Api],
@@ -183,8 +187,8 @@ pub fn check_assignment(role: Role, spec: &ModelSpec) -> Result<()> {
             role.label(),
         );
     }
-    // The resident session speaks Claude Code's own protocol.
-    if role == Role::Secretary && spec.cli != Cli::Claude {
+    // Their tool calls are judged over Claude Code's own protocol.
+    if matches!(role, Role::Secretary | Role::Worker) && spec.cli != Cli::Claude {
         bail!(
             "{} runs on {}; {} works only through {}",
             spec.name,
@@ -234,12 +238,13 @@ mod tests {
     #[test]
     fn each_role_accepts_exactly_the_kinds_in_the_spec_table() {
         use ModelKind::*;
-        let table: [(Role, &[ModelKind]); 6] = [
+        let table: [(Role, &[ModelKind]); 7] = [
             (Role::Secretary, &[AgentCli]),
             (Role::Dream, &[AgentCli, Local, Api]),
             (Role::Lookout, &[AgentCli, Local, Api]),
             (Role::Triage, &[Judge, AgentCli, Local, Api]),
             (Role::Assess, &[AgentCli, Local, Api]),
+            (Role::Worker, &[AgentCli]),
             (Role::Voice, &[Transcribe]),
         ];
         for (role, allowed) in table {
@@ -260,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_serves_every_role_an_agent_cli_can_but_the_secretary() {
+    fn codex_serves_every_role_an_agent_cli_can_but_the_secretary_and_the_worker() {
         let codex = ModelSpec {
             cli: Cli::Codex,
             ..spec(ModelKind::AgentCli)
@@ -268,7 +273,8 @@ mod tests {
         for role in Role::ALL {
             assert_eq!(
                 role.accepts(&codex),
-                role != Role::Secretary && role.allowed_kinds().contains(&ModelKind::AgentCli),
+                !matches!(role, Role::Secretary | Role::Worker)
+                    && role.allowed_kinds().contains(&ModelKind::AgentCli),
                 "{role:?}"
             );
         }
@@ -307,6 +313,7 @@ mod tests {
                 "見張り",
                 "トリアージ",
                 "見極め",
+                "手代",
                 "声の聞き取り"
             ]
         );

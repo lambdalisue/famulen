@@ -62,6 +62,15 @@ pub enum Source {
     },
     /// The lookout passed something on.
     Lookout { item: i64, source: String },
+    /// A delegated task came to an end.
+    Worker {
+        run: i64,
+        /// The task's code.
+        task: String,
+        /// How it ended: done, failed or refused.
+        outcome: String,
+        workgroup: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +101,7 @@ impl Input {
                 ..
             } => format!("arrival:{connection}:{receiver}:{id}"),
             Source::Lookout { item, .. } => format!("lookout:{item}"),
+            Source::Worker { run, .. } => format!("worker:{run}"),
         }
     }
 
@@ -146,6 +156,9 @@ impl Input {
                 ..
             } => format!("[arrival] connection: {connection} receiver: {receiver}"),
             Source::Lookout { item, source } => format!("[lookout] item: #{item} source: {source}"),
+            Source::Worker {
+                run, task, outcome, ..
+            } => format!("[worker] task: {task} run: #{run} outcome: {outcome}"),
         };
         format!("{header}\n{}", self.text)
     }
@@ -221,6 +234,25 @@ mod tests {
             "[approval] from: owner (U1) request: #3\napproved"
         );
         assert_eq!(input.dedup_key(), "approval:3");
+    }
+
+    #[test]
+    fn a_workers_result_names_its_task_and_how_it_ended() {
+        let input = Input {
+            sender: Sender::System,
+            source: Source::Worker {
+                run: 4,
+                task: "task-7w1hbn".into(),
+                outcome: "done".into(),
+                workgroup: "work".into(),
+            },
+            text: "fixed".into(),
+        };
+        assert_eq!(
+            input.render(),
+            "[worker] task: task-7w1hbn run: #4 outcome: done\nfixed"
+        );
+        assert_eq!(input.dedup_key(), "worker:4");
     }
 
     #[test]

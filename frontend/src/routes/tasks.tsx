@@ -1,6 +1,7 @@
 import { createAsync, useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
 import Icon from "~/components/Icon";
+import { DelegatedQueue, Delegation } from "~/components/records/Delegated";
 import RecordDetail from "~/components/records/RecordDetail";
 import RecordsPage, { type Group, oneParam } from "~/components/records/RecordsPage";
 import { AddRoutine, RoutineRow, Runs } from "~/components/records/RoutineParts";
@@ -146,10 +147,16 @@ export default function Tasks() {
             <>
               <Finish task={r} />
               <Blocked task={r} />
+              <Delegation task={r} />
             </>
           )} />}
           add={{ label: "タスクを足す", titleLabel: "何をするか", fields: ["Due", "Priority", "Assignee"] }}
-          foot={<Wakes />}
+          foot={
+            <>
+              <DelegatedQueue />
+              <Wakes />
+            </>
+          }
           empty="タスクはまだない。上のボタンか、会話で頼んで足す。"
         />
       </Match>

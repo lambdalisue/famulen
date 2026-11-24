@@ -5,7 +5,7 @@ import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { personaQuery, workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import { assigneeOf, choiceOf, dateText, daysLeft, isOver, OWNER, plainText, type Rec, SECRETARY, valueOf, workgroupNames } from "~/lib/records";
+import { assigneeOf, choiceOf, dateText, daysLeft, isOver, OWNER, plainText, type Rec, SECRETARY, valueOf, WORKER, workgroupNames } from "~/lib/records";
 import { today } from "~/lib/time";
 
 /** One task in a list: finish it, hand it over, or press it to open it. */
@@ -57,15 +57,17 @@ export default function TaskRow(props: { task: Rec }) {
             {due().slice(11) ? ` ${due().slice(11)}` : ""}
           </span>
         </Show>
-        <button
-          type="button"
-          class={`tag${aides() ? " aide" : ""}`}
-          aria-label={aides() ? "自分でやる" : "任せる"}
-          title={aides() ? "自分でやる" : `${aide()}に任せる`}
-          onClick={() => void put("Assignee", aides() ? OWNER : SECRETARY, aides() ? "自分でやる" : `${aide()}に任せた`)}
-        >
-          {assigneeOf(t(), aide())}
-        </button>
+        <Show when={valueOf(t(), "Assignee") !== WORKER} fallback={<span class="tag">{assigneeOf(t(), aide())}</span>}>
+          <button
+            type="button"
+            class={`tag${aides() ? " aide" : ""}`}
+            aria-label={aides() ? "自分でやる" : "任せる"}
+            title={aides() ? "自分でやる" : `${aide()}に任せる`}
+            onClick={() => void put("Assignee", aides() ? OWNER : SECRETARY, aides() ? "自分でやる" : `${aide()}に任せた`)}
+          >
+            {assigneeOf(t(), aide())}
+          </button>
+        </Show>
       </span>
     </>
   );

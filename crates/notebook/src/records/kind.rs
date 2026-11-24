@@ -6,7 +6,7 @@ use serde_norway::{Mapping, Value};
 
 use super::record_of;
 use crate::body::{COMMON_SECTIONS, Item, Layout, RELATED, same, split_commas};
-use crate::{Page, link, link_target};
+use crate::{Page, STANDARD_KINDS, link, link_target};
 
 /// What a declared field may hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,8 +224,30 @@ pub struct Kind {
 
 impl Kind {
     /// A kind read from its README's frontmatter; a kind without a README or
-    /// a declaration has no fields of its own.
+    /// a declaration has no fields of its own. A standard kind also has its
+    /// standard fields and sections its README does not declare.
     pub fn declared(name: &str, readme: Option<&Page>) -> anyhow::Result<Self> {
+        let mut kind = Self::written(name, readme)?;
+        if let Some((_, text)) = STANDARD_KINDS.iter().find(|(n, _)| *n == name)
+            && !kind.layout.free
+        {
+            let standard = Self::written(name, Some(&Page::parse(text)?))?;
+            for (field, ty) in standard.fields {
+                if kind.field(&field).is_none() {
+                    kind.fields.push((field, ty));
+                }
+            }
+            for (section, ty) in standard.sections {
+                if kind.section(&section).is_none() {
+                    kind.layout.sections.push(section.clone());
+                    kind.sections.push((section, ty));
+                }
+            }
+        }
+        Ok(kind)
+    }
+
+    fn written(name: &str, readme: Option<&Page>) -> anyhow::Result<Self> {
         let code = readme
             .and_then(|r| r.text("code"))
             .unwrap_or_else(|| name.to_owned());

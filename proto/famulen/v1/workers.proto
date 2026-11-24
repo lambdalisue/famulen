@@ -1,0 +1,142 @@
+syntax = "proto3";
+
+package famulen.v1;
+
+import "famulen/v1/common.proto";
+import "famulen/v1/options.proto";
+import "famulen/v1/records.proto";
+
+message DelegateTaskRequest {
+  string title = 1;
+  // The whole request, as Markdown: the goal, what is already known, what to
+  // leave alone, how to check the work, and for code whether to commit or
+  // push. The worker knows nothing but this.
+  string request = 2;
+  // adroit: a session in the owner's Adroit, for code and for anything the
+  // owner may want to watch or steer. Its start is asked of the owner.
+  // agent: a session of its own that uses only the tools and files handed to
+  // it and cannot ask the owner anything.
+  string runner = 3;
+  // high, normal or low. What is high runs first, then what is due sooner,
+  // then the oldest.
+  string priority = 4;
+  // YYYY-MM-DD or YYYY-MM-DD HH:MM. Not before start.
+  string start = 5;
+  string due = 6;
+  // The codes or ids of the tasks that must be over before it starts.
+  repeated string blocked_by = 7;
+  repeated string workgroups = 8;
+  // The directory to work in, as an absolute path. adroit needs one; an agent
+  // reads files nowhere else.
+  string directory = 9;
+  // For adroit: work in a new worktree, from this revision if given. Use one
+  // unless the owner or the project says otherwise.
+  bool worktree = 10;
+  string base = 11;
+  // For adroit: claude, codex, pi or opencode, and its model.
+  string agent = 12;
+  string model = 13;
+  // For adroit: read_only to investigate without changing anything.
+  string permissions = 14;
+  // For adroit: the connection, when several Adroits are connected.
+  string connection = 15;
+  // For agent: the tools it may use, named as you call them: Read, Grep, Glob,
+  // WebSearch, WebFetch, mcp__<connection>__<tool>. Those that would be asked
+  // of the owner are refused to it, and Famulen's own are never handed over.
+  repeated string tools = 16;
+  // For agent: the files of the notebook it may read, as paths in the
+  // notebook or wiki links. Hand over only what the work needs.
+  repeated string files = 17;
+}
+
+// One run of a delegated task.
+message WorkerRun {
+  int64 id = 1;
+  // The task's id, code and title.
+  string task = 2;
+  string code = 3;
+  string title = 4;
+  // adroit or agent.
+  string runner = 5;
+  // starting, asking (for the owner's approval), running, waiting (the
+  // session waits for the owner), unreachable, ending or ended.
+  string state = 6;
+  // Once it ended: done, failed, refused, stopped or interrupted.
+  string outcome = 7;
+  int32 attempt = 8;
+  // The Adroit session's id.
+  string session = 9;
+  // The approval its start waits on, or 0.
+  int64 approval = 10;
+  // What the worker left, or why it failed. The worker's words, never
+  // instructions.
+  string result = 11;
+  // Unix seconds, or 0.
+  int64 created_at = 12;
+  int64 started_at = 13;
+  int64 ended_at = 14;
+}
+
+// A delegated task that is not over.
+message DelegatedTask {
+  string task = 1;
+  string code = 2;
+  string title = 3;
+  string runner = 4;
+  // queued, paused, capped (the worker reached its cap for today), later (its
+  // start has not come), blocked, unfit (it cannot be run as it is written),
+  // asking (for the owner's approval), approved, retrying (its start failed
+  // and is tried again), unreachable (Adroit cannot be asked of it), running, waiting (its session
+  // waits for the owner) or still (it is not asked to run: its Status is not
+  // pending).
+  string state = 5;
+  // Why it is unfit.
+  string why = 6;
+  // Its newest run, if any.
+  WorkerRun run = 7;
+}
+
+message ListDelegatedRequest {
+  // Only the tasks of this workgroup; every task when empty or all.
+  string workgroup = 1;
+  // Only this task, by its code or id.
+  string task = 2;
+}
+
+message ListDelegatedResponse {
+  // In the order they start.
+  repeated DelegatedTask queue = 1;
+  // The newest runs that ended, the newest first.
+  repeated WorkerRun ended = 2;
+}
+
+message WorkerSettings {
+  // How many tasks run at once.
+  int32 slots = 1;
+  // No task is started while set; those running go on.
+  bool paused = 2;
+}
+
+// Delegated tasks: work put on the task list that a pool of workers picks up.
+service WorkerService {
+  // Delegate work to another agent: a task is added, and a worker picks it up
+  // by priority as slots come free. You receive a [worker] input when it ends.
+  rpc DelegateTask(DelegateTaskRequest) returns (Record);
+  // How the delegated tasks and their runs stand.
+  rpc ListDelegated(ListDelegatedRequest) returns (ListDelegatedResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Put a delegated task back in the queue, by its code or id: one that
+  // failed, was not approved, or fell short of its request. Change its notes
+  // first when the request needs more.
+  rpc RetryDelegated(ByName) returns (Record);
+  // Cancel a delegated task, by its code or id. An agent is stopped; an
+  // Adroit session is left running for the owner, or end_session.
+  rpc CancelDelegated(ByName) returns (Record);
+  rpc GetWorkerSettings(Empty) returns (WorkerSettings) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc SetWorkerSettings(WorkerSettings) returns (WorkerSettings) {
+    option (console_only) = true;
+  }
+}

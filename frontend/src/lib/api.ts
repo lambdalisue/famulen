@@ -18,6 +18,7 @@ import {
 } from "~/gen/famulen/v1/settings_pb";
 import { GatewayLogService, VaultService } from "~/gen/famulen/v1/vault_pb";
 import { LookoutService } from "~/gen/famulen/v1/lookout_pb";
+import { WorkerService } from "~/gen/famulen/v1/workers_pb";
 
 /** Where the backend answers, as the console's server reaches it. */
 export function backendUrl(): string {
@@ -85,4 +86,5 @@ export const api = {
   memory: client(MemoryService),
   vault: client(VaultService),
   gatewayLog: client(GatewayLogService),
+  workers: client(WorkerService),
 };
