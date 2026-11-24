@@ -218,6 +218,10 @@ impl Permissions {
                 ..Call::new(SECRETARY, "", tool_name, input.clone())
             },
         };
+        let call = Call {
+            origin: self.store.call_origin()?,
+            ..call
+        };
         Ok(match self.gateway.judge_assessed(&call).await? {
             Verdict::Allow { .. } => Decision::Allow,
             Verdict::Hold(ticket) => Decision::Held(ticket.id),

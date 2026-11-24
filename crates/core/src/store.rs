@@ -331,6 +331,19 @@ impl Store {
         )? == 1)
     }
 
+    /// What a call made now is made for: the input of the running turn.
+    pub fn call_origin(&self) -> anyhow::Result<Option<String>> {
+        Ok(self.running()?.map(|turn| turn.input.to_string()))
+    }
+
+    /// The input a call was made for, by its [`Store::call_origin`].
+    pub fn input_of_origin(&self, origin: &str) -> anyhow::Result<Option<Input>> {
+        Ok(match origin.parse() {
+            Ok(id) => self.get(id)?.map(|row| row.input),
+            Err(_) => None,
+        })
+    }
+
     pub fn running(&self) -> anyhow::Result<Option<Turn>> {
         Ok(self
             .conn()
@@ -441,6 +454,13 @@ CREATE TABLE IF NOT EXISTS approvals (
     ts          TEXT,
     created_at  INTEGER NOT NULL,
     answered_at INTEGER
+);
+-- Where a request was asked, when not in the main workspace's DM.
+CREATE TABLE IF NOT EXISTS approval_places (
+    approval  INTEGER PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    channel   TEXT NOT NULL,
+    thread    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS wakeups (
     id    INTEGER PRIMARY KEY,

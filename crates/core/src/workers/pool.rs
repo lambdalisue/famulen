@@ -434,8 +434,7 @@ impl Pool {
         let console = self.app.console.clone();
         tokio::spawn(async move {
             let slack = slack.read().unwrap_or_else(|p| p.into_inner()).clone();
-            let main = slack.as_ref().and_then(|s| s.get(None).ok());
-            if let Err(error) = crate::approvals::withdraw(&store, main, ticket).await {
+            if let Err(error) = crate::approvals::withdraw(&store, slack.as_deref(), ticket).await {
                 tracing::warn!(%error, ticket, "could not take back a request");
             }
             console.notify(Event::Approvals);

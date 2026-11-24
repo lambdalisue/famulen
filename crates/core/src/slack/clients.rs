@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 /// A Slack client per workspace, with the main one named.
+#[derive(Clone)]
 pub struct SlackClients<S> {
     clients: BTreeMap<String, S>,
     main: String,

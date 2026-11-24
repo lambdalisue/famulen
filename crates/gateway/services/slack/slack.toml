@@ -36,6 +36,15 @@ input = { type = "object", properties = { channel = { type = "string" }, text = 
 ok = "{/ok}"
 
 [[tools]]
+name = "post_ephemeral"
+description = "Post a message to a channel that only `user` sees, until they reload Slack; in a thread when `thread` is given."
+method = "POST"
+path = "/chat.postEphemeral"
+body = { channel = "{args.channel}", user = "{args.user}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}" }
+input = { type = "object", properties = { channel = { type = "string" }, user = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" } }, required = ["channel", "user", "text"] }
+ok = "{/ok}"
+
+[[tools]]
 name = "update_message"
 description = "Replace the text and blocks of a message the bot posted."
 method = "POST"
@@ -121,6 +130,7 @@ account = { team = ["{/payload/team_id}", "{/payload/team/id}"] }
 
 [permissions]
 post_message = "allow"
+post_ephemeral = "confirm"
 update_message = "allow"
 open_dm = "allow"
 add_reaction = "allow"

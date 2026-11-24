@@ -27,6 +27,15 @@ pub trait Slack: Send + Sync {
         message: Outgoing,
     ) -> impl Future<Output = anyhow::Result<String>> + Send;
 
+    /// Post to `channel` for `user` alone, until they reload Slack. It cannot
+    /// be replaced later.
+    fn post_ephemeral(
+        &self,
+        channel: &str,
+        user: &str,
+        message: Outgoing,
+    ) -> impl Future<Output = anyhow::Result<()>> + Send;
+
     /// Replace a message Famulen posted earlier.
     fn update(
         &self,
@@ -122,13 +131,13 @@ impl GatewaySlack {
 
     /// Post with the secretary's icon, or without one where the bot may not
     /// set it: a workspace the app was installed in before it asked to.
-    async fn post_with_icon(&self, mut args: Value) -> anyhow::Result<Value> {
+    async fn post_with_icon(&self, tool: &str, mut args: Value) -> anyhow::Result<Value> {
         let Some(icon) = self.icons.of(&self.connection) else {
-            return self.call("post_message", args).await;
+            return self.call(tool, args).await;
         };
         let bare = args.clone();
         args["icon"] = json!(icon);
-        let error = match self.call("post_message", args).await {
+        let error = match self.call(tool, args).await {
             Ok(answer) => return Ok(answer),
             Err(error) => error,
         };
@@ -140,7 +149,7 @@ impl GatewaySlack {
         {
             return Err(error);
         }
-        let answer = self.call("post_message", bare).await?;
+        let answer = self.call(tool, bare).await?;
         tracing::warn!(
             connection = %self.connection,
             %error,
@@ -164,12 +173,26 @@ fn message_args(channel: &str, message: Outgoing) -> Value {
 
 impl Slack for GatewaySlack {
     async fn post(&self, channel: &str, message: Outgoing) -> anyhow::Result<String> {
-        let answer = self.post_with_icon(message_args(channel, message)).await?;
+        let answer = self
+            .post_with_icon("post_message", message_args(channel, message))
+            .await?;
         Ok(answer
             .get("ts")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned())
+    }
+
+    async fn post_ephemeral(
+        &self,
+        channel: &str,
+        user: &str,
+        message: Outgoing,
+    ) -> anyhow::Result<()> {
+        let mut args = message_args(channel, message);
+        args["user"] = json!(user);
+        self.post_with_icon("post_ephemeral", args).await?;
+        Ok(())
     }
 
     async fn update(&self, channel: &str, ts: &str, message: Outgoing) -> anyhow::Result<()> {
@@ -303,6 +326,27 @@ mod tests {
         assert_eq!(
             seen[0].1,
             json!({ "channel": "D1", "text": "hi", "thread_ts": "1.0", "icon_url": MALE })
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ephemeral_post_names_the_one_who_sees_it_and_its_thread() {
+        let (base, seen) = slack_api(json!({ "ok": true, "message_ts": "1.5" })).await;
+
+        let message = Outgoing {
+            thread_ts: Some("1.0".into()),
+            ..says("hi")
+        };
+        slack(&base)
+            .post_ephemeral("C1", "U1", message)
+            .await
+            .unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "chat.postEphemeral");
+        assert_eq!(
+            seen[0].1,
+            json!({ "channel": "C1", "user": "U1", "text": "hi", "thread_ts": "1.0", "icon_url": MALE })
         );
     }
 
