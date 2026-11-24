@@ -1,10 +1,9 @@
-import { createAsync } from "@solidjs/router";
-import { createSignal, Show } from "solid-js";
+import { createSignal, onMount, Show } from "solid-js";
 import { IntervalField, PlacesField, RouteField, WHOLE, WorkgroupField } from "~/components/LookoutFields";
 import { ARRIVED } from "~/components/LookoutInterval";
 import { argsOf, fieldsOf, sameArgs, ToolField, typedOf } from "~/components/ToolArgs";
-import type { LookoutDefault, LookoutSource } from "~/gen/famulen/v1/lookout_pb";
-import { act } from "~/lib/act";
+import type { LookoutChoices, LookoutDefault, LookoutSource } from "~/gen/famulen/v1/lookout_pb";
+import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import { lookoutChoicesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
@@ -20,7 +19,10 @@ function EditForm(props: { source: LookoutSource; defaults: LookoutDefault[]; so
   const before = first.workgroups.length === 1 ? (first.workgroups[0] ?? WHOLE) : WHOLE;
   const [workgroup, setWorkgroup] = createSignal(before);
   const arrived = first.tool === ARRIVED;
-  const choices = createAsync(() => lookoutChoicesQuery(first.connection));
+  // Not `createAsync`: waiting on it in the form makes the form anew when the
+  // choices come, without what was already chosen in it.
+  const [choices, setChoices] = createSignal<LookoutChoices>();
+  onMount(async () => setChoices(await look(() => lookoutChoicesQuery(first.connection))));
   const [narrowed, setNarrowed] = createSignal(first.places.length > 0);
   const [places, setPlaces] = createSignal(first.places);
   const rest = () =>
