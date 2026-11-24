@@ -1450,3 +1450,51 @@ async fn an_agent_that_ends_without_a_result_is_a_failure_told_to_the_secretary(
     );
     assert_eq!(app.store.count_pending().unwrap(), 1);
 }
+
+#[tokio::test]
+async fn the_end_of_a_task_names_the_working_memory_that_speaks_of_it() {
+    let b = bench("pool-working", Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    let working = |name: &str, clues: String| {
+        let memory = crate::memory::WorkingMemory {
+            name: name.into(),
+            clues,
+            ..Default::default()
+        };
+        crate::memory::write_working(&b.app.memory_dir, &memory).unwrap();
+    };
+    working("by-link", b.task(&id).link());
+    working("by-session", "セッション s1 の完了待ち".into());
+    working("other", "セッション s12 の完了待ち".into());
+
+    b.fake.look_as("直す", Looked::Failed("だめ".into()));
+    b.pool.looked.lock().unwrap().clear();
+    b.pool.tick().await.unwrap();
+
+    let text = &b.told()[0].text;
+    let (said, left) = text.split_once("\n---\n").unwrap();
+    assert!(
+        said.contains("Working memory that speaks of it: by-link, by-session. "),
+        "{text}"
+    );
+    assert!(said.contains("close_working"));
+    assert_eq!(left, "だめ");
+    assert_eq!(
+        crate::memory::working_memories(&b.app.memory_dir)
+            .unwrap()
+            .len(),
+        3,
+        "it is the secretary's to close"
+    );
+}
+
+#[tokio::test]
+async fn the_end_of_a_task_no_working_memory_speaks_of_says_nothing_of_it() {
+    let b = bench("pool-no-working", Fake::default());
+    b.agent("調べる");
+    b.pool.tick().await.unwrap();
+    b.fake.look_as("調べる", Looked::Done("ok".into()));
+    b.pool.tick().await.unwrap();
+    assert!(!b.told()[0].text.contains("Working memory"));
+}
