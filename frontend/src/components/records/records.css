@@ -98,11 +98,6 @@ textarea.input.rec-notes { min-height:260px; font-family:"IBM Plex Mono", ui-mon
 .rec-log-text { flex:1; white-space:pre-wrap; overflow-wrap:anywhere; }
 .rec-log .sub { flex:none; }
 .rec-foot { border-top:1px solid var(--line2); padding-top:10px; margin:0; }
-.md .markdown-viewer { padding:0 !important; background:transparent !important; min-height:0 !important; max-width:none !important; }
-.md .markdown-body { font-size:14px; max-width:none; margin:0; padding:0; }
-.md .markdown-viewer[hidden] { display:none; }
-.md-plain { margin:0; white-space:pre-wrap; font:inherit; font-size:14px; line-height:1.8; overflow-wrap:anywhere; }
-.md-link { cursor:pointer; }
 .pick-list { list-style:none; margin:0; padding:0; max-height:min(420px, 60vh); overflow-y:auto; }
 .callout { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; border-radius:10px; background:var(--soft); font-size:13px; }
 .callout.warn { background:var(--warn-soft); color:var(--warn); }

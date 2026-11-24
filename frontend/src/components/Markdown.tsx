@@ -1,25 +1,32 @@
 import { useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, onMount, Show } from "solid-js";
-import { draw, recordHref } from "~/lib/markdown";
+import { Dynamic } from "solid-js/web";
+import { draw, notebookHref } from "~/lib/markdown";
+import "./Markdown.css";
 
-/** Markdown drawn as Arto draws it; until that is ready, the text itself. */
-export default function Markdown(props: { text: string }) {
-  let viewer: HTMLDivElement | undefined;
+/**
+ * Markdown drawn as Arto draws it; until that is ready, the text itself.
+ * `inline` sets it into the line it stands in, such as a title or an item of
+ * a list; `attributes` sets apart what memory items carry at their end.
+ */
+export default function Markdown(props: { text: string; inline?: boolean; attributes?: boolean }) {
+  let viewer: HTMLElement | undefined;
   const navigate = useNavigate();
   const [drawn, setDrawn] = createSignal(false);
   onMount(() => {
     window.handleMarkdownLinkClick = (path) => {
-      const href = recordHref(path);
+      const href = notebookHref(path);
       if (href) navigate(href);
     };
     let turn = 0;
     createEffect(() => {
       const text = props.text;
+      const how = { inline: props.inline, attributes: props.attributes };
       const mine = ++turn;
       const place = document.createElement("div");
       if (!viewer) return;
       const target = viewer;
-      draw(place, text)
+      draw(place, text, how)
         .then(() => {
           if (mine !== turn) return;
           target.replaceChildren(...place.childNodes);
@@ -29,12 +36,26 @@ export default function Markdown(props: { text: string }) {
         .catch(() => setDrawn(false));
     });
   });
+  // Following a link does not also pick the item the text stands in.
+  const onClick = (e: MouseEvent) => {
+    if (e.target instanceof Element && e.target.closest(".md-link, a")) e.stopPropagation();
+  };
   return (
-    <div class="md">
+    <Dynamic component={props.inline ? "span" : "div"} class={props.inline ? "md md-inline" : "md"} onClick={onClick}>
       <Show when={!drawn()}>
-        <pre class="md-plain">{props.text}</pre>
+        <Dynamic component={props.inline ? "span" : "pre"} class="md-plain">
+          {props.text}
+        </Dynamic>
       </Show>
-      <div class="markdown-viewer" data-theme="light" ref={viewer} hidden={!drawn()} />
-    </div>
+      <Dynamic
+        component={props.inline ? "span" : "div"}
+        class="markdown-viewer"
+        data-theme="light"
+        ref={(el: HTMLElement) => {
+          viewer = el;
+        }}
+        hidden={!drawn()}
+      />
+    </Dynamic>
   );
 }

@@ -1,5 +1,6 @@
 import { A, createAsync, useSearchParams } from "@solidjs/router";
-import { createEffect, For, type JSX, Match, Show, Switch } from "solid-js";
+import { createEffect, For, Match, Show, Switch } from "solid-js";
+import Markdown from "~/components/Markdown";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { personaQuery } from "~/lib/data";
@@ -11,94 +12,6 @@ const MODES: [string, string][] = [
   ["write", "書く"],
   ["history", "経緯"],
 ];
-
-const ATTRS = /\s+\{([\w-]+=[^}]*)\}\s*$/;
-
-/** A line's text, with the item attributes at its end set apart. */
-function Line(props: { text: string }) {
-  const m = () => ATTRS.exec(props.text);
-  return (
-    <>
-      {m() ? props.text.slice(0, m()?.index) : props.text}
-      <Show when={m()}>{(a) => <span class="attrs mono">{a()[1]}</span>}</Show>
-    </>
-  );
-}
-
-/**
- * The Markdown a memory file is written in: headings, lists, fenced code and
- * paragraphs. Built as elements rather than an HTML string, so nothing in the
- * file can inject markup.
- */
-function Markdown(props: { text: string }): JSX.Element {
-  const blocks = () => {
-    const out: JSX.Element[] = [];
-    let list: string[] = [];
-    let para: string[] = [];
-    let code: string[] | undefined;
-    const flush = () => {
-      if (list.length > 0) {
-        const items = list;
-        out.push(
-          <ul>
-            <For each={items}>
-              {(t) => (
-                <li>
-                  <Line text={t} />
-                </li>
-              )}
-            </For>
-          </ul>,
-        );
-        list = [];
-      }
-      if (para.length > 0) {
-        const text = para.join(" ");
-        out.push(
-          <p>
-            <Line text={text} />
-          </p>,
-        );
-        para = [];
-      }
-    };
-    for (const line of props.text.split("\n")) {
-      if (code !== undefined) {
-        if (line.startsWith("```")) {
-          const body = code.join("\n");
-          out.push(<pre>{body}</pre>);
-          code = undefined;
-        } else code.push(line);
-        continue;
-      }
-      if (line.startsWith("```")) {
-        flush();
-        code = [];
-        continue;
-      }
-      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-      const item = /^\s*[-*]\s+(.*)$/.exec(line);
-      if (heading) {
-        flush();
-        const text = heading[2];
-        const level = heading[1].length;
-        out.push(level === 1 ? <h1>{text}</h1> : level === 2 ? <h2>{text}</h2> : <h3>{text}</h3>);
-      } else if (item) {
-        if (para.length > 0) flush();
-        list.push(item[1]);
-      } else if (line.trim() === "") {
-        flush();
-      } else {
-        if (list.length > 0) flush();
-        para.push(line.trim());
-      }
-    }
-    if (code !== undefined) out.push(<pre>{code.join("\n")}</pre>);
-    flush();
-    return out;
-  };
-  return <>{blocks()}</>;
-}
 
 export default function MemoryFile() {
   const [params] = useSearchParams();
@@ -135,7 +48,7 @@ export default function MemoryFile() {
       </div>
       <Show when={file()}>
         {(f) => (
-          <Switch fallback={<article class="card markdown"><Markdown text={f().text} /></article>}>
+          <Switch fallback={<div class="card"><Markdown text={f().text} attributes /></div>}>
             <Match when={mode() === "write"}>
               <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
                 <label for="mem-edit" class="sr">
