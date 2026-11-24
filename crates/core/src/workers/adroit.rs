@@ -84,7 +84,7 @@ fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
     let order = &run.order;
     let mut input = json!({
         "dir": order.directory,
-        "prompt": order.request,
+        "prompt": super::finish::prompt(order),
         "name": format!("{} {}", token(run), order.title.replace('\n', " ")),
     });
     if order.worktree {

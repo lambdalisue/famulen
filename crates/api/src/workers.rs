@@ -5,7 +5,7 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Order, Outcome, Run, Runner, Settings, Standing, State, WORKER, is_delegated,
+    self, Finish, Order, Outcome, Run, Runner, Settings, Standing, State, WORKER, is_delegated,
 };
 use famulen_core::workgroups::ALL;
 
@@ -66,6 +66,15 @@ fn settings(s: Settings) -> WorkerSettings {
     WorkerSettings {
         slots: s.slots as i32,
         paused: s.paused,
+        finishes: s
+            .finishes
+            .into_iter()
+            .map(|f| WorkerFinish {
+                directory: f.directory,
+                steps: f.steps,
+                ..Default::default()
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -270,13 +279,24 @@ impl WorkerService for Api {
         let chosen = Settings {
             slots: u32::try_from(request.slots).map_err(fail)?,
             paused: request.paused,
+            finishes: request
+                .to_owned_message()
+                .finishes
+                .into_iter()
+                .map(|f| Finish {
+                    directory: f.directory.trim().to_owned(),
+                    steps: f.steps.trim().to_owned(),
+                })
+                .collect(),
         };
         chosen.save(&self.app.store).or_fail()?;
         self.app.journal.record(
             "setting",
             format!(
-                "workers: {} at once, paused {}",
-                chosen.slots, chosen.paused
+                "workers: {} at once, paused {}, {} finishes",
+                chosen.slots,
+                chosen.paused,
+                chosen.finishes.len()
             ),
         );
         changed(self);

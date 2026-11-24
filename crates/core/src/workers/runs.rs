@@ -388,6 +388,7 @@ pub(super) mod tests {
             permissions: String::new(),
             tools: Vec::new(),
             files: Vec::new(),
+            finish: String::new(),
         }
     }
 

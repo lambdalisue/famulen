@@ -105,3 +105,31 @@ test("how many run at once is saved", async ({ page, request }) => {
     .toMatchObject({ slots: 4, paused: true });
   await settle(request, false);
 });
+
+test("how work on code is finished is written, rewritten and removed", async ({ page, request }) => {
+  await visit(page, "/settings/roles/worker", "設定 · 手代");
+  const section = page.getByRole("region", { name: "仕上げ" });
+  await section.getByRole("button", { name: "仕上げを足す" }).click();
+  const dialog = page.getByRole("dialog", { name: "仕上げを足す" });
+  await dialog.getByLabel("ディレクトリ").fill("src");
+  await dialog.getByLabel("手順").fill("1. レビューする");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(toast(page)).toContainText("absolute path");
+  await dialog.getByLabel("ディレクトリ").fill("/src");
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(section).toContainText("1. レビューする");
+
+  // The other settings on the page leave it as it is.
+  await page.getByText("一時停止する").click();
+  await expect.poll(() => call(request, "WorkerService", "GetWorkerSettings")).toMatchObject({ paused: true, finishes: [{ directory: "/src" }] });
+
+  await section.getByRole("button", { name: "「/src」の仕上げを直す" }).click();
+  await page.getByLabel("手順").fill("1. マージする");
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(section).toContainText("1. マージする");
+  await section.getByRole("button", { name: "「/src」の仕上げを消す" }).click();
+  await agree(page, "消す");
+  await expect(section).toContainText("まだない");
+  await settle(request, false);
+});

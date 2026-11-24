@@ -144,3 +144,6 @@
 .vault-wide { width: 100%; }
 .vault-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: var(--s3); align-items: end; }
 .vault-add .btn { justify-self: start; }
+
+/* Long steps, as they are written. */
+.finish-steps { white-space: pre-line; overflow-wrap: anywhere; }

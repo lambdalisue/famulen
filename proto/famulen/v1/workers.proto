@@ -9,8 +9,11 @@ import "famulen/v1/records.proto";
 message DelegateTaskRequest {
   string title = 1;
   // The whole request, as Markdown: the goal, what is already known, what to
-  // leave alone, how to check the work, and for code whether to commit or
-  // push. The worker knows nothing but this.
+  // leave alone, and how to check the work. The worker knows nothing but this
+  // and, for code, the owner's standing steps to finish it (a review, a pull
+  // request, a merge and the like; get_worker_settings), which are added by
+  // themselves: do not write how to finish, unless the owner asked otherwise
+  // for this work, and then say that they did.
   string request = 2;
   // adroit: a session in the owner's Adroit, for code and for anything the
   // owner may want to watch or steer. Its start is asked of the owner.
@@ -110,11 +113,22 @@ message ListDelegatedResponse {
   repeated WorkerRun ended = 2;
 }
 
+// How the owner wants delegated work on code finished.
+message WorkerFinish {
+  // Work in this directory or below it, as an absolute path; any when empty.
+  // The closest around the work is the one that counts.
+  string directory = 1;
+  // As Markdown.
+  string steps = 2;
+}
+
 message WorkerSettings {
   // How many tasks run at once.
   int32 slots = 1;
   // No task is started while set; those running go on.
   bool paused = 2;
+  // Handed to every Adroit session that may change code.
+  repeated WorkerFinish finishes = 3;
 }
 
 // Delegated tasks: work put on the task list that a pool of workers picks up.
