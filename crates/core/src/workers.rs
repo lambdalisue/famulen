@@ -12,6 +12,7 @@ mod pool;
 mod queue;
 mod runners;
 mod runs;
+mod sight;
 
 pub use dispatch::*;
 pub use finish::*;
@@ -20,6 +21,7 @@ pub use pool::{Pool, run};
 pub use queue::*;
 pub use runners::{Began, Looked, Runners};
 pub use runs::*;
+pub use sight::*;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -82,6 +84,7 @@ impl Settings {
 #[derive(Clone)]
 pub struct Workers {
     pub runs: Runs,
+    pub sights: Sights,
     /// Where an agent works, one directory for each run.
     pub(crate) dir: PathBuf,
     /// Where no agent's tool may reach, on top of what is sealed for the
@@ -96,6 +99,7 @@ impl Workers {
     pub fn new(store: Store, dir: PathBuf, sealed: Vec<PathBuf>) -> Self {
         Self {
             runs: Runs::new(store),
+            sights: Sights::default(),
             dir,
             sealed,
             poke: Arc::default(),

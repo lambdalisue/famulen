@@ -1425,6 +1425,23 @@ async fn an_agent_uses_only_what_it_was_handed_and_asks_nobody() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn what_an_agent_writes_can_be_watched_and_stays_after_its_end() {
+    let script = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"読む。"}]}}'
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"}]}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"済んだ"}'
+"#;
+    let (app, _dir, _id) = run_agent("pool-agent-watched", script, &[("Runner", "agent")]).await;
+    let (run, sight, why) = crate::workers::watch(&app, 1).await.unwrap();
+    assert_eq!((run.state, why.as_str()), (State::Ended, ""));
+    let texts: Vec<_> = sight.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!((texts, sight.done()), (vec!["読む。"], Some(1.0)));
+    assert!(crate::workers::watch(&app, 2).await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn cancelling_ends_an_agent_with_every_process_it_started() {
     let dir = TempDir::new("pool-agent-group");
     let script = format!(

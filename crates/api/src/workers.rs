@@ -5,7 +5,8 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Finish, Order, Outcome, Run, Runner, Settings, Standing, State, WORKER, is_delegated,
+    self, Finish, Order, Outcome, Run, Runner, Settings, Sight, Standing, State, WORKER,
+    is_delegated,
 };
 use famulen_core::workgroups::ALL;
 
@@ -40,6 +41,27 @@ fn run(r: Run) -> WorkerRun {
         started_at: r.started_at.unwrap_or_default(),
         ended_at: r.ended_at.unwrap_or_default(),
         ..Default::default()
+    }
+}
+
+/// A run with what can be seen of it.
+fn seen(r: Run, sight: &Sight) -> WorkerRun {
+    WorkerRun {
+        steps: sight
+            .steps
+            .iter()
+            .map(|s| WorkerStep {
+                id: s.id.clone(),
+                parent: s.parent.clone(),
+                title: s.title.clone(),
+                status: s.status.clone(),
+                note: s.note.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        percent: (sight.done().unwrap_or_default() * 100.0) as i32,
+        doing: sight.doing(),
+        ..run(r)
     }
 }
 
@@ -191,7 +213,13 @@ impl WorkerService for Api {
                     runner,
                     state: state.into(),
                     why,
-                    run: q.run.map(run).into(),
+                    run: q
+                        .run
+                        .map(|r| {
+                            let sight = self.app.workers.sights.of(r.id);
+                            seen(r, &sight)
+                        })
+                        .into(),
                     ..Default::default()
                 }
             })
@@ -212,6 +240,30 @@ impl WorkerService for Api {
         Response::ok(ListDelegatedResponse {
             queue,
             ended,
+            ..Default::default()
+        })
+    }
+
+    async fn read_run(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ReadRunRequest>,
+    ) -> ServiceResult<RunOutput> {
+        let (run, sight, why) = workers::watch(&self.app, request.id).await.or_fail()?;
+        Response::ok(RunOutput {
+            run: Some(seen(run, &sight)).into(),
+            lines: sight
+                .lines
+                .into_iter()
+                .map(|l| WorkerLine {
+                    id: l.id,
+                    at: l.at,
+                    kind: l.kind.as_str().into(),
+                    text: l.text,
+                    ..Default::default()
+                })
+                .collect(),
+            why,
             ..Default::default()
         })
     }
