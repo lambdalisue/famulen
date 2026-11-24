@@ -66,6 +66,9 @@ pub struct Gateway {
     /// The answers that finished a login, with the connection each logged
     /// in. Held while one is being finished, so two of the same wait.
     finished: Arc<Mutex<HashMap<String, String>>>,
+    /// Held, by connection, while a token is traded for, so no value is
+    /// handed over twice.
+    exchanging: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// The keys issuers publish, with when they were fetched.
     jwks: Arc<std::sync::RwLock<HashMap<String, (i64, jsonwebtoken::jwk::JwkSet)>>>,
     /// Told of every ticket as it is held.
@@ -105,6 +108,7 @@ impl Gateway {
             running: Default::default(),
             openapi: Arc::default(),
             finished: Arc::default(),
+            exchanging: Arc::default(),
             presence: Arc::new(crate::presence::now),
             endpoints: Default::default(),
             jwks: Arc::default(),

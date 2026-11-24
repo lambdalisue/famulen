@@ -8,6 +8,7 @@ setup = "README.md"
 
 [account]
 display = "{account.team_name}"
+config_refresh = { label = "アプリの設定用トークンの Refresh Token（xoxe-）", optional = true, secret = true }
 
 [app]
 id = "slack"
@@ -22,6 +23,12 @@ query = { scope = "app_mentions:read,channels:history,chat:write,chat:write.cust
 tokens = { bot = "{/access_token}", user = "{/authed_user/access_token}" }
 values = { team = "{/team/id}", team_name = "{/team/name}", user = "{/authed_user/id}", bot_user = "{/bot_user_id}", app = "{/app_id}" }
 same = ["team"]
+
+[login.exchange.config]
+post = "https://slack.com/api/tooling.tokens.rotate"
+form = { refresh_token = "{account.config_refresh}" }
+token = "{/token}"
+renews = { config_refresh = "{/refresh_token}" }
 
 [transport]
 http = { base = "https://slack.com/api", auth = "bot" }
@@ -69,6 +76,17 @@ method = "POST"
 path = "/reactions.add"
 body = { channel = "{args.channel}", timestamp = "{args.ts}", name = "{args.name}" }
 input = { type = "object", properties = { channel = { type = "string" }, ts = { type = "string" }, name = { type = "string" } }, required = ["channel", "ts", "name"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "set_app_icon"
+description = "Set the app's own icon, the one in the sidebar and the lists, to the public image at `icon`."
+method = "POST"
+path = "/apps.icon.set"
+body = { app_id = "{account.app}", url = "{args.icon}" }
+input = { type = "object", properties = { icon = { type = "string" } }, required = ["icon"] }
+auth = "config"
+open_world = true
 ok = "{/ok}"
 
 [[tools]]
@@ -120,6 +138,7 @@ token = "{app.app_token}"
 account = { team = ["{/payload/team_id}", "{/payload/team/id}"] }
 
 [permissions]
+set_app_icon = "confirm"
 post_message = "allow"
 update_message = "allow"
 open_dm = "allow"

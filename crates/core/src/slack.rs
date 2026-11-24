@@ -2,6 +2,7 @@
 //! Slack's events and hands them over untouched; reading them and posting
 //! through the Slack connection's tools lives here.
 
+pub mod app_icon;
 pub mod attention;
 pub mod clients;
 pub mod events;

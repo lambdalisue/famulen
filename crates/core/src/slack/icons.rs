@@ -9,7 +9,7 @@ use crate::store::Store;
 /// Where Slack fetches the brand's icons from: the public repository.
 const BRAND: &str = "https://raw.githubusercontent.com/lambdalisue/famulen/main/brand";
 
-fn url(gender: Gender) -> String {
+pub(super) fn url(gender: Gender) -> String {
     format!("{BRAND}/{}/avatar-512.png", gender.as_str())
 }
 
