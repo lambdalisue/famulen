@@ -52,6 +52,17 @@ message DelegateTaskRequest {
   repeated string files = 17;
 }
 
+// One step of the plan a worker keeps.
+message WorkerStep {
+  string id = 1;
+  // The step it is part of, or empty.
+  string parent = 2;
+  string title = 3;
+  // pending, in_progress, completed or blocked.
+  string status = 4;
+  string note = 5;
+}
+
 // One run of a delegated task.
 message WorkerRun {
   int64 id = 1;
@@ -78,6 +89,35 @@ message WorkerRun {
   int64 created_at = 12;
   int64 started_at = 13;
   int64 ended_at = 14;
+  // Its plan, when it keeps one, while it goes on. The worker's words.
+  repeated WorkerStep steps = 15;
+  // How much of its plan is done, of 100.
+  int32 percent = 16;
+  // What it does now, in the worker's words.
+  string doing = 17;
+}
+
+message ReadRunRequest {
+  int64 id = 1;
+}
+
+// Something a worker was asked, wrote or called.
+message WorkerLine {
+  // Unix milliseconds.
+  int64 at = 1;
+  // asked, said, called (a tool) or answered (by a tool).
+  string kind = 2;
+  string text = 3;
+  // Tells it from the other lines of its run.
+  uint64 id = 4;
+}
+
+message RunOutput {
+  WorkerRun run = 1;
+  // Oldest first. Of an Adroit session what it wrote, not what it called.
+  repeated WorkerLine lines = 2;
+  // Why it could not be read anew.
+  string why = 3;
 }
 
 // A delegated task that is not over.
@@ -139,6 +179,11 @@ service WorkerService {
   // How the delegated tasks and their runs stand.
   rpc ListDelegated(ListDelegatedRequest) returns (ListDelegatedResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // A run with what can be seen of it while it goes on, and after.
+  rpc ReadRun(ReadRunRequest) returns (RunOutput) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
   }
   // Put a delegated task back in the queue, by its code or id: one that
   // failed, was not approved, or fell short of its request. Change its notes

@@ -1,10 +1,11 @@
 //! The queue as it stands: the delegated tasks with their runs.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use super::{Asked, Candidate, Limits, Order, Placed, Run, Settings, State, plan};
+use super::{Asked, Candidate, Limits, Order, Placed, Run, Settings, Sight, State, plan};
 use crate::app::App;
 use crate::models::{CapUnit, Role};
 pub use crate::records::is_delegated;
@@ -123,6 +124,33 @@ pub fn limits(app: &App, now: DateTime<Utc>) -> anyhow::Result<Limits> {
         paused: settings.paused,
         agents_left,
     })
+}
+
+/// How often a session is read while it is watched, and once its run ended.
+const WATCH_EVERY: Duration = Duration::from_secs(4);
+const WATCH_ENDED_EVERY: Duration = Duration::from_secs(30);
+
+/// A run with what can be seen of it, read anew; and why it could not be.
+pub async fn watch(app: &App, id: i64) -> anyhow::Result<(Run, Sight, String)> {
+    let run = app
+        .workers
+        .runs
+        .get(id)?
+        .ok_or_else(|| anyhow::anyhow!("no run #{id}"))?;
+    let every = if run.state == State::Ended {
+        WATCH_ENDED_EVERY
+    } else {
+        WATCH_EVERY
+    };
+    let mut why = String::new();
+    if !run.session.is_empty()
+        && app.workers.sights.due(id, every)
+        && let Err(error) = super::adroit::watch(app, &run).await
+    {
+        why = format!("{error:#}");
+    }
+    let sight = app.workers.sights.of(id);
+    Ok((run, sight, why))
 }
 
 /// The delegated tasks that are not over, in the order they start.

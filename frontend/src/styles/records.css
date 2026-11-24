@@ -71,6 +71,29 @@
 .delegated-summary:hover { background: var(--panel); }
 .delegated-number { flex: none; width: 1.6em; text-align: right; color: var(--muted); font-size: var(--t-sm); }
 
+/* One run of a delegated task. */
+.run-progress { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s2); min-width: 0; font-size: var(--t-sm); }
+.run-bar { flex: none; width: 96px; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; }
+.run-bar > span { display: block; height: 100%; background: var(--accent); }
+.run-doing { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
+.run-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.run-step { display: flex; align-items: flex-start; gap: 8px; font-size: var(--t-base); color: var(--muted); }
+.run-step .icon { flex: none; margin-top: 3px; }
+.run-step.completed { color: var(--ink); }
+.run-step.in_progress { color: var(--ink); font-weight: 700; }
+.run-step.blocked { color: var(--danger); }
+.run-step-text { min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.run-step-text .sub { font-weight: 400; }
+.run-page { display: flex; flex-direction: column; gap: var(--s4); flex: 1; min-height: 0; }
+.run-about { display: flex; flex-wrap: wrap; gap: 2px var(--s3); overflow-wrap: anywhere; }
+.run-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: var(--s4); }
+.run-plan { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; overflow-y: auto; }
+.run-output { min-height: 0; display: flex; }
+.run-lines { flex: 1; min-width: 0; margin: 0; padding: 14px 18px; list-style: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); }
+.run-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
+.run-line.called code { font: 12px/1.7 var(--mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-line-at { color: var(--muted); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+
 /* One record. */
 .rec { display: flex; flex-direction: column; gap: var(--s4); padding: 18px 24px 32px; min-width: 0; }
 .event + .rec { border-top: 8px solid var(--bg); }

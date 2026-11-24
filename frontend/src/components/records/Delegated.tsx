@@ -6,6 +6,7 @@ import {
   EmptyState,
   Icon,
   IconButton,
+  LinkButton,
   List,
   ListRow,
   Loading,
@@ -27,6 +28,7 @@ import {
   isBad,
   isBadOutcome,
   outcomeText,
+  runHref,
   runnerText,
   stageOf,
   STAGES,
@@ -35,6 +37,7 @@ import {
 } from "~/lib/workers";
 import { workgroup } from "~/lib/workgroup";
 import RecordsFrame from "./RecordsFrame";
+import { ProgressLine, RunSteps } from "./RunProgress";
 
 const retry = (id: string) => act(() => api.workers.retryDelegated({ id }), "並びに戻した");
 const cancel = (id: string, title: string) =>
@@ -46,6 +49,17 @@ const cancel = (id: string, title: string) =>
   );
 
 const placeOf = (queue: DelegatedTask[] | undefined, task: string) => (queue ?? []).findIndex((t) => t.task === task) + 1;
+
+/** Whether a task has a run under way that can be watched. */
+const isSeen = (t: DelegatedTask) => !!t.run && ["running", "waiting", "unreachable"].includes(t.state);
+
+function Watch(props: { run: WorkerRun; title: string }) {
+  return (
+    <LinkButton small href={runHref(props.run)} label={`「${props.title}」の出力を見る`}>
+      出力
+    </LinkButton>
+  );
+}
 
 function Standing(props: { of: DelegatedTask }) {
   const tone = () =>
@@ -74,10 +88,16 @@ function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; nu
           <Show when={t().why}>
             <span>{t().why}</span>
           </Show>
+          <Show when={isSeen(t())}>
+            <ProgressLine run={t().run!} />
+          </Show>
         </>
       }
       end={
         <>
+          <Show when={isSeen(t())}>
+            <Watch run={t().run!} title={t().title} />
+          </Show>
           <Show when={t().state === "still"}>
             <Button small onClick={() => void retry(t().task)}>
               並びに戻す
@@ -223,6 +243,9 @@ export function RunResult(props: { run: WorkerRun; href?: string }) {
           <Show when={r().endedAt}>
             <span>{shortTime(r().endedAt, owner.tz())}</span>
           </Show>
+          <a href={runHref(r())} aria-label={`「${r().title}」#${String(r().id)} の出力を見る`}>
+            出力
+          </a>
         </div>
       </div>
       <Show when={r().result}>
@@ -256,6 +279,7 @@ export function Delegation(props: { task: Rec }) {
                 並びに戻す
               </Button>
             </Show>
+            <Show when={now()?.run && isSeen(now()!) ? now()!.run : undefined}>{(r) => <Watch run={r()} title={props.task.title} />}</Show>
             <Show when={now()}>
               <Button small onClick={() => void cancel(props.task.id, props.task.title)}>
                 委託をやめる
@@ -278,6 +302,16 @@ export function Delegation(props: { task: Rec }) {
                 <span class="sub">セッション {t().run?.session}</span>
               </Show>
             </div>
+          )}
+        </Show>
+        <Show when={now()?.run && isSeen(now()!) ? now()!.run : undefined}>
+          {(r) => (
+            <>
+              <ProgressLine run={r()} />
+              <Show when={r().steps.length > 0}>
+                <RunSteps run={r()} />
+              </Show>
+            </>
           )}
         </Show>
         <Show when={last()}>

@@ -133,3 +133,21 @@ test("how work on code is finished is written, rewritten and removed", async ({ 
   await expect(section).toContainText("まだない");
   await settle(request, false);
 });
+
+test("how far a delegated task got and what its worker writes are seen as it goes on", async ({ page, request }) => {
+  await settle(request, false);
+  const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title: "長く調べる", request: "e2e-plan", runner: "agent" });
+  await visit(page, `/tasks?tab=delegated&id=${t.id}`, /タスク/);
+  await expect(detail(page).getByRole("list", { name: "予定" })).toContainText("書く");
+  await expect(queued(page, "長く調べる").getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+  await detail(page).getByRole("link", { name: "「長く調べる」の出力を見る" }).click();
+  await expectView(page, "タスク · 委託 · 長く調べる");
+  const output = page.getByRole("region", { name: "出力" });
+  await expect(output).toContainText("まず読む");
+  const first = await output.getByRole("listitem").first().elementHandle();
+  // It goes on without the page being opened again.
+  await expect(output).toContainText("書き終えた", { timeout: 15_000 });
+  await expect(page.locator(".run-page .tag")).toHaveText("済んだ", { timeout: 15_000 });
+  // What was on screen stays as it was, open or folded.
+  expect(await first?.evaluate((e) => e.isConnected)).toBe(true);
+});

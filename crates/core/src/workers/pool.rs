@@ -27,7 +27,7 @@ const TICK: Duration = Duration::from_secs(15);
 /// How long it waits for more to be told of before it looks.
 const SETTLE: Duration = Duration::from_millis(200);
 /// How often a session in Adroit is looked at when nothing is told of it.
-const LOOK_EVERY: Duration = Duration::from_secs(60);
+const LOOK_EVERY: Duration = Duration::from_secs(20);
 /// How often a start is tried before it is given up.
 const MOST_TRIES: u32 = 3;
 /// How often a run cut off by a restart is made.
@@ -168,7 +168,7 @@ impl Pool {
                 tell(&run, result);
             }
         }
-        if changed {
+        if self.app.workers.sights.take_changed() || changed {
             self.app.console.notify(Event::Records);
         }
         Ok(())

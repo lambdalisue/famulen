@@ -74,3 +74,6 @@ export { default as link } from "@tabler/icons/outline/link.svg?raw";
 export { default as tag } from "@tabler/icons/outline/tag.svg?raw";
 export { default as hourglass } from "@tabler/icons/outline/hourglass.svg?raw";
 export { default as userCheck } from "@tabler/icons/outline/user-check.svg?raw";
+export { default as circle } from "@tabler/icons/outline/circle.svg?raw";
+export { default as circleCheck } from "@tabler/icons/outline/circle-check.svg?raw";
+export { default as progress } from "@tabler/icons/outline/progress.svg?raw";
