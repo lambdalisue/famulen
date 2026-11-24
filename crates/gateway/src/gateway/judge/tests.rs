@@ -253,6 +253,22 @@ fn held_tickets_are_told_to_subscribers() {
 }
 
 #[test]
+fn a_ticket_keeps_what_its_call_was_made_for() {
+    let g = gateway();
+    let made_for = Call {
+        origin: Some("7".into()),
+        ..call("send_message")
+    };
+    let Verdict::Hold(ticket) = g.judge(&made_for).unwrap() else {
+        panic!("should be held");
+    };
+    assert_eq!(ticket.origin.as_deref(), Some("7"));
+    assert_eq!(g.ticket(ticket.id).unwrap(), Some(ticket));
+    g.judge(&call("send_message")).unwrap();
+    assert_eq!(g.held_tickets().unwrap()[1].origin, None);
+}
+
+#[test]
 fn a_ticket_that_waited_too_long_lapses() {
     let g = gateway();
     let Verdict::Hold(ticket) = g.judge(&call("send_message")).unwrap() else {

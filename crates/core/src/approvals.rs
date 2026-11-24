@@ -4,6 +4,8 @@
 //! of waiting. When the owner approves, exactly that call is granted once and
 //! the session is told it may make it again.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -12,9 +14,12 @@ use famulen_gateway::{Question, Ticket};
 use crate::asking;
 use crate::input::{Input, Sender, Source};
 use crate::permissions::Permissions;
+use crate::slack::clients::SlackClients;
 use crate::slack::events::Action;
 use crate::slack::web::{Outgoing, Slack};
 use crate::store::{Store, now};
+
+mod exposure;
 
 const ACTION_PREFIX: &str = "famulen.approval.";
 /// Slack rejects a section longer than 3000 characters.
@@ -49,6 +54,15 @@ impl Answer {
     /// The answer a console button names: `approve`, `reject` or `always`.
     pub fn from_name(name: &str) -> Option<Self> {
         Self::from_action_id(&format!("{ACTION_PREFIX}{name}"))
+    }
+
+    /// What the owner reads of it once given.
+    fn note(self) -> &'static str {
+        match self {
+            Answer::Approve => "承認しました",
+            Answer::Reject => "却下しました",
+            Answer::AlwaysAllow => "承認し、今後は常に許可にしました",
+        }
     }
 
     fn status(self) -> &'static str {
@@ -119,30 +133,27 @@ fn ticket_tool(ticket: &Ticket) -> String {
 }
 
 pub struct Approvals<S> {
-    slack: Option<S>,
+    slack: Option<SlackClients<S>>,
     console: Option<crate::console_log::ConsoleLog>,
     store: Store,
     permissions: Permissions,
-    /// The workspace approvals are asked in, and the owner's ID there.
-    workspace: String,
-    owner: String,
+    /// The owner's ID in each workspace.
+    owners: BTreeMap<String, String>,
 }
 
 impl<S: Slack> Approvals<S> {
     pub fn new(
-        slack: Option<S>,
+        slack: Option<SlackClients<S>>,
         store: Store,
         permissions: Permissions,
-        workspace: impl Into<String>,
-        owner: impl Into<String>,
+        owners: BTreeMap<String, String>,
     ) -> Self {
         Self {
             slack,
             console: None,
             store,
             permissions,
-            workspace: workspace.into(),
-            owner: owner.into(),
+            owners,
         }
     }
 
@@ -158,8 +169,8 @@ impl<S: Slack> Approvals<S> {
         }
     }
 
-    /// Put a ticket the gateway held to the owner: on the console, and in
-    /// their DM when Slack is connected. A ticket already put is left alone.
+    /// Put a ticket the gateway held to the owner: on the console, and on
+    /// Slack when it is connected. A ticket already put is left alone.
     pub async fn present(&self, ticket: &Ticket) -> anyhow::Result<()> {
         let (id, tool, input) = (ticket.id, ticket_tool(ticket), &ticket.shown);
         let added = self.store.conn().execute(
@@ -171,17 +182,144 @@ impl<S: Slack> Approvals<S> {
             return Ok(());
         }
         self.tell_console();
-        if let Some(slack) = &self.slack {
-            let channel = slack.open_dm(&self.owner).await?;
-            let ts = slack
-                .post(&channel, self.ask_message(id, &tool, input))
-                .await?;
-            self.store.conn().execute(
-                "UPDATE approvals SET channel = ?1, ts = ?2 WHERE id = ?3",
-                params![channel, ts, id],
-            )?;
+        let Some(slack) = &self.slack else {
+            return Ok(());
+        };
+        let message = self.ask_message(id, &tool, input);
+        match self.ask_in_conversation(ticket, &message).await {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%error, id, "could not ask in the conversation; asking in the DM");
+                self.store
+                    .conn()
+                    .execute("DELETE FROM approval_places WHERE approval = ?1", [id])?;
+            }
         }
+        let channel = slack.main().open_dm(self.owner(slack.main_id())).await?;
+        let ts = slack.main().post(&channel, message).await?;
+        self.posted(id, &channel, &ts)
+    }
+
+    fn owner(&self, workspace: &str) -> &str {
+        self.owners.get(workspace).map_or("", String::as_str)
+    }
+
+    fn posted(&self, id: i64, channel: &str, ts: &str) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "UPDATE approvals SET channel = ?1, ts = ?2 WHERE id = ?3",
+            params![channel, ts, id],
+        )?;
         Ok(())
+    }
+
+    /// Ask in the thread of the Slack conversation the call was made in.
+    /// False when it was not made in one, or may not be asked there.
+    async fn ask_in_conversation(
+        &self,
+        ticket: &Ticket,
+        message: &Outgoing,
+    ) -> anyhow::Result<bool> {
+        let Some(place) = self.conversation_of(ticket)? else {
+            return Ok(false);
+        };
+        let Some(slack) = self
+            .slack
+            .as_ref()
+            .and_then(|s| s.get(Some(&place.workspace)).ok())
+        else {
+            return Ok(false);
+        };
+        let owner = self.owner(&place.workspace);
+        if owner.is_empty() {
+            return Ok(false);
+        }
+        let in_dm = slack.open_dm(owner).await? == place.channel;
+        if !in_dm && exposure::kept_to_dm(ticket) {
+            return Ok(false);
+        }
+        // Before the post, so that no press can come before it is known.
+        self.store.conn().execute(
+            "INSERT INTO approval_places (approval, workspace, channel, thread)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![ticket.id, place.workspace, place.channel, place.thread],
+        )?;
+        let message = Outgoing {
+            thread_ts: Some(place.thread),
+            ..message.clone()
+        };
+        if in_dm {
+            let ts = slack.post(&place.channel, message).await?;
+            self.posted(ticket.id, &place.channel, &ts)?;
+        } else {
+            slack.post_ephemeral(&place.channel, owner, message).await?;
+        }
+        Ok(true)
+    }
+
+    /// The Slack thread the owner was talking in when the call was made. One
+    /// made after the owner's answer to a request belongs where that did.
+    /// What others said does not count: the owner may not be looking there.
+    fn conversation_of(&self, ticket: &Ticket) -> anyhow::Result<Option<Place>> {
+        let mut origin = match ticket.actor.as_str() {
+            crate::permissions::SECRETARY => ticket.origin.clone(),
+            _ => None,
+        };
+        while let Some(input) = match origin.take() {
+            Some(origin) => self.store.input_of_origin(&origin)?,
+            None => None,
+        } {
+            match input.source {
+                Source::Slack {
+                    workspace,
+                    channel,
+                    ts,
+                    thread_ts,
+                    ..
+                } if input.sender == Sender::Owner => {
+                    return Ok(Some(Place {
+                        workspace,
+                        channel,
+                        thread: thread_ts.unwrap_or(ts),
+                    }));
+                }
+                Source::Approval { id, .. } => {
+                    origin = self
+                        .permissions
+                        .gateway()
+                        .ticket(id)?
+                        .and_then(|before| before.origin);
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
+    /// The owner's ID where a request was asked; empty without Slack.
+    fn owner_asked(&self, id: i64) -> anyhow::Result<&str> {
+        let place = place_of(&self.store, id)?;
+        let workspace = match (&place, &self.slack) {
+            (Some(place), _) => place.workspace.as_str(),
+            (None, Some(slack)) => slack.main_id(),
+            (None, None) => return Ok(""),
+        };
+        Ok(self.owner(workspace))
+    }
+
+    /// Whether a press is the owner's, in a workspace the request it is about
+    /// was asked in.
+    fn pressed_by_owner(&self, action: &Action, id: i64) -> anyhow::Result<bool> {
+        let Some(slack) = &self.slack else {
+            return Ok(false);
+        };
+        let asked_in = match place_of(&self.store, id)? {
+            Some(place) => place.workspace,
+            None => slack.main_id().to_owned(),
+        };
+        Ok(action.workspace == asked_in
+            && !action.user.is_empty()
+            && action.user == self.owner(&asked_in))
     }
 
     /// The message that asks for an answer to a request.
@@ -205,12 +343,12 @@ impl<S: Slack> Approvals<S> {
     /// outcome, or `None` when the press is not the owner's or the request
     /// was already answered.
     pub async fn answer(&self, action: &Action) -> anyhow::Result<Option<Input>> {
-        if action.workspace != self.workspace || action.user != self.owner {
-            return Ok(None);
-        }
         let Ok(id) = action.value.parse::<i64>() else {
             return Ok(None);
         };
+        if !self.pressed_by_owner(action, id)? {
+            return Ok(None);
+        }
         if action.action_id.starts_with(asking::PREFIX) {
             let Some(ticket) = self.permissions.gateway().ticket(id)? else {
                 return Ok(None);
@@ -271,17 +409,32 @@ impl<S: Slack> Approvals<S> {
             return Ok(None);
         };
         self.tell_console();
-        if let (Some(slack), Some(channel), Some(ts)) = (&self.slack, channel, ts) {
-            let failed = match &answered.ran {
-                Some(Err(error)) => Some(format!("届けられませんでした: {error:#}")),
-                _ => None,
-            };
-            let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
-            let message = match note {
-                Some(note) => noted_message(id, &tool, &input, &note),
-                None => request_message(id, &tool, &input, Some(answer), false),
-            };
-            slack.update(&channel, &ts, message).await?;
+        if let Some(clients) = &self.slack {
+            let place = place_of(&self.store, id)?;
+            let workspace = place.as_ref().map(|p| p.workspace.as_str());
+            match (clients.get(workspace), channel, ts, &place) {
+                (Ok(slack), Some(channel), Some(ts), _) => {
+                    let failed = match &answered.ran {
+                        Some(Err(error)) => Some(format!("届けられませんでした: {error:#}")),
+                        _ => None,
+                    };
+                    let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
+                    let message = match note {
+                        Some(note) => noted_message(id, &tool, &input, &note),
+                        None => request_message(id, &tool, &input, Some(answer), false),
+                    };
+                    slack.update(&channel, &ts, message).await?;
+                }
+                // What only the owner saw cannot be changed, so they are told.
+                (Ok(slack), _, _, Some(place)) => {
+                    let message = place.said(format!("確認 #{id}: {}", answer.note()));
+                    let owner = self.owner(&place.workspace);
+                    if let Err(error) = slack.post_ephemeral(&place.channel, owner, message).await {
+                        tracing::warn!(%error, id, "could not show the answer in the conversation");
+                    }
+                }
+                _ => {}
+            }
         }
         // A worker's call is made by the pool, which sees the answer itself.
         if answered.ticket.actor == crate::permissions::WORKER {
@@ -308,7 +461,7 @@ impl<S: Slack> Approvals<S> {
             sender: Sender::Owner,
             source: Source::Approval {
                 id,
-                user: self.owner.clone(),
+                user: self.owner_asked(id)?.to_owned(),
             },
             text,
         }))
@@ -345,7 +498,11 @@ impl<S: Slack> Approvals<S> {
 
 /// Take back a request that is asked no more: it leaves the console, and its
 /// message on Slack loses its buttons.
-pub async fn withdraw<S: Slack>(store: &Store, slack: Option<&S>, id: i64) -> anyhow::Result<()> {
+pub async fn withdraw<S: Slack>(
+    store: &Store,
+    slack: Option<&SlackClients<S>>,
+    id: i64,
+) -> anyhow::Result<()> {
     let row: Option<(String, Option<String>, Option<String>)> = {
         let conn = store.conn();
         let changed = conn.execute(
@@ -362,6 +519,9 @@ pub async fn withdraw<S: Slack>(store: &Store, slack: Option<&S>, id: i64) -> an
         )
         .optional()?
     };
+    let place = place_of(store, id)?;
+    let workspace = place.as_ref().map(|p| p.workspace.as_str());
+    let slack = slack.and_then(|s| s.get(workspace).ok());
     if let (Some(slack), Some((tool, Some(channel), Some(ts)))) = (slack, row) {
         let text = format!("*確認 #{id}* `{tool}` は、もう要らなくなったので取り下げました");
         let blocks = json!([section(&text)]);
@@ -378,6 +538,41 @@ pub async fn withdraw<S: Slack>(store: &Store, slack: Option<&S>, id: i64) -> an
             .await?;
     }
     Ok(())
+}
+
+/// A thread on Slack a request was asked in.
+struct Place {
+    workspace: String,
+    channel: String,
+    thread: String,
+}
+
+impl Place {
+    fn said(&self, text: String) -> Outgoing {
+        Outgoing {
+            text,
+            thread_ts: Some(self.thread.clone()),
+            ..Default::default()
+        }
+    }
+}
+
+/// Where a request was asked, when not in the main workspace's DM.
+fn place_of(store: &Store, id: i64) -> anyhow::Result<Option<Place>> {
+    Ok(store
+        .conn()
+        .query_row(
+            "SELECT workspace, channel, thread FROM approval_places WHERE approval = ?1",
+            params![id],
+            |row| {
+                Ok(Place {
+                    workspace: row.get(0)?,
+                    channel: row.get(1)?,
+                    thread: row.get(2)?,
+                })
+            },
+        )
+        .optional()?)
 }
 
 /// A request that was just answered, and where its message is.
@@ -497,12 +692,7 @@ fn request_message(
             blocks.push(json!({ "type": "actions", "elements": buttons }));
         }
         Some(answer) => {
-            let note = match answer {
-                Answer::Approve => "承認しました",
-                Answer::Reject => "却下しました",
-                Answer::AlwaysAllow => "承認し、今後は常に許可にしました",
-            };
-            blocks.push(context(note));
+            blocks.push(context(answer.note()));
         }
     }
     Outgoing {
@@ -591,8 +781,13 @@ mod tests {
                 confirm: true,
             }])
             .unwrap();
+        let clients = ["w1", "w2"].map(|w| (w.to_owned(), slack));
+        let clients = SlackClients::new(clients, "w1").unwrap();
+        let owners = [("w1", OWNER), ("w2", "U9")]
+            .map(|(w, o)| (w.to_owned(), o.to_owned()))
+            .into();
         (
-            Approvals::new(Some(slack), store, permissions.clone(), "w1", OWNER),
+            Approvals::new(Some(clients), store, permissions.clone(), owners),
             permissions,
         )
     }
@@ -643,6 +838,189 @@ mod tests {
                 .unwrap()
                 .contains("a@example.com")
         );
+    }
+
+    /// Start the turn of an input, as the session would.
+    fn turn(approvals: &Approvals<&FakeSlack>, sender: Sender, source: Source) {
+        let store = &approvals.store;
+        store.end_turn().unwrap();
+        let input = Input {
+            sender,
+            source,
+            text: "x".into(),
+        };
+        let id = store.enqueue(&input).unwrap().unwrap();
+        assert!(store.start_turn(id, "all").unwrap());
+    }
+
+    fn said_in(workspace: &str, channel: &str, thread_ts: Option<&str>) -> Source {
+        Source::Slack {
+            workspace: workspace.into(),
+            channel: channel.into(),
+            ts: "5.5".into(),
+            thread_ts: thread_ts.map(Into::into),
+            user: OWNER.into(),
+            unmentioned: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_call_made_in_a_channels_thread_is_asked_there_for_the_owner_alone() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w1", "C1", Some("5.0")));
+        let id = request(&approvals, &permissions).await;
+        assert!(slack.posts().is_empty());
+        let asked = slack.ephemerals();
+        assert_eq!(asked.len(), 1);
+        assert_eq!((asked[0].0.as_str(), asked[0].1.as_str()), ("C1", OWNER));
+        assert_eq!(asked[0].2.thread_ts.as_deref(), Some("5.0"));
+        approvals
+            .answer(&press(Answer::Approve, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(slack.updates().is_empty());
+        let told = slack.ephemerals().pop().unwrap();
+        assert!(told.2.text.contains("承認しました"));
+        assert_eq!(told.2.thread_ts.as_deref(), Some("5.0"));
+    }
+
+    #[tokio::test]
+    async fn a_call_made_in_the_dm_is_asked_in_the_thread_of_the_message_and_stays() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w1", "DM-U1", None));
+        request(&approvals, &permissions).await;
+        let posts = slack.posts();
+        assert_eq!(posts[0].0, "DM-U1");
+        assert_eq!(posts[0].1.thread_ts.as_deref(), Some("5.5"));
+        assert!(slack.ephemerals().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_call_made_in_another_workspace_is_asked_and_answered_there_by_its_owner() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w2", "C1", None));
+        let id = request(&approvals, &permissions).await;
+        assert_eq!(slack.ephemerals()[0].1, "U9");
+        let press_in = |workspace: &str, user: &str| Action {
+            workspace: workspace.into(),
+            ..press(Answer::Approve, id, user)
+        };
+        for (workspace, user) in [("w1", "U9"), ("w1", OWNER), ("w2", OWNER), ("w2", "U2")] {
+            let answered = approvals.answer(&press_in(workspace, user)).await.unwrap();
+            assert_eq!(answered, None, "{workspace} {user}");
+        }
+        let told = approvals.answer(&press_in("w2", "U9")).await.unwrap();
+        assert!(matches!(told.unwrap().source, Source::Approval { user, .. } if user == "U9"));
+    }
+
+    #[tokio::test]
+    async fn a_call_not_made_in_a_conversation_with_the_owner_is_asked_in_the_dm() {
+        let others = [
+            (
+                Sender::System,
+                Source::Schedule {
+                    name: "n".into(),
+                    at: "1".into(),
+                },
+            ),
+            (
+                Sender::System,
+                Source::Lookout {
+                    item: 1,
+                    source: "s".into(),
+                },
+            ),
+            (
+                Sender::Owner,
+                Source::Console {
+                    message: 1,
+                    workgroup: "all".into(),
+                    view: "v".into(),
+                    selection: None,
+                },
+            ),
+            (Sender::Other, said_in("w1", "C1", Some("5.0"))),
+        ];
+        for (sender, source) in others {
+            let slack = FakeSlack::default();
+            let (approvals, permissions) = setup(&slack);
+            turn(&approvals, sender, source);
+            request(&approvals, &permissions).await;
+            assert_eq!(slack.posts()[0].0, "DM-U1");
+            assert_eq!(slack.posts()[0].1.thread_ts, None);
+            assert!(slack.ephemerals().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_call_made_after_an_answer_is_asked_where_the_first_was() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w1", "C1", Some("5.0")));
+        let id = request(&approvals, &permissions).await;
+        turn(
+            &approvals,
+            Sender::Owner,
+            Source::Approval {
+                id,
+                user: OWNER.into(),
+            },
+        );
+        request(&approvals, &permissions).await;
+        assert_eq!(slack.ephemerals().len(), 2);
+        assert!(slack.posts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_request_is_asked_where_its_call_was_made_though_another_turn_runs_by_then() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w1", "C1", Some("5.0")));
+        permissions.decide(TOOL, &input()).await.unwrap();
+        turn(
+            &approvals,
+            Sender::System,
+            Source::Wake {
+                id: 1,
+                at: "1".into(),
+            },
+        );
+        approvals.present_held().await.unwrap();
+        assert_eq!(slack.ephemerals()[0].0, "C1");
+    }
+
+    #[tokio::test]
+    async fn a_call_that_may_show_a_secret_is_asked_in_the_dm() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w1", "C1", Some("5.0")));
+        let input = json!({ "to": "a", "body": "password: hunter2" });
+        permissions.decide(TOOL, &input).await.unwrap();
+        approvals.present_held().await.unwrap();
+        assert!(slack.ephemerals().is_empty());
+        assert_eq!(slack.posts()[0].0, "DM-U1");
+    }
+
+    #[tokio::test]
+    async fn what_slack_refuses_to_show_in_the_thread_is_asked_in_the_dm() {
+        let slack = FakeSlack {
+            no_ephemeral: true,
+            ..Default::default()
+        };
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Owner, said_in("w2", "C1", None));
+        let id = request(&approvals, &permissions).await;
+        assert_eq!(slack.posts()[0].0, "DM-U1");
+        approvals
+            .answer(&press(Answer::Reject, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(slack.updates().len(), 1);
     }
 
     #[tokio::test]

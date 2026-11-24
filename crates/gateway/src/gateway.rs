@@ -223,6 +223,24 @@ impl Gateway {
         self.serve(by, server, message).await
     }
 
+    /// [`Self::handle`] for a call made for `origin`, which its ticket keeps.
+    pub async fn handle_from(
+        &self,
+        origin: Option<String>,
+        actor: &str,
+        ask: Option<String>,
+        server: &str,
+        message: &Value,
+    ) -> Option<Value> {
+        let by = Call {
+            actor: actor.to_owned(),
+            ask,
+            origin,
+            ..Call::default()
+        };
+        self.serve(by, server, message).await
+    }
+
     /// [`Self::handle`] for an `actor` who cannot wait for the owner's answer:
     /// a call that would be held is refused instead.
     pub async fn handle_unasked(

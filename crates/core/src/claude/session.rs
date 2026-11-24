@@ -1,6 +1,7 @@
 //! One Claude Code process: inputs go in on stdin, and famulen answers the
 //! permission and MCP requests that come back on stdout.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -168,24 +169,20 @@ pub struct Services<S> {
 }
 
 impl<S: Slack + Clone> Services<S> {
-    /// `owner` is the owner's ID in the main workspace, where approvals are
-    /// also asked when Slack is connected; the console always gets them.
+    /// `owners` are the owner's IDs by workspace: approvals are also asked on
+    /// Slack when it is connected; the console always gets them.
     pub fn new(
         slack: Option<&SlackClients<S>>,
         store: Store,
         permissions: Permissions,
-        owner: impl Into<String>,
+        owners: BTreeMap<String, String>,
         memory_dir: impl Into<PathBuf>,
         tools: Arc<dyn crate::hub::OwnTools>,
         console: Option<crate::console_log::ConsoleLog>,
     ) -> Self {
         let memory_dir = memory_dir.into();
-        let (main, main_id) = match &slack {
-            Some(s) => (Some(s.main().clone()), s.main_id().to_owned()),
-            None => (None, String::new()),
-        };
         let mut approvals =
-            Approvals::new(main, store.clone(), permissions.clone(), main_id, owner);
+            Approvals::new(slack.cloned(), store.clone(), permissions.clone(), owners);
         if let Some(console) = console {
             approvals = approvals.with_console(console);
         }
@@ -454,13 +451,23 @@ fn answer<S: Slack + 'static>(
                         tracing::warn!(%error, %server_name, "could not read the workgroup; asking");
                         Some("the workgroup could not be read".into())
                     });
+                let origin = services.store.call_origin().unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not read what the call is made for");
+                    None
+                });
                 let permissions = services.permissions.clone();
                 tokio::spawn(async move {
                     let _guard = guard;
                     let response = match permissions.refused_launch(&server_name, &message) {
                         Some(refused) => Some(refused),
                         None => gateway
-                            .handle(crate::permissions::SECRETARY, ask, &server_name, &message)
+                            .handle_from(
+                                origin,
+                                crate::permissions::SECRETARY,
+                                ask,
+                                &server_name,
+                                &message,
+                            )
                             .await
                             .map(|r| permissions.without_launchers(&server_name, r)),
                     };

@@ -94,9 +94,8 @@ fn take_back(app: &App, told: Told) -> anyhow::Result<()> {
     let (store, console) = (app.store.clone(), app.console.clone());
     let slack = app.slack.read().unwrap_or_else(|p| p.into_inner()).clone();
     tokio::spawn(async move {
-        let main = slack.as_ref().and_then(|s| s.get(None).ok());
         for id in withdrawn {
-            if let Err(error) = crate::approvals::withdraw(&store, main, id).await {
+            if let Err(error) = crate::approvals::withdraw(&store, slack.as_deref(), id).await {
                 tracing::warn!(%error, id, "could not take back a request");
             }
         }
