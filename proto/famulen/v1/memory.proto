@@ -90,15 +90,13 @@ message WriteFileRequest {
 }
 
 message RememberRequest {
+  reserved 3;
+  reserved "keep_in";
   // Link every record it mentions as [[code]], [[title]] or [[id]], such as
   // [[task-7w1hbn]].
   string text = 1;
   // The owner said it, rather than it being concluded.
   bool said = 2;
-  // A rule or correction the owner gave that should hold at once:
-  // core.md, pending.md or long/<group>/<name>.md. Empty leaves it for the
-  // dream.
-  string keep_in = 3;
   string workgroup = 4;
   // The id of the party it is about, or empty.
   string party = 5;
@@ -130,6 +128,8 @@ message Dream {
   // Memos that became tasks, and records marked as possibly out of date.
   int32 task_made = 12;
   int32 doubted = 13;
+  // Episodic notes nothing was kept of.
+  int32 discarded = 14;
 }
 
 message DreamChange {
@@ -205,8 +205,9 @@ service MemoryService {
   rpc WriteFile(WriteFileRequest) returns (FileContent) {
     option (console_only) = true;
   }
-  // Write down something worth remembering in today's episodic memory. The nightly
-  // dream sorts it; set keep_in only for a rule or correction that must hold now.
+  // Write down a noticing in today's episodic memory: freely, roughly and often.
+  // The nightly dream keeps what is worth it and throws the rest away. What the
+  // owner said is handed to every new conversation until then.
   rpc Remember(RememberRequest) returns (MemoryItem);
   // Save where a piece of work stands, so it survives the conversation.
   rpc SetWorking(SetWorkingRequest) returns (WorkingMemory);

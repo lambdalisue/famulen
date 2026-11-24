@@ -5,11 +5,16 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
-use super::{self as layers, CORE};
+use super::{self as layers, CORE, Src};
+use crate::dreaming::waiting_notes;
+
+/// The most of what the owner said lately a session is handed.
+const MOST_SAID: usize = 50;
 
 /// Core, the long-term index and the work in progress, as handed to a new
 /// session, core cut at `core_lines`. Core items not yet or no longer valid on
-/// `today` are left out.
+/// `today` are left out. What the owner said holds from when it was said, so
+/// what the dream has not placed yet is handed on too.
 pub fn prompt_context(dir: &Path, today: NaiveDate, core_lines: usize) -> String {
     let mut text = String::new();
 
@@ -32,6 +37,26 @@ pub fn prompt_context(dir: &Path, today: NaiveDate, core_lines: usize) -> String
             text,
             "… (cut at {core_lines} lines; read {CORE} for the rest)"
         );
+    }
+
+    let said: Vec<String> = waiting_notes(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, e)| e.src() == Some(Src::Said))
+        .map(|(date, e)| format!("{date} {}", e.render()))
+        .collect();
+    if !said.is_empty() {
+        text.push_str("\nSaid by the owner, waiting for the dream (follow it already):\n\n");
+        if said.len() > MOST_SAID {
+            let _ = writeln!(
+                text,
+                "… (the latest {MOST_SAID}; read {}/ for the earlier)",
+                layers::EPISODIC
+            );
+        }
+        for line in &said[said.len().saturating_sub(MOST_SAID)..] {
+            let _ = writeln!(text, "{line}");
+        }
     }
 
     text.push_str("\nLong-term memory (read a file when its topic comes up):\n\n");
@@ -72,7 +97,9 @@ pub fn prompt_context(dir: &Path, today: NaiveDate, core_lines: usize) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::{WorkingMemory, ensure, write_file, write_working};
+    use crate::memory::{
+        EpisodeState, WorkingMemory, append_episode_from, ensure, write_file, write_working,
+    };
     use crate::notebook::testing::TempDir;
 
     fn today() -> NaiveDate {
@@ -151,6 +178,45 @@ mod tests {
         assert!(!text.contains("ended"));
         assert!(!text.contains("later"));
         assert!(text.contains("- now "));
+    }
+
+    #[test]
+    fn what_the_owner_said_is_handed_on_before_the_dream_places_it() {
+        let tmp = TempDir::new("prompt-said");
+        ensure(tmp.path()).unwrap();
+        let at = today().and_hms_opt(10, 0, 0).unwrap();
+        for (text, state, src) in [
+            ("返事は短く", EpisodeState::Waiting, Src::Said),
+            ("昼は蕎麦らしい", EpisodeState::Waiting, Src::Inferred),
+            ("もう済んだ", EpisodeState::Applied, Src::Said),
+        ] {
+            append_episode_from(tmp.path(), at, text, state, src).unwrap();
+        }
+
+        let text = prompt_context(tmp.path(), today(), 150);
+
+        assert!(text.contains("2026-11-21 - 10:00 返事は短く"), "{text}");
+        assert!(
+            !text.contains("蕎麦") && !text.contains("もう済んだ"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn only_the_latest_of_what_the_owner_said_is_handed_on() {
+        let tmp = TempDir::new("prompt-said-many");
+        ensure(tmp.path()).unwrap();
+        let at = today().and_hms_opt(10, 0, 0).unwrap();
+        for n in 0..=MOST_SAID {
+            let text = format!("決まり{n:03}");
+            append_episode_from(tmp.path(), at, &text, EpisodeState::Waiting, Src::Said).unwrap();
+        }
+
+        let text = prompt_context(tmp.path(), today(), 150);
+
+        assert!(!text.contains("決まり000"));
+        assert!(text.contains("read episodic/ for the earlier"), "{text}");
+        assert!(text.contains("決まり001") && text.contains("決まり050"));
     }
 
     #[test]

@@ -352,9 +352,22 @@ mod tests {
     }
 
     #[test]
+    fn what_is_remembered_is_the_dreams_to_place() {
+        let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
+        let takes = &tool(&tools, "remember").input_schema["properties"];
+        assert!(takes.get("text").is_some());
+        assert!(takes.get("keep_in").is_none(), "{takes}");
+    }
+
+    #[test]
     fn a_field_comment_describes_the_argument() {
         let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
-        let note = &tool(&tools, "remember").input_schema["properties"]["keep_in"]["description"];
-        assert!(note.as_str().unwrap_or_default().contains("core"), "{note}");
+        let note = &tool(&tools, "remember").input_schema["properties"]["text"]["description"];
+        assert!(
+            note.as_str()
+                .unwrap_or_default()
+                .contains("Link every record"),
+            "{note}"
+        );
     }
 }

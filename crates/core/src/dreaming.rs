@@ -67,10 +67,20 @@ const AS_RECORD: [&str; 2] = [TASKS, MEMOS];
 struct Plan {
     #[serde(default)]
     edits: Vec<Edit>,
-    /// The episodic notes the dream dealt with, whether or not they changed
-    /// anything. The others are read again next time.
+    /// The episodic notes the dream kept something of. Those neither here nor
+    /// discarded are read again next time.
     #[serde(default)]
     settled: Vec<String>,
+    #[serde(default)]
+    discarded: Vec<Discard>,
+}
+
+/// An episodic note the dream keeps nothing of.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+struct Discard {
+    id: String,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 pub fn plan_schema() -> Value {
@@ -102,9 +112,20 @@ pub fn plan_schema() -> Value {
                     "required": ["op"]
                 }
             },
-            "settled": { "type": "array", "items": { "type": "string" } }
+            "settled": { "type": "array", "items": { "type": "string" } },
+            "discarded": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "reason": { "type": "string" }
+                    },
+                    "required": ["id", "reason"]
+                }
+            }
         },
-        "required": ["edits", "settled"]
+        "required": ["edits", "settled", "discarded"]
     })
 }
 
@@ -128,10 +149,22 @@ Answer with small edits only:
   a promise to keep, something to ask, check, buy, send, decide or follow up), with a title that says what to do, and start and due (YYYY-MM-DD or YYYY-MM-DD HH:MM) only when they are known. \
   memos: a fact to look up with nothing to do about it (a device, a contract, an account, how something stands). When in doubt whether there is something to do, it is a task, not a memo.
 
+What to keep:
+- Episodic notes are written down roughly and in number; most are not worth keeping. Memory is for what will still matter months from now: \
+  what the owner said of themselves, their wishes and their rules that holds on, what comes up again and again, and certain facts that stay useful for long.
+- Throw away boldly what happened once, what was only a step on the way, what is already in the records (a task, a memo, an event) and what will soon be out of date. When in doubt, throw it away: \
+  what matters comes up again, and you are shown what was lately thrown away. A note that says again what was thrown away counts together with it as notes that back one thing.
+- Do not throw away something still to be done that no record holds, as far as the notes and the talk tell: add it to long/prospective, the one exception to the rule on records below; a later dream makes it a task with to_record. The rules below on the lookout and on who people are say what is kept of those.
+- Before adding, look for an item that says the same or nearly the same: confirm it, or edit it to hold both, and add only what no item covers. \
+  When two items of core or pending overlap, edit one to hold both and forget the other with the reason merged, unless the owner said the other. \
+  Do not merge long-term memories away: the prose under a summary is not shown to you and would be lost.
+- A rule or correction the owner gave (src said) is kept: nothing but you puts it in memory, so being in doubt is no reason to throw it away. Where it changes an item, replace that item, since the owner's newer word on it stands.
+- Core holds only what must be in mind in every conversation; the rest of what is kept goes to long-term memory.
+
 Rules:
 - Records (calendar events, tasks, people's accounts, devices, contracts) are not memory: do not add them, and move any already in memory out with to_record.
 - A procedure is kept only when the owner confirmed it or it worked once; otherwise leave it pending.
-- An item the owner said is never edited away or forgotten unless 3 or more notes contradict it; an inferred item needs 2. \
+- An item the owner said is never edited away or forgotten unless the owner corrected it or 3 or more notes contradict it; an inferred item needs 2. \
   With fewer, add or update a pending judgment instead (need=2 or need=3, ev counting what backs it).
 - A replacement is an add whose attrs name the old id in supersedes, plus a forget of the old item with reason replaced.
 - Keep core within {core_lines} lines; move what is least used out of core first.
@@ -140,7 +173,8 @@ Rules:
   and what the owner said does or does not concern them (\"これは関係ない\"), become or back semantic memories of what they care about and what not to bring them, \
   so the lookout picks up and passes over the same things next time.
 - Who a person is to the owner (their company, role, how to deal with them) is memory: keep it in long/semantic/<name>.md and link their record ([[records/parties/<id>]]) in the prose. Link the other records a memory speaks of the same way ([[records/<kind>/<id>|title]]), and keep the links a note has. Their contact accounts are records.
-- Deal with every episodic note: file it, back an item with it, or decide it needs nothing. List every note id you dealt with in settled; a note left out is shown to you again next night.
+- Deal with every episodic note. List the id of each note you filed or backed an item with in settled, and each you keep nothing of in discarded, \
+  with a short reason in the language of the notes (once only, under way, already a record, soon out of date, already known), which the owner reads. A note in neither is shown to you again next night.
 - Write in the language the notes are written in. Do nothing when nothing needs to change.";
 
 /// The system prompt for a dream that keeps core within `core_lines`.
@@ -193,6 +227,34 @@ pub fn prompt(dir: &Path, usage: &Index) -> anyhow::Result<String> {
                 let _ = writeln!(text, "{}", shown(e));
             }
         }
+    }
+    Ok(text)
+}
+
+/// What the dreams of the last days threw away, newest first.
+fn lately_discarded(store: &Store) -> anyhow::Result<String> {
+    // A weekly dream still sees what the one before it threw away.
+    const DAYS: i64 = 8;
+    const MOST: usize = 300;
+    let since = now() - DAYS * 86_400;
+    let mut text = String::new();
+    let thrown = dreams_before(store, 0, 100)?
+        .into_iter()
+        .take_while(|night| night.at >= since)
+        .flat_map(|night| night.summary.changes)
+        .filter(|change| change.op == memory::Op::Discarded)
+        .take(MOST);
+    for change in thrown {
+        if text.is_empty() {
+            text.push_str(
+                "\nLately thrown away, to tell what comes up again (not to be dealt with):\n\n",
+            );
+        }
+        let day = Path::new(&change.file)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let _ = writeln!(text, "- {} ({day})", change.text);
     }
     Ok(text)
 }
@@ -392,16 +454,117 @@ pub fn waiting_notes(dir: &Path) -> anyhow::Result<Vec<(NaiveDate, Entry)>> {
     Ok(notes)
 }
 
+/// Turn every add of what an item of the same layer and scope already says
+/// into backing that item, so a repeated note does not grow memory. Told in
+/// other words it is the model's to see; an item this plan touches otherwise
+/// is left to the plan.
+fn back_repeats(edits: &mut Vec<Edit>, before: &Snapshot, today: NaiveDate) -> anyhow::Result<()> {
+    let of_op = |confirms: bool| -> BTreeSet<String> {
+        edits
+            .iter()
+            .filter(|e| (e.op == "confirm") == confirms)
+            .filter_map(|e| e.id.clone())
+            .collect()
+    };
+    let mut confirmed = of_op(true);
+    let touched = of_op(false);
+    let mut kept = Vec::new();
+    for edit in std::mem::take(edits) {
+        let Some((id, item)) =
+            repeated(&edit, before, today)?.filter(|(id, _)| !touched.contains(*id))
+        else {
+            kept.push(edit);
+            continue;
+        };
+        let backing = |op: &str, attrs| Edit {
+            op: op.into(),
+            id: Some(id.to_owned()),
+            file: None,
+            text: None,
+            attrs,
+            reason: None,
+            record: None,
+        };
+        let said = memory::Src::Said.as_str();
+        if edit.attrs.get("src").is_some_and(|src| src == said)
+            && item.entry.src() != Some(memory::Src::Said)
+        {
+            let attrs = BTreeMap::from([("src".to_owned(), said.to_owned())]);
+            kept.push(backing("edit", attrs));
+        }
+        if confirmed.insert(id.to_owned()) {
+            kept.push(backing("confirm", BTreeMap::new()));
+        }
+    }
+    *edits = kept;
+    Ok(())
+}
+
+/// The item an add would only say again.
+fn repeated<'a>(
+    edit: &Edit,
+    before: &'a Snapshot,
+    today: NaiveDate,
+) -> anyhow::Result<Option<(&'a str, &'a memory::Located)>> {
+    let later = edit
+        .attrs
+        .get("from")
+        .and_then(|from| from.parse::<NaiveDate>().ok())
+        .is_some_and(|from| from > today);
+    if edit.op != "add"
+        || later
+        || ["supersedes", "to"]
+            .iter()
+            .any(|key| edit.attrs.contains_key(*key))
+    {
+        return Ok(None);
+    }
+    let Some(layer) = edit.file.as_deref().and_then(Layer::of) else {
+        return Ok(None);
+    };
+    let same_layer = |held: Layer| match (layer, held) {
+        (Layer::Long(_), Layer::Long(_)) => true,
+        (layer, held) => layer.is_kept() && layer == held,
+    };
+    let plain = |text: &str| -> String {
+        text.trim()
+            .trim_end_matches(['。', '.'])
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect()
+    };
+    let says = plain(edit.text.as_deref().unwrap_or_default());
+    let mut scope = Entry::new("");
+    for key in ["workgroup", "party"] {
+        if let Some(value) = edit.attrs.get(key).filter(|v| !v.is_empty()) {
+            scope.set(key, value.clone())?;
+        }
+    }
+    Ok(before
+        .entries
+        .iter()
+        .find(|(_, held)| {
+            same_layer(held.layer)
+                && plain(held.entry.text()) == says
+                && held.entry.to().is_none()
+                && held.entry.workgroup() == scope.workgroup()
+                && held.entry.get("party") == scope.get("party")
+        })
+        .map(|(id, held)| (id.as_str(), held)))
+}
+
 /// Mark the notes the dream settled. A note it read but left is tried again,
 /// until it has been left `MAX_TRIES` times; a note written while the model
-/// was thinking was not read, and waits for the next dream.
+/// was thinking was not read, and waits for the next dream. The notes given
+/// up unsettled.
 fn mark_dreamt(
     dir: &Path,
     today: NaiveDate,
     read: &BTreeSet<String>,
     settled: &BTreeSet<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<BTreeSet<String>> {
     const MAX_TRIES: u32 = 3;
+    let mut given_up = BTreeSet::new();
     for date in memory::episodic_dates(dir)? {
         let rel = format!("{}/{date}.md", memory::EPISODIC);
         let mut doc = memory::read_doc(dir, &rel)?;
@@ -421,6 +584,9 @@ fn mark_dreamt(
                     .unwrap_or(0)
                     + 1;
                 if settled.contains(&id) || tries >= MAX_TRIES {
+                    if !settled.contains(&id) {
+                        given_up.insert(id.clone());
+                    }
                     e.set("dreamt", today.format("%Y-%m-%d").to_string())
                 } else {
                     e.set("tries", tries.to_string())
@@ -429,7 +595,7 @@ fn mark_dreamt(
         }
         doc.save(&dir.join(rel))?;
     }
-    Ok(())
+    Ok(given_up)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -522,10 +688,11 @@ where
     Fut: Future<Output = anyhow::Result<Value>>,
 {
     commit_day(dir)?;
-    let read = ids_of(waiting_notes(dir)?);
+    let read = waiting_notes(dir)?;
     let usage = Index::open(records.notebook())?;
     let core_lines = DreamSettings::load(store)?.core_lines;
     let mut prompt = prompt(dir, &usage)?;
+    prompt.push_str(&lately_discarded(store)?);
     prompt.push_str(&talk(store, 1)?);
     let _ = writeln!(prompt, "\nToday is {today}.");
     let mut outcome = match ask(system(core_lines), prompt).await {
@@ -547,7 +714,7 @@ fn commit_day(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ids_of(notes: Vec<(NaiveDate, Entry)>) -> BTreeSet<String> {
+fn ids_of(notes: &[(NaiveDate, Entry)]) -> BTreeSet<String> {
     notes
         .iter()
         .filter_map(|(_, e)| e.id().map(str::to_owned))
@@ -586,12 +753,13 @@ fn apply_answer(
     dir: &Path,
     usage: &Index,
     today: NaiveDate,
-    read: &BTreeSet<String>,
+    read: &[(NaiveDate, Entry)],
     answer: Value,
 ) -> anyhow::Result<Outcome> {
     let mut plan: Plan = serde_json::from_value(answer)?;
     let before = Snapshot::take(dir)?;
     let proposed = plan.edits.len();
+    back_repeats(&mut plan.edits, &before, today)?;
     let (moving, mut skipped) = take_records(records, dir, &mut plan.edits, &before)?;
     skipped.extend(apply(dir, &plan.edits, today)?);
     for reason in &skipped {
@@ -615,13 +783,24 @@ fn apply_answer(
         notebook::revert_to(dir, "HEAD")?;
         return Err(error);
     }
+    // An answer does not say which edit files which note, and nothing else
+    // holds what the owner said: it is not settled by an edit that may have
+    // been the one refused.
+    let said: BTreeSet<&str> = read
+        .iter()
+        .filter(|(_, note)| note.src() == Some(memory::Src::Said))
+        .filter_map(|(_, note)| note.id())
+        .collect();
     let settled: BTreeSet<String> = plan
         .settled
-        .iter()
-        .filter(|id| read.contains(*id))
-        .cloned()
+        .into_iter()
+        .filter(|id| skipped.is_empty() || !said.contains(id.as_str()))
+        .chain(plan.discarded.iter().map(|d| d.id.clone()))
         .collect();
-    mark_dreamt(dir, today, read, &settled)?;
+    let given_up = mark_dreamt(dir, today, &ids_of(read), &settled)?;
+    leave_pending(dir, read, &given_up)?;
+    let after = Snapshot::take(dir)?;
+    let thrown = discards(read, &plan.discarded, &given_up);
     for edit in plan.edits.iter().filter(|e| e.op == "confirm") {
         if let Some(id) = edit
             .id
@@ -632,14 +811,16 @@ fn apply_answer(
         }
     }
     settle_uses(dir, usage)?;
-    let summary = DreamDiff::between(&before, &after).summary();
+    let mut diff = DreamDiff::between(&before, &after);
+    diff.changes.extend(thrown);
+    let summary = diff.summary();
     let c = &summary.counts;
     let message = format!(
         "夢: 足した {} · 直した {} · 置き換えた {} · 忘れた {}",
         c.added, c.edited, c.replaced, c.archived
     );
     let commit = notebook::commit_all(dir, &notebook::famulen(), &message)?;
-    let status = if skipped.is_empty() {
+    let mut status = if skipped.is_empty() {
         format!("見た（変更の案 {proposed} 件）")
     } else {
         format!(
@@ -648,6 +829,9 @@ fn apply_answer(
             skipped.join("; ")
         )
     };
+    if summary.counts.discarded > 0 {
+        let _ = write!(status, "。気づきを {} 件捨てた", summary.counts.discarded);
+    }
     Ok(Outcome {
         status,
         applied: true,
@@ -655,6 +839,66 @@ fn apply_answer(
         commit,
         summary,
     })
+}
+
+/// Leave pending what the owner said when no dream could deal with it.
+fn leave_pending(
+    dir: &Path,
+    read: &[(NaiveDate, Entry)],
+    given_up: &BTreeSet<String>,
+) -> anyhow::Result<()> {
+    for (date, note) in read {
+        if note.src() != Some(memory::Src::Said)
+            || !note.id().is_some_and(|id| given_up.contains(id))
+        {
+            continue;
+        }
+        let mut entry = Entry::new(note.body())
+            .with("id", memory::fresh_id(dir)?)?
+            .with("src", memory::Src::Said.as_str())?
+            .with("from", date.to_string())?;
+        let workgroup = note.workgroup();
+        if !workgroup.is_empty() {
+            entry.set("workgroup", workgroup.join(","))?;
+        }
+        if let Some(party) = note.get("party") {
+            entry.set("party", party)?;
+        }
+        let mut doc = memory::doc_to_add_to(dir, memory::PENDING)?;
+        doc.push(entry)?;
+        doc.save(&dir.join(memory::PENDING))?;
+    }
+    Ok(())
+}
+
+/// What the night tells of the notes thrown away.
+fn discards(
+    read: &[(NaiveDate, Entry)],
+    asked: &[Discard],
+    given_up: &BTreeSet<String>,
+) -> Vec<memory::Change> {
+    read.iter()
+        .filter_map(|(date, note)| {
+            let id = note.id()?;
+            let reason = match asked.iter().find(|d| d.id == id) {
+                Some(discard) => discard.reason.clone(),
+                None if given_up.contains(id) && note.src() != Some(memory::Src::Said) => {
+                    Some("何度読んでも片づかなかった".into())
+                }
+                None => return None,
+            };
+            Some(memory::Change {
+                op: memory::Op::Discarded,
+                id: id.to_owned(),
+                file: format!("{}/{date}.md", memory::EPISODIC),
+                text: note.body().to_owned(),
+                previous: None,
+                from_file: None,
+                replaces: None,
+                reason,
+            })
+        })
+        .collect()
 }
 
 /// A memory on its way to the records.
@@ -1527,7 +1771,7 @@ mod tests {
         note(dir.path(), "前からある気づき");
         let path = dir.path().to_owned();
         dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
-            let settled = ids_of(waiting_notes(&path).unwrap());
+            let settled = ids_of(&waiting_notes(&path).unwrap());
             note(&path, "考えている間の気づき");
             Ok(json!({ "edits": [], "settled": settled }))
         })
@@ -1612,6 +1856,259 @@ mod tests {
             "{semantic:?}"
         );
         assert_eq!(store.state("lookout.interests").unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_note_thrown_away_is_dealt_with_and_the_night_says_which_and_why() {
+        let (dir, store) = setup();
+        let thrown = note(dir.path(), "昼は蕎麦だった");
+        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
+            Ok(json!({
+                "edits": [],
+                "settled": [thrown],
+                "discarded": [{ "id": thrown, "reason": "一度きり" }, { "id": "none" }]
+            }))
+        })
+        .await
+        .unwrap();
+
+        assert!(waiting_notes(dir.path()).unwrap().is_empty());
+        assert!(
+            memory::read_file(dir.path(), "episodic/2026-11-21.md")
+                .unwrap()
+                .contains("昼は蕎麦だった")
+        );
+        assert_eq!(outcome.summary.counts.discarded, 1);
+        assert!(outcome.status.contains("気づきを 1 件捨てた"));
+        let change = &recent_dreams(&store, 1).unwrap()[0].summary.changes[0];
+        assert_eq!(change.op, memory::Op::Discarded);
+        assert_eq!(change.text, "昼は蕎麦だった");
+        assert_eq!(change.file, "episodic/2026-11-21.md");
+        assert_eq!(change.reason.as_deref(), Some("一度きり"));
+    }
+
+    #[tokio::test]
+    async fn a_note_given_up_after_the_last_try_is_told_as_thrown_away() {
+        let (dir, store) = setup();
+        note(dir.path(), "片づかない気づき");
+        for left in [0, 0, 1] {
+            let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+                Ok(json!({ "edits": [], "settled": [] }))
+            })
+            .await
+            .unwrap();
+            assert_eq!(outcome.summary.counts.discarded, left);
+        }
+    }
+
+    fn said(dir: &Path, text: &str) -> String {
+        let at = day().and_hms_opt(10, 0, 0).unwrap();
+        let note =
+            memory::append_episode_from(dir, at, text, EpisodeState::Waiting, memory::Src::Said);
+        note.unwrap().id().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn what_the_owner_said_is_left_pending_rather_than_given_up() {
+        let (dir, store) = setup();
+        let id = said(dir.path(), "返事は短く");
+        memory::tag_episode(dir.path(), day(), &id, "workgroup", "work").unwrap();
+        for pending in [0, 0, 1] {
+            let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+                Ok(json!({ "edits": [], "settled": [] }))
+            })
+            .await
+            .unwrap();
+            assert_eq!(outcome.summary.counts.pending_added, pending);
+            assert_eq!(outcome.summary.counts.discarded, 0);
+        }
+        assert!(waiting_notes(dir.path()).unwrap().is_empty());
+        let kept = memory::pending_entries(dir.path()).unwrap();
+        assert_eq!(kept[0].body(), "返事は短く");
+        assert_eq!(kept[0].src(), Some(memory::Src::Said));
+        assert_eq!(kept[0].workgroup(), ["work"]);
+    }
+
+    #[tokio::test]
+    async fn what_the_owner_said_waits_when_an_edit_that_may_have_filed_it_was_refused() {
+        let (dir, store) = setup();
+        let rule = said(dir.path(), "返事は短く");
+        let noticed = note(dir.path(), "紅茶を頼んだ");
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
+            Ok(json!({
+                "edits": [{ "op": "add", "file": "elsewhere.md", "text": "返事は短く" }],
+                "settled": [rule, noticed]
+            }))
+        })
+        .await
+        .unwrap();
+        let waiting = waiting_notes(dir.path()).unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].1.body(), "返事は短く");
+    }
+
+    #[tokio::test]
+    async fn a_refused_dream_throws_nothing_away() {
+        let (dir, store) = setup();
+        memory::write_file(dir.path(), "core.md", "# 心得\n- 一 {id: c1, src: inferred}\n- 二 {id: c2, src: inferred}\n- 三 {id: c3, src: inferred}\n".as_bytes()).unwrap();
+        let thrown = note(dir.path(), "昼は蕎麦だった");
+        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
+            Ok(json!({
+                "edits": [{ "op": "forget", "id": "c1" }, { "op": "forget", "id": "c2" }],
+                "discarded": [{ "id": thrown }]
+            }))
+        })
+        .await
+        .unwrap();
+        assert!(!outcome.applied);
+        assert_eq!(outcome.summary.counts.discarded, 0);
+        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_next_dream_is_shown_what_was_lately_thrown_away_so_it_can_tell_what_comes_back() {
+        let (dir, store) = setup();
+        let thrown = note(dir.path(), "昼は蕎麦だった");
+        dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |_, prompt| async move {
+                assert!(!prompt.contains("Lately thrown away"), "{prompt}");
+                Ok(json!({ "edits": [], "discarded": [{ "id": thrown }] }))
+            },
+        )
+        .await
+        .unwrap();
+        dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |_, prompt| async move {
+                let (_, lately) = prompt.split_once("Lately thrown away").expect("the list");
+                assert!(lately.contains("- 昼は蕎麦だった (2026-11-21)"), "{prompt}");
+                Ok(json!({ "edits": [] }))
+            },
+        )
+        .await
+        .unwrap();
+        store
+            .conn()
+            .execute("UPDATE dreams SET at = at - ?1", params![9 * 86_400])
+            .unwrap();
+        dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |_, prompt| async move {
+                assert!(!prompt.contains("Lately thrown away"), "{prompt}");
+                Ok(json!({ "edits": [] }))
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_dream_is_told_to_keep_little_throw_boldly_and_merge_before_adding() {
+        let (dir, store) = setup();
+        dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |system, _| async move {
+                for told in [
+                    "Throw away boldly",
+                    "comes up again",
+                    "happened once",
+                    "already in the records",
+                    "still to be done that no record holds",
+                    "Before adding",
+                ] {
+                    assert!(system.contains(told), "{told}");
+                }
+                Ok(json!({ "edits": [] }))
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_add_of_what_memory_already_says_backs_the_item_instead() {
+        let (dir, store) = setup();
+        memory::write_file(
+            dir.path(),
+            "long/semantic/tea.md",
+            long("p1", "紅茶が好き", "src: inferred\nev: 1\n").as_bytes(),
+        )
+        .unwrap();
+        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "add", "file": "long/semantic/black-tea.md", "text": "紅茶が 好き。", "attrs": { "src": "said", "from": "2026-11-21" } },
+            ] }))
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.summary.counts.added, 0);
+        assert_eq!(outcome.summary.counts.confirmed, 1);
+        assert!(!dir.path().join("long/semantic/black-tea.md").exists());
+        let kept = memory::read_file(dir.path(), "long/semantic/tea.md").unwrap();
+        assert!(kept.contains("ev: 2"), "{kept}");
+        assert!(kept.contains("src: said"), "{kept}");
+    }
+
+    #[tokio::test]
+    async fn an_add_stays_an_add_for_another_layer_scope_period_or_an_item_the_dream_takes_away() {
+        for (held, add, gone) in [
+            (
+                "src: inferred\n",
+                json!({ "op": "add", "file": "core.md", "text": "紅茶が好き" }),
+                false,
+            ),
+            (
+                "workgroup: [a]\n",
+                json!({ "op": "add", "file": "long/semantic/new.md", "text": "紅茶が好き" }),
+                false,
+            ),
+            (
+                "to: 2026-11-01\n",
+                json!({ "op": "add", "file": "long/semantic/new.md", "text": "紅茶が好き" }),
+                false,
+            ),
+            (
+                "src: inferred\n",
+                json!({ "op": "add", "file": "long/semantic/new.md", "text": "紅茶が好き" }),
+                true,
+            ),
+        ] {
+            let (dir, store) = setup();
+            for (rel, id, text, extra) in [
+                ("long/semantic/tea.md", "p1", "紅茶が好き", held),
+                ("long/semantic/a.md", "p2", "別のこと", ""),
+            ] {
+                memory::write_file(dir.path(), rel, long(id, text, extra).as_bytes()).unwrap();
+            }
+            let mut edits = vec![add.clone()];
+            if gone {
+                edits.push(json!({ "op": "forget", "id": "p1", "reason": "replaced" }));
+            }
+            let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
+                Ok(json!({ "edits": edits }))
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                outcome.summary.counts.added, 1,
+                "{held} {add} {}",
+                outcome.status
+            );
+        }
     }
 
     #[test]
