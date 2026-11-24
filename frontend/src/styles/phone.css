@@ -105,6 +105,9 @@
   .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + var(--composer, 182px) + 8px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
   .m-float > * { pointer-events: auto; }
   .m-toggles:is(nav), .m-toggles > .segs { background: var(--card); box-shadow: 0 4px 12px rgba(27, 27, 25, .18); }
+  .m-toggles { min-width: 0; margin-right: var(--s3); }
+  .m-toggles > .records-tabs > .segs { background: none; }
+  .m-toggles > .records-tabs { border-radius: var(--r); background: var(--card); box-shadow: 0 4px 12px rgba(27, 27, 25, .18); }
   .m-toggles .segs-item.on, .m-toggles .segs-indicator { background: var(--soft); box-shadow: none; }
   .m-fab.icon-plain { margin-left: auto; width: 56px; height: 56px; border-radius: 50%; background: var(--workgroup); color: #fff; box-shadow: 0 6px 16px rgba(27, 27, 25, .22), 0 1px 3px rgba(27, 27, 25, .2); }
   dialog.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }

@@ -22,6 +22,9 @@ export default function AddRecord(props: {
   const kinds = createAsync(() => kindsQuery());
   const navigate = useNavigate();
   const [given, setGiven] = createSignal<{ [name: string]: FieldValue }>({});
+  const preset = () =>
+    Object.fromEntries(Object.entries(props.preset ?? {}).map(([name, value]): [string, FieldValue] => [name, { value, values: [] }]));
+  const filled = (): { [name: string]: FieldValue } => ({ ...preset(), ...given() });
   const types = () =>
     props.fields
       .map((n) =>
@@ -40,10 +43,7 @@ export default function AddRecord(props: {
           kind: props.kind,
           title,
           workgroups: newWorkgroups(workgroup()),
-          fields: [
-            ...Object.entries(props.preset ?? {}).map(([name, value]) => ({ name, value })),
-            ...Object.entries(given()).map(([name, v]) => ({ name, ...v })),
-          ],
+          fields: Object.entries(filled()).map(([name, v]) => ({ name, ...v })),
         }),
       "足した",
     );
@@ -64,7 +64,7 @@ export default function AddRecord(props: {
               <FieldEdit
                 type={t}
                 label={nameOf(t.name)}
-                field={given()[t.name] ? { name: t.name, ...given()[t.name] } : undefined}
+                field={filled()[t.name] ? { name: t.name, ...filled()[t.name] } : undefined}
                 onSave={(v) => setGiven({ ...given(), [t.name]: v })}
               />
             </Field>
