@@ -1,6 +1,6 @@
 import { createAsync, revalidate, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, Show, Suspense } from "solid-js";
-import { Button, EmptyState, ErrorState, Loading, whenConfirmed } from "~/components/ui";
+import { Button, EmptyState, ErrorState, Keyed, Loading, whenConfirmed } from "~/components/ui";
 import type { RecordKind, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -68,39 +68,39 @@ function Sections(props: { record: Rec; kind: RecordKind; aide: string; save: Sa
   const rest = () => props.kind.sections.filter((s) => !given(s) && !added().includes(s.name));
   return (
     <>
-      <For each={shown()}>
+      <Keyed each={shown()} by={(s) => s.name}>
         {(s) => (
           <section class="rec-section">
-            <h3>{nameOf(s.name)}</h3>
+            <h3>{nameOf(s().name)}</h3>
             <Show
-              when={s.many}
+              when={s().many}
               fallback={
                 <Fields
-                  types={s.fields}
-                  fields={given(s)?.fields ?? []}
+                  types={s().fields}
+                  fields={given(s())?.fields ?? []}
                   aide={props.aide}
                   onSave={(name, v) =>
                     void props.save((now) => ({
-                      sections: [{ name: s.name, fields: withField(sectionIn(now, s.name)?.fields ?? [], name, v) }],
+                      sections: [{ name: s().name, fields: withField(sectionIn(now, s().name)?.fields ?? [], name, v) }],
                     }))
                   }
                 />
               }
             >
               <Items
-                type={s}
-                items={given(s)?.items ?? []}
+                type={s()}
+                items={given(s())?.items ?? []}
                 aide={props.aide}
                 onSave={(change) =>
                   void props.save((now) => ({
-                    sections: [{ name: s.name, items: change((sectionIn(now, s.name)?.items ?? []).map(plainItem)) }],
+                    sections: [{ name: s().name, items: change((sectionIn(now, s().name)?.items ?? []).map(plainItem)) }],
                   }))
                 }
               />
             </Show>
           </section>
         )}
-      </For>
+      </Keyed>
       <Show when={rest().length > 0}>
         <div class="chips-line">
           <For each={rest()}>
