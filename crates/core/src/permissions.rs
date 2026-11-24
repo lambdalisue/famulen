@@ -467,9 +467,14 @@ impl Permissions {
             .collect()
     }
 
-    /// What the owner calls a connection.
-    pub fn connection_name(&self, id: impl AsRef<str>) -> anyhow::Result<Option<String>> {
-        Ok(self.connections.get(id.as_ref())?.map(|c| c.name))
+    /// A connection, where it is still there.
+    pub fn connection(&self, id: impl AsRef<str>) -> Option<crate::connections::Connection> {
+        self.connections.get(id).ok().flatten()
+    }
+
+    /// The connection a call of `tool` is made through, where it is still there.
+    pub fn connection_of(&self, tool: &str) -> Option<crate::connections::Connection> {
+        self.connection(crate::wording::connection_of(tool)?)
     }
 
     /// The gateway that judges the calls.

@@ -16,8 +16,10 @@ use crate::input::{Input, Sender, Source};
 use crate::permissions::Permissions;
 use crate::slack::clients::SlackClients;
 use crate::slack::events::Action;
+use crate::slack::mrkdwn::escape;
 use crate::slack::web::{Outgoing, Slack};
 use crate::store::{Store, now};
+use crate::wording;
 
 mod exposure;
 
@@ -131,16 +133,8 @@ impl From<Answer> for famulen_gateway::Answer {
     }
 }
 
-/// How a held call is named to the owner and the session: as the model
-/// called it, or by the change to the vault or to a definition it is.
 fn ticket_tool(ticket: &Ticket) -> String {
-    match ticket.connection.as_str() {
-        "" => ticket.tool.clone(),
-        famulen_gateway::VAULT | famulen_gateway::DEFINITIONS => {
-            format!("{}.{}", ticket.connection, ticket.tool)
-        }
-        connection => format!("mcp__{connection}__{}", ticket.tool),
-    }
+    wording::tool_of(&ticket.connection, &ticket.tool)
 }
 
 pub struct Approvals<S> {
@@ -360,7 +354,8 @@ impl<S: Slack> Approvals<S> {
     fn ask_message(&self, id: i64, tool: &str, input: &Value) -> Outgoing {
         let questions = questions(&self.permissions, tool, input);
         if questions.is_empty() {
-            return request_message(id, tool, input, None, once(&self.permissions, tool));
+            let asked = Asked::of(&self.permissions, tool);
+            return request_message(id, &asked, input, None, once(&self.permissions, tool));
         }
         question_message(id, input, &questions)
     }
@@ -448,14 +443,15 @@ impl<S: Slack> Approvals<S> {
             let workspace = place.as_ref().map(|p| p.workspace.as_str());
             match (clients.get(workspace), channel, ts, &place) {
                 (Ok(slack), Some(channel), Some(ts), _) => {
+                    let asked = Asked::of(&self.permissions, &tool);
                     let failed = match &answered.ran {
                         Some(Err(error)) => Some(format!("届けられませんでした: {error:#}")),
                         _ => None,
                     };
                     let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
                     let message = match note {
-                        Some(note) => noted_message(id, &tool, &input, &note),
-                        None => request_message(id, &tool, &input, Some(answer), false),
+                        Some(note) => noted_message(id, &asked, &input, &note),
+                        None => request_message(id, &asked, &input, Some(answer), false),
                     };
                     slack.update(&channel, &ts, message).await?;
                 }
@@ -557,7 +553,10 @@ pub async fn withdraw<S: Slack>(
     let workspace = place.as_ref().map(|p| p.workspace.as_str());
     let slack = slack.and_then(|s| s.get(workspace).ok());
     if let (Some(slack), Some((tool, Some(channel), Some(ts)))) = (slack, row) {
-        let text = format!("*確認 #{id}* `{tool}` は、もう要らなくなったので取り下げました");
+        let text = format!(
+            "*確認 #{id}* 「{}」は、もう要らなくなったので取り下げました",
+            escape(&wording::deed(&tool, None))
+        );
         let blocks = json!([section(&text)]);
         slack
             .update(
@@ -665,6 +664,26 @@ fn context(text: &str) -> Value {
     json!({ "type": "context", "elements": [{ "type": "mrkdwn", "text": text }] })
 }
 
+/// What a held call does, and where.
+struct Asked {
+    deed: String,
+    place: String,
+}
+
+impl Asked {
+    fn of(permissions: &Permissions, tool: &str) -> Self {
+        let connection = permissions.connection_of(tool);
+        Self {
+            deed: wording::deed(tool, connection.as_ref()),
+            place: wording::place(tool, connection.as_ref()),
+        }
+    }
+
+    fn mrkdwn(&self) -> String {
+        format!("「{}」（{}）", escape(&self.deed), escape(&self.place))
+    }
+}
+
 /// The part of a request's message that says what it is about.
 fn heading(id: i64, what: &str, shown: &Value) -> Vec<Value> {
     let mut blocks = vec![section(&format!("*確認 #{id}* {what}"))];
@@ -698,8 +717,8 @@ fn question_message(id: i64, shown: &Value, asked: &[Question]) -> Outgoing {
 }
 
 /// A request's message once it is answered, with how.
-fn noted_message(id: i64, tool: &str, shown: &Value, note: &str) -> Outgoing {
-    let mut blocks = heading(id, &format!("`{tool}`"), shown);
+fn noted_message(id: i64, asked: &Asked, shown: &Value, note: &str) -> Outgoing {
+    let mut blocks = heading(id, &asked.mrkdwn(), shown);
     blocks.push(json!({ "type": "section", "text": { "type": "plain_text", "text": note.chars().take(INPUT_PREVIEW_CHARS).collect::<String>() } }));
     Outgoing {
         text: format!("確認 #{id}: {note}"),
@@ -710,19 +729,20 @@ fn noted_message(id: i64, tool: &str, shown: &Value, note: &str) -> Outgoing {
 
 fn request_message(
     id: i64,
-    tool: &str,
+    asked: &Asked,
     input: &Value,
     answered: Option<Answer>,
     once: bool,
 ) -> Outgoing {
-    let mut blocks = heading(id, &format!("`{tool}` を使ってよいですか？"), input);
+    let mut blocks = heading(id, &format!("{}を許しますか？", asked.mrkdwn()), input);
     // What is decided is shown as it is, without the secretary's own words.
     let input = input.get("decides").unwrap_or(input);
-    blocks.push(section(&format!("```{}```", preview(input))));
+    let said = said(input);
+    blocks.push(json!({ "type": "section", "text": { "type": "plain_text", "text": preview(&said), "emoji": false } }));
     match answered {
         None => {
             // What is decided only once is not approved unread.
-            let unread = once && pretty(input).chars().count() > INPUT_PREVIEW_CHARS;
+            let unread = once && said.chars().count() > INPUT_PREVIEW_CHARS;
             let mut buttons = Vec::new();
             if unread {
                 blocks.push(context("長くて全部は出せないので、承認はコンソールでする"));
@@ -740,7 +760,7 @@ fn request_message(
         }
     }
     Outgoing {
-        text: format!("確認 #{id}: {tool}"),
+        text: format!("確認 #{id}: {}", asked.deed),
         blocks: Some(Value::Array(blocks)),
         thread_ts: None,
     }
@@ -763,10 +783,18 @@ fn pretty(input: &Value) -> String {
     serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
 }
 
-fn preview(input: &Value) -> String {
-    let text = pretty(input);
+/// What a call is given, in the owner's words.
+fn said(input: &Value) -> String {
+    match wording::given(input) {
+        Some(rows) if rows.is_empty() => "（何も渡さない）".into(),
+        Some(rows) => wording::plain(&rows),
+        None => pretty(input),
+    }
+}
+
+fn preview(text: &str) -> String {
     if text.chars().count() <= INPUT_PREVIEW_CHARS {
-        return text;
+        return text.to_owned();
     }
     let mut cut: String = text.chars().take(INPUT_PREVIEW_CHARS).collect();
     cut.push_str("\n…");
@@ -898,8 +926,14 @@ mod tests {
             blocks[1]["text"]["text"]
                 .as_str()
                 .unwrap()
-                .contains("a@example.com")
+                .contains("宛先：a@example.com")
         );
+        assert_eq!(
+            blocks[0]["text"]["text"],
+            format!("*確認 #{id}* 「メールを送る」（Famulen）を許しますか？")
+        );
+        assert_eq!(blocks[1]["text"]["type"], "plain_text");
+        assert!(!posts[0].1.text.contains("mcp__"));
     }
 
     /// Start the turn of an input, as the session would.
@@ -1224,15 +1258,21 @@ mod tests {
     #[tokio::test]
     async fn a_long_input_is_cut_on_a_character_boundary() {
         let long = json!({ "body": "あ".repeat(4000) });
-        let shown = preview(&long);
+        let shown = preview(&said(&long));
         assert!(shown.chars().count() <= INPUT_PREVIEW_CHARS + 2);
         assert!(shown.ends_with('…'));
     }
 
     #[test]
     fn what_is_decided_once_has_no_button_for_from_now_on_and_is_not_approved_unread() {
+        let asked = Asked {
+            deed: "使う".into(),
+            place: "どこか".into(),
+        };
         let buttons = |input: &Value, once: bool| -> Vec<String> {
-            let blocks = request_message(1, "t", input, None, once).blocks.unwrap();
+            let blocks = request_message(1, &asked, input, None, once)
+                .blocks
+                .unwrap();
             blocks
                 .as_array()
                 .unwrap()

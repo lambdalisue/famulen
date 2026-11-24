@@ -4,6 +4,8 @@
 use famulen_gateway::{DEFINITIONS, Ticket, VAULT};
 use serde_json::Value;
 
+use crate::wording;
+
 /// Words that name a secret, as a field or in a text before its value.
 const NAMES: &[&str] = &[
     "password",
@@ -73,6 +75,8 @@ fn names_secret(text: &str) -> bool {
 
 fn text_may_hold_secret(text: &str) -> bool {
     names_secret(text)
+        // It is shown as what it says, which its own form hides from the rest.
+        || wording::letter(text).is_some()
         || KEYS.iter().any(|key| text.contains(key))
         || url_with_password(text)
         || text
@@ -110,6 +114,8 @@ mod tests {
             json!({ "text": "ghp_x" }),
             json!({ "url": "postgres://me:x@host/db" }),
             json!({ "text": "a1".repeat(16) }),
+            // "To: a\n\n>>>???>>>???", whose form is short runs.
+            json!({ "raw": "VG86IGEKCj4-Pj8_Pz4-Pj8_Pw" }),
         ] {
             assert!(may_hold_secret(&secret), "{secret}");
         }

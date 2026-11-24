@@ -1,13 +1,10 @@
-import { createAsync } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import AideIcon from "~/components/AideIcon";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import Markdown from "~/components/Markdown";
 import Questions from "~/components/Questions";
-import { type Approval, ApprovalAnswer } from "~/gen/famulen/v1/console_pb";
-import { askedOf, type Given, givenOf } from "~/lib/approvals";
+import { type Approval, ApprovalAnswer, type ApprovalGiven } from "~/gen/famulen/v1/console_pb";
 import { chatMarkdown } from "~/lib/chat";
-import { connectionsQuery } from "~/lib/connections";
 import { approvalId } from "~/lib/inbox";
 import { Button, Disclosure } from "~/components/ui";
 
@@ -39,12 +36,6 @@ function pretty(input: string): string {
   }
 }
 
-/** What each held call does and where, by its tool. */
-export function useAsked() {
-  const connections = createAsync(() => connectionsQuery());
-  return (tool: string) => askedOf(tool, connections()?.connections ?? []);
-}
-
 /** A long text, the first of it until the rest is asked for. */
 function LongText(props: { text: string; code: boolean }) {
   const [open, setOpen] = createSignal(false);
@@ -74,12 +65,12 @@ function LongText(props: { text: string; code: boolean }) {
   );
 }
 
-function Rows(props: { rows: Given[] }) {
+function Rows(props: { rows: ApprovalGiven[] }) {
   return (
     <dl class="asked-rows">
       <For each={props.rows}>
         {(row) => (
-          <div classList={{ long: row.lines || row.rows.length > 0 }}>
+          <div classList={{ long: row.rows.length > 0 || row.text.includes("\n") || [...row.text].length > 60 }}>
             <dt>{row.name}</dt>
             <dd>
               <Show when={row.rows.length > 0} fallback={<LongText text={row.text} code={row.code} />}>
@@ -105,8 +96,6 @@ function Whole(props: { approval: Approval }) {
 /** A call that waits for the owner's answer. */
 export default function ApprovalCard(props: { approval: Approval; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
   const r = () => props.approval;
-  const asked = useAsked();
-  const call = () => asked(r().tool);
   const change = () => (r().tool === CHANGE_DEFINITION ? proposal(r().input) : undefined);
   const asks = () => r().questions.length > 0;
   return (
@@ -114,9 +103,9 @@ export default function ApprovalCard(props: { approval: Approval; onAnswer: (ans
       <div class="asked-head">
         <AideIcon size={28} />
         <div class="grow">
-          <b class="asked-does">{call().does}</b>
+          <b class="asked-does">{r().deed}</b>
           <span class="sub">
-            確認 #{r().id.toString()} · {change()?.definition || call().where}
+            確認 #{r().id.toString()} · {change()?.definition || r().place}
           </span>
         </div>
       </div>
@@ -134,8 +123,8 @@ export default function ApprovalCard(props: { approval: Approval; onAnswer: (ans
             when={asks()}
             fallback={
               <>
-                <Show when={givenOf(r().input)} fallback={<pre>{pretty(r().input)}</pre>}>
-                  {(rows) => <Rows rows={rows()} />}
+                <Show when={r().given.length > 0} fallback={<pre>{pretty(r().input)}</pre>}>
+                  <Rows rows={r().given} />
                 </Show>
                 <Whole approval={r()} />
               </>
