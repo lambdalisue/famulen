@@ -231,3 +231,20 @@ test("a long call that came while the chat was folded is read to its end once it
   await card.getByRole("button", { name: "却下" }).click();
   await expect(card).toHaveCount(0);
 });
+
+test("the categories of things are within reach of the thumb, and scroll beside the button that adds", async ({ page, request }) => {
+  // Enough of them to have a tab whatever the tests before left.
+  for (let i = 1; i <= 12; i++) await record(request, "holdings", `楽器の品 ${i}`, { fields: { Category: "楽器" } });
+  for (const c of ["書籍", "家電", "工具", "衣類", "家具"]) await record(request, "holdings", `${c}の品`, { fields: { Category: c } });
+  await visit(page, "/things", "物");
+  const tabs = page.getByRole("navigation", { name: "分類" });
+  expect((await tabs.boundingBox())?.y ?? 0).toBeGreaterThan(400);
+  await tabs.getByRole("link", { name: "楽器" }).tap();
+  await expect(page.locator("[data-record]")).toHaveText(Array<RegExp>(12).fill(/楽器の品/));
+  await row(page, "楽器の品").first().getByRole("link").tap();
+  await page.getByRole("link", { name: "物へ戻る" }).click();
+  await expect(tabs.getByRole("link", { name: "楽器" })).toBeInViewport();
+  const add = page.getByRole("button", { name: "物を足す" });
+  await add.tap();
+  await expect(page.getByRole("dialog")).toBeVisible();
+});

@@ -36,9 +36,13 @@ function contractFacts(r: Rec): string[] {
   ];
 }
 
+const categoryOf = (r: Rec) => valueOf(r, "Category") || "分類なし";
+
 const KINDS = {
   holdings: {
     title: "物",
+    narrow: ["Status"],
+    tabs: { label: "分類", param: "category", field: "Category", of: categoryOf },
     base: "/things",
     facts: thingFacts,
     overLabel: "手放した物も",
@@ -47,6 +51,8 @@ const KINDS = {
   },
   contracts: {
     title: "契約",
+    narrow: ["Category", "Status"],
+    tabs: undefined,
     base: "/contracts",
     facts: contractFacts,
     overLabel: "終わった契約も",
@@ -60,7 +66,7 @@ function groups(records: Rec[]): Group[] {
   const by = new Map<string, Rec[]>();
   const sorted = [...records].sort(order);
   for (const r of sorted) {
-    const c = valueOf(r, "Category") || "分類なし";
+    const c = categoryOf(r);
     by.set(c, [...(by.get(c) ?? []), r]);
   }
   if (by.size <= 1) return [{ name: "", records: sorted }];
@@ -102,13 +108,14 @@ export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) 
       kind={props.kind}
       base={of().base}
       title={of().title}
-      narrow={["Category", "Status"]}
+      narrow={of().narrow}
+      tabs={of().tabs}
       over={isPast}
       overLabel={of().overLabel}
       groups={groups}
       row={row}
       cards
-      detail={(id) => <RecordDetail kind={props.kind} id={id} back={of().base} />}
+      detail={(id, back) => <RecordDetail kind={props.kind} id={id} back={back()} />}
       add={of().add}
       hint="期限の 2 週間前になると、タスクになる。"
       empty={of().empty}

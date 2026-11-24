@@ -1,6 +1,7 @@
 /* What there is, and what is picked of it beside it. */
 .split-pane { --left: clamp(320px, 38%, 620px); position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; }
 .split-left { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; scroll-padding: 12px; padding: 22px 26px 40px; display: flex; flex-direction: column; gap: var(--s4); container: list / inline-size; }
+.split-left > * { flex-shrink: 0; }
 .split-detail { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--card); border-left: 1px solid var(--line); }
 .split-detail > .resize-edge { left: -5px; }
 .split-bar { flex: none; display: flex; align-items: center; gap: var(--s1); min-height: 48px; padding: 0 var(--s3) 0 var(--s4); border-bottom: 1px solid var(--line2); }
@@ -36,6 +37,11 @@
   .records-choices .select { font-size: var(--t-sm); padding: 0 24px 0 8px; background-position: right 7px center; min-height: 32px; }
   .page-head-actions { margin-left: 0; }
 }
+
+.records-tabs { display: flex; align-items: center; gap: var(--s2); min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.records-tabs > * { flex: none; max-width: none; }
+.records-tabs > .select { max-width: 180px; }
+.records-more { align-self: flex-start; margin-top: var(--s2); font-size: var(--t-sm); }
 
 /* A record in a list, or as a card. */
 .rec-row { min-height: 56px; }
