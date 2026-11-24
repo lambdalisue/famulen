@@ -402,6 +402,17 @@ mod tests {
     }
 
     #[test]
+    fn a_mark_of_doubt_without_a_day_and_a_move_to_no_record_are_told() {
+        let (_tmp, nb) = notebook("check-marks");
+        write(
+            nb.root(),
+            &format!("records/memos/{A}.md"),
+            &format!("---\nid: {A}\nobsolete: soon\nmoved: elsewhere\n---\n\n# x\n"),
+        );
+        assert_eq!(rules(&nb), [("metadata", Error, 1), ("metadata", Error, 1)]);
+    }
+
+    #[test]
     fn fields_and_sections_that_do_not_fit_their_kind_are_told_with_their_lines() {
         let (_tmp, nb) = notebook("check-fields");
         record(

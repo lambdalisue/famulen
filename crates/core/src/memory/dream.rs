@@ -73,6 +73,10 @@ pub enum Op {
     Moved,
     /// An item gone from every layer.
     Deleted,
+    /// A memo that became a task.
+    TaskMade,
+    /// A record marked as one that may no longer be true.
+    Doubted,
 }
 
 /// One change, with the text a person reads in the console.
@@ -225,6 +229,7 @@ fn grew(was: &Entry, now: &Entry) -> bool {
 
 /// How many changes of each kind one dream made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Counts {
     pub added: usize,
     pub edited: usize,
@@ -234,6 +239,8 @@ pub struct Counts {
     pub pending_added: usize,
     pub moved: usize,
     pub deleted: usize,
+    pub task_made: usize,
+    pub doubted: usize,
 }
 
 impl Counts {
@@ -247,6 +254,8 @@ impl Counts {
             Op::PendingAdded => &mut self.pending_added,
             Op::Moved => &mut self.moved,
             Op::Deleted => &mut self.deleted,
+            Op::TaskMade => &mut self.task_made,
+            Op::Doubted => &mut self.doubted,
         }
     }
 }

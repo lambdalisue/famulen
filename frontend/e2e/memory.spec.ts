@@ -1,6 +1,7 @@
-import { resolve } from "node:path";
+import { readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { call, record, toast, visit } from "./support";
+import { call, detail, record, row, toast, visit } from "./support";
 
 type Models = { roles: { role: string; choices: string[] }[] };
 type Dreams = { dreams?: { id: string }[] };
@@ -311,6 +312,67 @@ test.describe("the dream button", () => {
     await expect(change.locator("strong")).toHaveText("電話");
     await expect(change.locator(".tag")).toHaveText("忘れた");
     await expect(change.locator(".sub")).toHaveText(/^long\/prospective\/e2e-call\.md → forgotten\/.+\.md · e2eで済んだ$/);
+
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
+    await call(request, "ModelService", "UnregisterModel", { id: model.id });
+  });
+
+  test("a night makes a task of a memo and asks about a doubtful record, which the owner clears", async ({ page, request }) => {
+    const { path: notebook } = await call<{ path: string }>(request, "SettingsService", "GetNotebookPlace");
+    const todo = await record(request, "memos", "e2e-todo 牛乳を買う", { notes: "低脂肪のもの" });
+    const stale = await record(request, "memos", "e2e-stale 店の営業時間", { notes: "20 時まで" });
+    for (const { id } of [todo, stale]) {
+      const file = join(notebook, "records", "memos", `${id}.md`);
+      const old = readFileSync(file, "utf8").replace(/^(created|updated): .*$/gm, "$1: 2020-01-01T00:00:00+09:00");
+      writeFileSync(file, old);
+      utimesSync(file, new Date("2020-01-01"), new Date("2020-01-01"));
+    }
+    const model = await call<{ id: string }>(request, "ModelService", "RegisterModel", {
+      name: "e2e の夢",
+      kind: "MODEL_KIND_AGENT_CLI",
+      endpoint: resolve("e2e/fake-claude.pl"),
+    });
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: model.id });
+    const before = (await call<Dreams>(request, "MemoryService", "ListDreams")).dreams?.length ?? 0;
+    await call(request, "MemoryService", "DreamNow");
+    await expect
+      .poll(
+        async () => {
+          const now = await call<Dreams & { dreaming?: boolean }>(request, "MemoryService", "ListDreams");
+          return !now.dreaming && (now.dreams?.length ?? 0) > before;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+
+    await visit(page, "/memory", "記憶 · 夢");
+    const made = page.locator(".item").filter({ hasText: "e2e-todo 牛乳を買う" });
+    await expect(made.locator(".tag")).toHaveText("タスクにした");
+    await expect(made.locator(".sub")).toContainText("e2e-why");
+    const doubted = page.locator(".item").filter({ hasText: "e2e-stale 店の営業時間" });
+    await expect(doubted.locator(".tag")).toHaveText("古いかも");
+
+    await visit(page, "/memos", "メモ");
+    await expect(row(page, "e2e-todo 牛乳を買う")).toHaveCount(0);
+    await page.getByLabel("タスクに移したメモも").check();
+    await row(page, "e2e-todo 牛乳を買う").click();
+    await detail(page).locator(".callout").getByRole("link", { name: "e2e-todo 牛乳を買う" }).click();
+    await expect(page).toHaveURL(/\/tasks\?id=/);
+    await expect(detail(page).getByText("低脂肪のもの")).toBeVisible();
+
+    await visit(page, "/memos", "メモ");
+    await page.getByLabel("古いかもしれないものだけ").check();
+    await expect(page.locator("[data-record]")).toHaveCount(1);
+    await expect(row(page, "e2e-stale 店の営業時間").locator(".tag.warn")).toHaveText("古いかも");
+    await row(page, "e2e-stale 店の営業時間").click();
+    await expect(detail(page).getByText("20 時まで")).toBeVisible();
+    await expect(detail(page).locator(".callout.warn")).toContainText("e2e-why");
+    await detail(page).getByRole("button", { name: "確かめたので印を外す" }).click();
+    await expect(toast(page)).toHaveText("印を外した");
+    await expect(detail(page).locator(".callout.warn")).toHaveCount(0);
+    type Listed = { records?: { title: string }[] };
+    const open = await call<Listed>(request, "RecordService", "ListRecords", { kind: "tasks", openOnly: true });
+    expect(open.records?.map((t) => t.title).filter((t) => t.includes("e2e-stale"))).toEqual([]);
 
     await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
     await call(request, "ModelService", "UnregisterModel", { id: model.id });

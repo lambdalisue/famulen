@@ -96,6 +96,13 @@ message Record {
   repeated RecordLink blockers = 20;
   // Every memory that links to it, but forgotten ones. Only from GetRecord.
   repeated MemoryLink memories = 21;
+  // The day it was marked as possibly out of date, YYYY-MM-DD. What a marked
+  // record says is doubtful: say so when relying on it. Empty when unmarked.
+  string obsolete = 22;
+  // Why it looks out of date.
+  string obsolete_reason = 23;
+  // The record it was made into, while that one is there.
+  RecordLink moved_to = 24;
 }
 
 message FieldType {
@@ -215,6 +222,9 @@ service RecordService {
   // Add a record, or change one. Records it mentions are to be linked, in
   // Related or where they are mentioned.
   rpc SaveRecord(SaveRecordRequest) returns (Record);
+  // Take the mark that it may be out of date off a record, once the owner
+  // confirmed it or it was put right. The tasks that asked about it are done.
+  rpc ClearObsolete(RecordRef) returns (Record);
   // Remove a record for good.
   rpc DeleteRecord(RecordRef) returns (Empty) {
     option (confirm) = true;

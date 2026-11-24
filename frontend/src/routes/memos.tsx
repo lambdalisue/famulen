@@ -38,6 +38,8 @@ export default function Memos() {
       base="/memos"
       title="メモ"
       narrow={[]}
+      over={(r) => !!r.movedTo}
+      overLabel="タスクに移したメモも"
       groups={(records) => [{ name: "", records: [...records].sort((a, b) => b.updated.localeCompare(a.updated)) }]}
       row={body}
       card={body}

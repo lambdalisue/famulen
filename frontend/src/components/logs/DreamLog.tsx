@@ -19,6 +19,8 @@ function counts(d: Dream): string {
     ["忘れた", d.archived],
     ["確かめた", d.confirmed],
     ["保留にした", d.pendingAdded],
+    ["タスクにした", d.taskMade],
+    ["古いかもの印", d.doubted],
   ];
   return parts
     .filter(([, n]) => n > 0)
@@ -33,7 +35,7 @@ export default function DreamLog() {
   return (
     <>
       <p class="sub">
-        夜ごとに夢を見たか、何件の記憶を変えたか。変えた中身は<A href="/memory">記憶</A>の夢で読む。
+        夜ごとに夢を見たか、何件の記憶と記録を変えたか。変えた中身は<A href="/memory">記憶</A>の夢で読む。
       </p>
       <div class="list">
         <For each={pages.rows()}>

@@ -44,6 +44,7 @@ button.tag { border:1px solid transparent; cursor:pointer; display:inline-flex; 
 .rec-row:first-child { border-top:0; }
 .rec-row:hover { background:#FAF9F5; }
 .rec-row.on { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--workgroup); }
+.rec-row.doubted .rec-main, .rec-card.doubted .rec-main { opacity:.6; }
 .rec-row.over .rec-main b, .rec-card.over .rec-main b { color:#8C8A82; }
 .rec-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
 .rec-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:8px; cursor:pointer; min-height:112px; }

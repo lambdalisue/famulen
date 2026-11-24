@@ -127,12 +127,16 @@ message Dream {
   repeated DreamChange changes = 10;
   // The memory commit the dream made; empty when nothing was applied.
   string commit = 11;
+  // Memos that became tasks, and records marked as possibly out of date.
+  int32 task_made = 12;
+  int32 doubted = 13;
 }
 
 message DreamChange {
   string op = 1;
   string id = 2;
-  // Where the item is after the dream (before it, for a deletion).
+  // Where the item is after the dream (before it, for a deletion), in the
+  // memory directory; a record's is in the notebook.
   string file = 3;
   string text = 4;
   // Why the item changed, when the dream said.
@@ -166,6 +170,9 @@ message DreamSettings {
   int32 core_lines = 5;
   // When the next scheduled dream is due, in words. Answered, never read.
   string next = 6;
+  // Whether the dream also makes tasks of memos and asks about records that
+  // may be out of date. Left out, it stays as it is.
+  optional bool tidy_records = 7;
 }
 
 message ListPartyMemoriesResponse {

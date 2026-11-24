@@ -59,6 +59,15 @@ fn metadata(record: &Record, findings: &mut Findings) {
             findings.error(1, "metadata", format!("{name} is no RFC 3339 time: {at}"));
         }
     }
+    if let Some(on) = record.meta.text("obsolete")
+        && !is_date(&on)
+    {
+        findings.error(1, "metadata", format!("obsolete is no date: {on}"));
+    }
+    if record.meta.text("moved").is_some() && record.moved().is_none() {
+        let why = "moved names no record: write records/<kind>/<id>";
+        findings.error(1, "metadata", why);
+    }
     for (name, _) in record.meta.fields() {
         if !METADATA.contains(&name) {
             findings.warning(1, "metadata", format!("unknown metadata: {name}"));

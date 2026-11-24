@@ -9,6 +9,7 @@ mod destinations;
 mod dream_settings;
 mod logs;
 mod lookout;
+mod obsolete;
 mod persona;
 mod records;
 mod roles;

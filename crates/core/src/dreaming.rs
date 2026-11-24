@@ -21,7 +21,7 @@ use crate::console_log::{ConsoleLog, Who};
 use crate::dream_settings::DreamSettings;
 use crate::memory::{self, DreamDiff, DreamSummary, Entry, EpisodeState, Layer, Snapshot};
 use crate::notebook::{self, Writer};
-use crate::records::{MEMOS, Patch, Records};
+use crate::records::{Held, MEMOS, OWNER, Patch, Record, Records, TASKS, log_lines};
 use crate::store::{Store, now};
 
 /// One edit the model asks for.
@@ -40,7 +40,28 @@ pub struct Edit {
     pub attrs: BTreeMap<String, String>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// For `to_record`: the record the item becomes.
+    #[serde(default)]
+    pub record: Option<AsRecord>,
 }
+
+/// The record a memory becomes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AsRecord {
+    /// `tasks` or `memos`. The other kinds are not offered: the dream is not
+    /// shown the records, so it would add a second one of what is there.
+    pub kind: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// For a task, `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub due: Option<String>,
+}
+
+/// The kinds of record a memory may become.
+const AS_RECORD: [&str; 2] = [TASKS, MEMOS];
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct Plan {
@@ -66,7 +87,17 @@ pub fn plan_schema() -> Value {
                         "file": { "type": "string" },
                         "text": { "type": "string" },
                         "attrs": { "type": "object", "additionalProperties": { "type": "string" } },
-                        "reason": { "type": "string" }
+                        "reason": { "type": "string" },
+                        "record": {
+                            "type": "object",
+                            "properties": {
+                                "kind": { "type": "string", "enum": AS_RECORD },
+                                "title": { "type": "string" },
+                                "start": { "type": "string" },
+                                "due": { "type": "string" }
+                            },
+                            "required": ["kind", "title"]
+                        }
                     },
                     "required": ["op"]
                 }
@@ -92,7 +123,10 @@ Answer with small edits only:
 - move: move an item by id to another file (promote a well-backed item to core, demote an unused one from core, settle a pending judgment into long-term memory).
 - confirm: an item a note backs again, by id (its evidence and last use go up).
 - forget: move an item by id to forgotten memory, with a reason (outdated, replaced, wrong).
-- to_record: an item that is really a record (an event, a task, a device, a contract, an account), by id: it becomes a memo and leaves memory.
+- to_record: an item that is really a record, by id: it leaves memory and becomes the record you give in `record`. \
+  Choose its kind by what the owner would do with it. tasks: something to be done, by anyone, at any time (an action, an errand, \
+  a promise to keep, something to ask, check, buy, send, decide or follow up), with a title that says what to do, and start and due (YYYY-MM-DD or YYYY-MM-DD HH:MM) only when they are known. \
+  memos: a fact to look up with nothing to do about it (a device, a contract, an account, how something stands). When in doubt whether there is something to do, it is a task, not a memo.
 
 Rules:
 - Records (calendar events, tasks, people's accounts, devices, contracts) are not memory: do not add them, and move any already in memory out with to_record.
@@ -401,6 +435,10 @@ fn mark_dreamt(
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outcome {
     pub status: String,
+    /// Whether the model's answer was applied, changing something or not.
+    pub applied: bool,
+    /// The night it was recorded as.
+    pub night: i64,
     pub commit: Option<String>,
     pub summary: DreamSummary,
 }
@@ -410,6 +448,8 @@ impl Outcome {
     fn nothing(status: String) -> Self {
         Self {
             status,
+            applied: false,
+            night: 0,
             commit: None,
             summary: DreamSummary::default(),
         }
@@ -468,6 +508,8 @@ pub fn dreams_before(store: &Store, before: i64, limit: usize) -> anyhow::Result
 
 /// Dream once. `ask` puts the system prompt and the memory to the model and
 /// returns its JSON answer. The night is recorded in the `dreams` table.
+/// The memory is applied on its own: what follows a dream reads
+/// [`Outcome::applied`] and the night it was recorded as.
 pub async fn dream<F, Fut>(
     store: &Store,
     records: &Records,
@@ -484,8 +526,9 @@ where
     let usage = Index::open(records.notebook())?;
     let core_lines = DreamSettings::load(store)?.core_lines;
     let mut prompt = prompt(dir, &usage)?;
-    prompt.push_str(&talk_of_the_day(store)?);
-    let outcome = match ask(system(core_lines), prompt).await {
+    prompt.push_str(&talk(store, 1)?);
+    let _ = writeln!(prompt, "\nToday is {today}.");
+    let mut outcome = match ask(system(core_lines), prompt).await {
         Err(error) => Outcome::nothing(format!("見られなかった（{error}）")),
         Ok(answer) => {
             // What was written while the model thought is the day's, not the
@@ -495,7 +538,7 @@ where
             apply_answer(records, dir, &usage, today, &read, answer)?
         }
     };
-    record_night(store, &outcome)?;
+    outcome.night = record_night(store, &outcome)?;
     Ok(outcome)
 }
 
@@ -511,9 +554,9 @@ fn ids_of(notes: Vec<(NaiveDate, Entry)>) -> BTreeSet<String> {
         .collect()
 }
 
-/// What was said on the console in the last day, to check the notes against.
-fn talk_of_the_day(store: &Store) -> anyhow::Result<String> {
-    let since = now() - 86_400;
+/// What was said on the console in the last days, to check against.
+pub(crate) fn talk(store: &Store, days: i64) -> anyhow::Result<String> {
+    let since = now() - days * 86_400;
     let talk: Vec<String> = ConsoleLog::new(store.clone())
         .recent(200)?
         .into_iter()
@@ -530,7 +573,7 @@ fn talk_of_the_day(store: &Store) -> anyhow::Result<String> {
         String::new()
     } else {
         format!(
-            "\nThe day's conversation on the console, to check the notes against:\n\n{}\n",
+            "\nWhat was said lately on the console, to check against:\n\n{}\n",
             talk.join("\n")
         )
     })
@@ -548,8 +591,9 @@ fn apply_answer(
 ) -> anyhow::Result<Outcome> {
     let mut plan: Plan = serde_json::from_value(answer)?;
     let before = Snapshot::take(dir)?;
-    let memos = take_memos(&mut plan.edits, &before);
-    let skipped = apply(dir, &plan.edits, today)?;
+    let proposed = plan.edits.len();
+    let (moving, mut skipped) = take_records(records, dir, &mut plan.edits, &before)?;
+    skipped.extend(apply(dir, &plan.edits, today)?);
     for reason in &skipped {
         tracing::debug!(%reason, "a dream edit was not applied");
     }
@@ -558,11 +602,18 @@ fn apply_answer(
         notebook::revert_to(dir, "HEAD")?;
         return Ok(Outcome::nothing(format!("当てなかった（{violation}）")));
     }
-    for memo in memos {
-        if let Err(error) = records.add(Writer::Secretary, MEMOS, memo) {
+    // What one says may name another that is gone by now, and a record once
+    // written stays though the memory comes back: nothing is written unless
+    // all can be.
+    for moved in &moving {
+        if let Err(error) = records.check_add(Writer::Secretary, moved.kind, moved.patch.clone()) {
             notebook::revert_to(dir, "HEAD")?;
             return Err(error);
         }
+    }
+    if let Err(error) = write_all(records, moving) {
+        notebook::revert_to(dir, "HEAD")?;
+        return Err(error);
     }
     let settled: BTreeSet<String> = plan
         .settled
@@ -589,58 +640,290 @@ fn apply_answer(
     );
     let commit = notebook::commit_all(dir, &notebook::famulen(), &message)?;
     let status = if skipped.is_empty() {
-        format!("見た（変更の案 {} 件）", plan.edits.len())
+        format!("見た（変更の案 {proposed} 件）")
     } else {
         format!(
-            "見た（変更の案 {} 件のうち {} 件は当てなかった: {}）",
-            plan.edits.len(),
+            "見た（変更の案 {proposed} 件のうち {} 件は当てなかった: {}）",
             skipped.len(),
             skipped.join("; ")
         )
     };
     Ok(Outcome {
         status,
+        applied: true,
+        night: 0,
         commit,
         summary,
     })
 }
 
-/// Turn every `to_record` edit into forgetting its item, and give the memos
-/// those items become. Records are committed as they are written, so the
-/// memos are added only once the dream stands.
-fn take_memos(edits: &mut [Edit], before: &Snapshot) -> Vec<Patch> {
-    let mut memos = Vec::new();
-    for edit in edits.iter_mut().filter(|e| e.op == "to_record") {
-        let item = edit
-            .id
-            .as_deref()
-            .and_then(|id| before.entries.get(id))
-            .filter(|item| item.layer.is_kept());
-        let Some(item) = item else {
-            continue;
-        };
-        let text = item.entry.body().to_owned();
-        let title: String = text.chars().take(30).collect();
-        memos.push(Patch {
-            notes: Some(text),
-            workgroups: Some(item.entry.workgroup()),
-            source: "夢で記憶から移した".into(),
-            ..Patch::titled(title)
-        });
-        edit.op = "forget".into();
-        edit.reason = Some("記録に移した".into());
-    }
-    memos
+/// A memory on its way to the records.
+struct Moving {
+    kind: &'static str,
+    title: String,
+    text: String,
+    patch: Patch,
 }
 
-fn record_night(store: &Store, outcome: &Outcome) -> anyhow::Result<()> {
-    store.conn().execute(
+impl Moving {
+    /// Add the record, or log it at the open task that already says it, which
+    /// may be one this dream made. The record added, if one was.
+    fn write(self, held: &Held<'_>) -> anyhow::Result<Option<Record>> {
+        let records = held.records();
+        let workgroups = self.patch.workgroups.clone().unwrap_or_default();
+        let known = match self.kind {
+            TASKS => records.open_task_titled(&self.title, &workgroups)?,
+            _ => None,
+        };
+        match known {
+            Some(task) => {
+                let line = format!("記憶にもあった：{}", self.text);
+                // Logged already by a dream that did not stand after all.
+                if log_lines(&task).iter().any(|l| l.text == line) {
+                    return Ok(None);
+                }
+                let patch = Patch {
+                    log: vec![line],
+                    ..Patch::default()
+                };
+                held.change(Writer::Secretary, TASKS, &task.id, patch)?;
+                Ok(None)
+            }
+            None => held.add(Writer::Secretary, self.kind, self.patch).map(Some),
+        }
+    }
+}
+
+/// Write every record or none: when one cannot be written, those added before
+/// it are taken away, as their memories come back. Nobody else writes
+/// records meanwhile.
+fn write_all(records: &Records, moving: Vec<Moving>) -> anyhow::Result<()> {
+    let held = records.hold();
+    let mut added: Vec<Record> = Vec::new();
+    for moved in moving {
+        match moved.write(&held) {
+            Ok(record) => added.extend(record),
+            Err(error) => {
+                for record in added.iter().rev() {
+                    if let Err(error) = held.remove(Writer::Secretary, &record.kind, &record.id) {
+                        tracing::warn!(%error, record = record.target(), "could not take back a record");
+                    }
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Turn every `to_record` edit into forgetting its item, and give the records
+/// those items become. Records are committed as they are written, so they are
+/// added only once the dream stands; what could not be added is refused now,
+/// and its item stays in memory.
+fn take_records(
+    records: &Records,
+    dir: &Path,
+    edits: &mut Vec<Edit>,
+    before: &Snapshot,
+) -> anyhow::Result<(Vec<Moving>, Vec<String>)> {
+    let mut moving = Vec::new();
+    let mut skipped = Vec::new();
+    let mut kept = Vec::new();
+    let mut asked = BTreeSet::new();
+    // What the records say is taken before any edit is applied.
+    let edited: BTreeSet<Option<String>> = edits
+        .iter()
+        .filter(|e| e.op == "edit")
+        .map(|e| e.id.clone())
+        .collect();
+    for mut edit in std::mem::take(edits) {
+        if edit.op != "to_record" {
+            kept.push(edit);
+            continue;
+        }
+        if edited.contains(&edit.id) {
+            skipped.push(format!(
+                "to_record {}: edited in the same dream",
+                edit.id.as_deref().unwrap_or("")
+            ));
+            continue;
+        }
+        if !asked.insert(edit.id.clone()) {
+            skipped.push(format!(
+                "to_record {}: asked twice",
+                edit.id.as_deref().unwrap_or("")
+            ));
+            continue;
+        }
+        match to_record(records, dir, &edit, before) {
+            Ok(moved) => {
+                let kind = moved.kind;
+                moving.push(moved);
+                edit.op = "forget".into();
+                edit.reason = Some(
+                    if kind == TASKS {
+                        "タスクに移した"
+                    } else {
+                        "メモに移した"
+                    }
+                    .into(),
+                );
+                kept.push(edit);
+            }
+            Err(error) => skipped.push(format!(
+                "to_record {}: {error:#}",
+                edit.id.as_deref().unwrap_or("")
+            )),
+        }
+    }
+    *edits = kept;
+    Ok((moving, skipped))
+}
+
+/// The record one `to_record` edit asks for.
+fn to_record(
+    records: &Records,
+    dir: &Path,
+    edit: &Edit,
+    before: &Snapshot,
+) -> anyhow::Result<Moving> {
+    let id = edit.id.as_deref().unwrap_or_default();
+    let item = before
+        .entries
+        .get(id)
+        .filter(|item| item.layer.is_kept())
+        .ok_or_else(|| anyhow::anyhow!("no kept item"))?;
+    let asked = edit
+        .record
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("it does not say which record"))?;
+    let kind = *AS_RECORD
+        .iter()
+        .find(|k| **k == asked.kind)
+        .ok_or_else(|| anyhow::anyhow!("a memory cannot become one of {}", asked.kind))?;
+    let text = whole_text(dir, item)?;
+    let title = asked
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned);
+    if kind == MEMOS {
+        let title = title.unwrap_or_else(|| item.entry.body().chars().take(30).collect());
+        let patch = Patch {
+            notes: Some(text.clone()),
+            workgroups: Some(item.entry.workgroup()),
+            source: "夢で記憶から移した".into(),
+            ..Patch::titled(&title)
+        };
+        records.check_add(Writer::Secretary, kind, patch.clone())?;
+        return Ok(Moving {
+            kind,
+            title,
+            text,
+            patch,
+        });
+    }
+    let title = title.ok_or_else(|| anyhow::anyhow!("a task needs a title"))?;
+    let from = item
+        .entry
+        .from()
+        .map(|d| format!("、{d} から"))
+        .unwrap_or_default();
+    let place = item.file.to_string_lossy().replace('\\', "/");
+    let patch = task_patch(
+        title.clone(),
+        format!("{text}\n\n元は記憶の {place}（{id}{from}）"),
+        asked.start.as_deref(),
+        asked.due.as_deref(),
+    );
+    let patch = Patch {
+        workgroups: Some(item.entry.workgroup()),
+        source: "夢で記憶から移した".into(),
+        ..patch
+    };
+    records.check_add(Writer::Secretary, kind, patch.clone())?;
+    Ok(Moving {
+        kind,
+        title,
+        text,
+        patch,
+    })
+}
+
+/// All an item says: for a long-term memory its prose too, which the dream is
+/// not shown and the forgotten line does not keep.
+fn whole_text(dir: &Path, item: &memory::Located) -> anyhow::Result<String> {
+    let summary = item.entry.body();
+    let doc = memory::read_doc(dir, &item.file)?;
+    let prose = doc.long_text().unwrap_or_default().trim();
+    Ok(if prose.is_empty() || prose == summary {
+        summary.to_owned()
+    } else if prose.contains(summary) {
+        prose.to_owned()
+    } else {
+        format!("{summary}\n\n{prose}")
+    })
+}
+
+/// A task of the owner's, as the dream makes one.
+pub(crate) fn task_patch(
+    title: String,
+    notes: String,
+    start: Option<&str>,
+    due: Option<&str>,
+) -> Patch {
+    let mut patch = Patch {
+        notes: Some(notes),
+        ..Patch::titled(title)
+    }
+    .with("Assignee", OWNER);
+    for (name, value) in [("Start", start), ("Due", due)] {
+        if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
+            patch = patch.with(name, value);
+        }
+    }
+    patch
+}
+
+fn record_night(store: &Store, outcome: &Outcome) -> anyhow::Result<i64> {
+    let conn = store.conn();
+    conn.execute(
         "INSERT INTO dreams (at, commit_id, status, summary) VALUES (?1, ?2, ?3, ?4)",
         params![
             now(),
             outcome.commit,
             outcome.status,
             serde_json::to_string(&outcome.summary)?
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Add what was done after the dream of a night to its record.
+pub(crate) fn add_to_night(
+    store: &Store,
+    night: i64,
+    changes: Vec<memory::Change>,
+    status: &str,
+) -> anyhow::Result<()> {
+    let Some(mut was) = dreams_before(store, night + 1, 1)?
+        .into_iter()
+        .find(|n| n.id == night)
+    else {
+        return Ok(());
+    };
+    was.summary.changes.extend(changes);
+    was.summary = DreamDiff {
+        changes: was.summary.changes,
+    }
+    .summary();
+    store.conn().execute(
+        "UPDATE dreams SET status = ?2, summary = ?3 WHERE id = ?1",
+        params![
+            night,
+            format!("{}。{status}", was.status),
+            serde_json::to_string(&was.summary)?
         ],
     )?;
     Ok(())
@@ -786,7 +1069,7 @@ mod tests {
         let path = dir.path().to_owned();
         let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
             note(&path, "考えている間の気づき");
-            Ok(json!({ "edits": [{ "op": "to_record", "id": "c1" }, { "op": "forget", "id": "c2" }] }))
+            Ok(json!({ "edits": [{ "op": "to_record", "id": "c1", "record": { "kind": "memos", "title": "一" } }, { "op": "forget", "id": "c2" }] }))
         })
         .await
         .unwrap();
@@ -944,7 +1227,7 @@ mod tests {
             memory::write_file(dir.path(), rel, long(id, text, extra).as_bytes()).unwrap();
         }
         let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
-            Ok(json!({ "edits": [{ "op": "to_record", "id": "p1" }, { "op": "confirm", "id": "p2" }] }))
+            Ok(json!({ "edits": [{ "op": "to_record", "id": "p1", "record": { "kind": "memos", "title": "山田さんの社用電話" } }, { "op": "confirm", "id": "p2" }] }))
         })
         .await
         .unwrap();
@@ -967,6 +1250,272 @@ mod tests {
             kept.contains("uses: 2") || kept.contains("uses: '2'"),
             "{kept}"
         );
+    }
+
+    fn prospective(dir: &Path, items: &[(&str, &str)]) {
+        for (id, text) in items {
+            memory::write_file(
+                dir,
+                format!("long/prospective/{id}.md"),
+                long(id, text, "src: said\nfrom: 2026-11-20\nworkgroup: [work]\n").as_bytes(),
+            )
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn something_to_do_in_memory_becomes_a_task_of_the_owners_with_where_it_came_from() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[("p1", "来週田中さんに電話する"), ("p2", "残る")],
+        );
+        let outcome = dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |system, _| async move {
+                assert!(system.contains("it is a task, not a memo"), "{system}");
+                Ok(json!({ "edits": [{ "op": "to_record", "id": "p1", "record":
+                { "kind": "tasks", "title": "田中さんに電話する", "due": "2026-11-28" } }] }))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(outcome.applied, "{}", outcome.status);
+        assert!(dir.records.list(MEMOS).unwrap().is_empty());
+        let tasks = dir.records.list(TASKS).unwrap();
+        assert_eq!(tasks[0].title(), "田中さんに電話する");
+        assert_eq!(tasks[0].body.value("Due").as_deref(), Some("2026-11-28"));
+        assert_eq!(tasks[0].body.value("Assignee").as_deref(), Some(OWNER));
+        assert_eq!(tasks[0].workgroups(), ["work"]);
+        assert!(tasks[0].notes().contains("来週田中さんに電話する"));
+        assert!(tasks[0].notes().contains("long/prospective/p1.md"));
+        assert_eq!(
+            outcome.summary.changes[0].reason.as_deref(),
+            Some("タスクに移した")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_memory_that_becomes_a_record_takes_its_prose_along() {
+        let (dir, store) = setup();
+        prospective(dir.path(), &[("p2", "残る")]);
+        memory::write_file(
+            dir.path(),
+            "long/prospective/p1.md",
+            "---\nid: p1\nsummary: 棚を直す\n---\n\nねじは 4 mm。\n\n- 道具箱にある\n".as_bytes(),
+        )
+        .unwrap();
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [{ "op": "to_record", "id": "p1", "record": { "kind": "tasks", "title": "棚を直す" } }] }))
+        })
+        .await
+        .unwrap();
+        let notes = dir.records.list(TASKS).unwrap()[0].notes();
+        assert!(
+            notes.starts_with("棚を直す\n\nねじは 4 mm。\n\n- 道具箱にある"),
+            "{notes}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_record_of_no_kind_offered_or_with_a_bad_date_is_refused_and_stays_in_memory() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[("p1", "一"), ("p2", "二"), ("p3", "三"), ("p4", "四")],
+        );
+        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "to_record", "id": "p1", "record": { "kind": "events", "title": "x" } },
+                { "op": "to_record", "id": "p2", "record": { "kind": "tasks", "title": "x", "due": "来週" } },
+                { "op": "to_record", "id": "p3", "record": { "kind": "tasks", "title": " " } },
+                { "op": "to_record", "id": "p4" },
+            ] }))
+        })
+        .await
+        .unwrap();
+
+        assert!(
+            outcome.status.contains("4 件は当てなかった"),
+            "{}",
+            outcome.status
+        );
+        assert!(dir.records.list(TASKS).unwrap().is_empty());
+        let kept = Snapshot::take(dir.path()).unwrap().entries;
+        assert_eq!(kept.len(), 4);
+        assert!(kept.values().all(|l| l.layer.is_kept()));
+    }
+
+    #[tokio::test]
+    async fn a_memory_an_open_task_already_says_goes_to_its_log_instead_of_a_second_task() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[("p1", "請求書を送る。月末まで"), ("p2", "残る")],
+        );
+        dir.records
+            .add(
+                Writer::Owner,
+                TASKS,
+                Patch {
+                    workgroups: Some(vec!["work".into()]),
+                    ..Patch::titled("請求書を送る")
+                },
+            )
+            .unwrap();
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [{ "op": "to_record", "id": "p1", "record": { "kind": "tasks", "title": "請求書を 送る" } }] }))
+        })
+        .await
+        .unwrap();
+
+        let tasks = dir.records.list(TASKS).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(
+            crate::records::log_lines(&tasks[0])[0]
+                .text
+                .contains("月末まで")
+        );
+    }
+
+    #[tokio::test]
+    async fn memories_that_cannot_all_become_records_leave_none_behind() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[
+                ("p1", "山田さんの電話"),
+                ("p2", "番号は [[memory/long/prospective/p1]] にある"),
+                ("p3", "残る"),
+                ("p4", "残る二"),
+            ],
+        );
+        let tried = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "to_record", "id": "p1", "record": { "kind": "memos", "title": "一" } },
+                { "op": "to_record", "id": "p2", "record": { "kind": "memos", "title": "二" } },
+            ] }))
+        })
+        .await;
+        assert!(tried.is_err());
+        assert!(dir.records.list(MEMOS).unwrap().is_empty());
+        assert!(dir.path().join("long/prospective/p1.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_record_already_added_is_taken_back_when_a_later_one_cannot_be() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[
+                ("p1", "田中さんの電話"),
+                ("p2", "[[田中]] に電話する"),
+                ("p3", "残る"),
+                ("p4", "残る二"),
+            ],
+        );
+        dir.records
+            .add(
+                Writer::Owner,
+                crate::records::PARTIES,
+                Patch::titled("田中"),
+            )
+            .unwrap();
+        let tried = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "to_record", "id": "p1", "record": { "kind": "memos", "title": "田中" } },
+                { "op": "to_record", "id": "p2", "record": { "kind": "memos", "title": "二" } },
+            ] }))
+        })
+        .await;
+        assert!(tried.is_err());
+        assert!(dir.records.list(MEMOS).unwrap().is_empty());
+        assert!(dir.path().join("long/prospective/p1.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_memory_edited_in_the_same_dream_stays_and_does_not_become_what_it_said_before() {
+        let (dir, store) = setup();
+        prospective(dir.path(), &[("p1", "送付先は旧住所"), ("p2", "残る")]);
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "edit", "id": "p1", "text": "送付先は新住所" },
+                { "op": "to_record", "id": "p1", "record": { "kind": "memos", "title": "送付先" } },
+            ] }))
+        })
+        .await
+        .unwrap();
+        assert!(dir.records.list(MEMOS).unwrap().is_empty());
+        let kept = memory::read_file(dir.path(), "long/prospective/p1.md").unwrap();
+        assert!(kept.contains("新住所"), "{kept}");
+    }
+
+    #[tokio::test]
+    async fn memories_of_one_title_become_one_task_that_holds_them_all() {
+        let (dir, store) = setup();
+        prospective(
+            dir.path(),
+            &[
+                ("p1", "請求書を送る。月末まで"),
+                ("p2", "請求書は田中さん宛"),
+                ("p3", "残る"),
+                ("p4", "残る二"),
+            ],
+        );
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [
+                { "op": "to_record", "id": "p1", "record": { "kind": "tasks", "title": "請求書を送る" } },
+                { "op": "to_record", "id": "p2", "record": { "kind": "tasks", "title": "請求書を 送る" } },
+            ] }))
+        })
+        .await
+        .unwrap();
+
+        let tasks = dir.records.list(TASKS).unwrap();
+        assert_eq!(tasks.len(), 1);
+        for said in ["月末まで", "田中さん宛"] {
+            assert!(tasks[0].body.text().contains(said), "{said}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_night_says_what_was_done_after_its_dream() {
+        let (dir, store) = setup();
+        let first = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            Ok(json!({ "edits": [], "settled": [] }))
+        })
+        .await
+        .unwrap();
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async {
+            anyhow::bail!("later")
+        })
+        .await
+        .unwrap();
+        let change = memory::Change {
+            op: memory::Op::Doubted,
+            id: "x".into(),
+            file: "records/memos/x.md".into(),
+            text: "x".into(),
+            previous: None,
+            from_file: None,
+            replaces: None,
+            reason: Some("古い".into()),
+        };
+
+        add_to_night(&store, first.night, vec![change], "記録も見た").unwrap();
+
+        let nights = recent_dreams(&store, 5).unwrap();
+        assert!(
+            nights[0].status.ends_with("。記録も見た"),
+            "{}",
+            nights[0].status
+        );
+        assert_eq!(nights[0].summary.counts.doubted, 1);
+        assert!(nights[1].summary.changes.is_empty());
     }
 
     #[tokio::test]
@@ -1074,6 +1623,7 @@ mod tests {
                 text: Some("x".into()),
                 attrs: BTreeMap::new(),
                 reason: None,
+                record: None,
             }],
             day(),
         )
