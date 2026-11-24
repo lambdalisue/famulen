@@ -526,7 +526,7 @@ pub(crate) fn advance(
     from: &str,
     to: &str,
 ) -> Result<(), NotMoved> {
-    let _turn = git::committing();
+    let _turn = git::committing(notebook.root());
     // Files touched but left as they were would look changed.
     plain(notebook, &["update-index", "-q", "--refresh"])
         .output()
