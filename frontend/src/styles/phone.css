@@ -14,7 +14,7 @@
   .main { height: 100%; }
 
   /* The whole page scrolls as one, and clears what floats at the bottom. */
-  .pane, .pane:has(> .framed, > .split-pane) { padding: 8px 16px calc(262px + env(safe-area-inset-bottom)); background: var(--bg); gap: var(--s3); overflow-y: auto; display: block; }
+  .pane, .pane:has(> .framed, > .split-pane) { padding: 8px 16px calc(var(--composer, 182px) + 80px + env(safe-area-inset-bottom)); background: var(--bg); gap: var(--s3); overflow-y: auto; display: block; }
   .pane > * + * { margin-top: var(--s3); }
   .framed, .split-pane { display: block; }
   .split-left, .split-pane.open > .split-left, .split-pane.floats.open > .split-left { overflow: visible; padding: 0; gap: var(--s3); }
@@ -102,7 +102,7 @@
   body.typing.chat-open .chat { --under: 0px; }
   body.typing .m-dismiss { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--muted); }
 
-  .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + 190px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
+  .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + var(--composer, 182px) + 8px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
   .m-float > * { pointer-events: auto; }
   .m-toggles:is(nav), .m-toggles > .segs { background: var(--card); box-shadow: 0 4px 12px rgba(27, 27, 25, .18); }
   .m-toggles .segs-item.on, .m-toggles .segs-indicator { background: var(--soft); box-shadow: none; }
@@ -110,7 +110,7 @@
   dialog.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .dialog-positioner { align-items: flex-end; padding: 0; }
   .dialog, .dialog.wide { width: 100%; max-height: 92dvh; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
-  .toasts { bottom: calc(56px + 200px + env(safe-area-inset-bottom)); }
+  .toasts { bottom: calc(56px + var(--composer, 182px) + 18px + env(safe-area-inset-bottom)); }
 }
 
 /*

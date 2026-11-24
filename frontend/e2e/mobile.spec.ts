@@ -170,6 +170,13 @@ test("the memo list opens one memo on its own, and the back link returns to the 
   await page.getByRole("link", { name: "メモへ戻る" }).click();
   await expect(page).toHaveURL(/\/memos$/);
   await expect(row(page, "スマホで読むメモ")).toBeVisible();
+
+  // What was opened stays beside the composer, and the button that adds stands above it.
+  const add = page.getByRole("button", { name: "メモを書く" });
+  const [button, chat] = [await add.boundingBox(), await page.locator(".chat").boundingBox()];
+  expect((button?.y ?? 0) + (button?.height ?? 0)).toBeLessThanOrEqual(chat?.y ?? 0);
+  await add.tap();
+  await expect(page.getByRole("dialog")).toBeVisible();
 });
 
 test("the task page's floating button opens the dialog that adds a task", async ({ page }) => {
