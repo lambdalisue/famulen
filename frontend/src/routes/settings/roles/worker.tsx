@@ -1,12 +1,14 @@
-import { createAsync } from "@solidjs/router";
-import { createSignal, For, Show } from "solid-js";
+import { createAsync, useNavigate } from "@solidjs/router";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import LogSheet from "~/components/logs/LogSheet";
+import Markdown from "~/components/Markdown";
 import { RunResult } from "~/components/records/Delegated";
 import RoleModel from "~/components/RoleModel";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import type { WorkerFinish, WorkerSettings } from "~/gen/famulen/v1/workers_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
+import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
 import { delegatedQuery, workerSettingsQuery } from "~/lib/workers";
 import * as icons from "~/lib/icons";
@@ -17,18 +19,20 @@ import {
   EmptyState,
   Field,
   IconButton,
+  LinkButton,
   List,
   ListRow,
   NumberField,
   PageHeader,
   Section,
   Switch,
+  Tag,
   TextArea,
   TextField,
   whenConfirmed,
 } from "~/components/ui";
 
-type Change = Partial<{ slots: number; paused: boolean; finishes: { directory: string; steps: string }[] }>;
+type Change = Partial<{ slots: number; paused: boolean; finishes: { repository: string; steps: string }[] }>;
 
 let saving: Promise<unknown> = Promise.resolve();
 
@@ -71,29 +75,59 @@ const EXAMPLE = `1. 差分をレビューし、指摘を直す
 3. CI が通るまで直し、通ったらマージする
 4. 動いているものに反映する`;
 
+/** One finish: `own` as the owner wrote it, or as Famulen brings it along; `bundled` when there is one to go back to. */
+type Shown = { repository: string; steps: string; own: boolean; bundled: boolean };
+
+const sameRepository = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** The owner's own and what Famulen brings along, those for any work first. */
+function shown(s: WorkerSettings): Shown[] {
+  const has = (all: WorkerFinish[], f: WorkerFinish) => all.some((o) => sameRepository(o.repository, f.repository));
+  return [
+    ...s.finishes.map((f) => ({ repository: f.repository, steps: f.steps, own: true, bundled: has(s.bundledFinishes, f) })),
+    ...s.bundledFinishes
+      .filter((f) => !has(s.finishes, f))
+      .map((f) => ({ repository: f.repository, steps: f.steps, own: false, bundled: true })),
+  ].sort((a, b) => (a.repository < b.repository ? -1 : 1));
+}
+
 /** Writes one finish; `was` is the one it takes the place of. */
-function FinishDialog(props: { was?: WorkerFinish; open: boolean; onOpenChange: (open: boolean) => void }) {
-  const [directory, setDirectory] = createSignal(props.was?.directory ?? "");
+function FinishDialog(props: {
+  was?: Shown;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (now: { repository: string }) => void;
+}) {
+  const [repository, setRepository] = createSignal(props.was?.repository ?? "");
   const [steps, setSteps] = createSignal(props.was?.steps ?? "");
-  const was = props.was?.directory;
+  const was = props.was?.repository;
   const submit = async (e: SubmitEvent) => {
     e.preventDefault();
-    const now = { directory: directory().trim(), steps: steps().trim() };
-    const saved = await save((s) => ({
-      finishes:
-        was !== undefined && s.finishes.some((f) => f.directory === was)
-          ? s.finishes.map((f) => (f.directory === was ? now : f))
-          : [...s.finishes, now],
-    }));
-    if (saved) props.onOpenChange(false);
+    const now = { repository: repository().trim(), steps: steps().trim() };
+    let place = -1;
+    const saved = await save((s) => {
+      place = was === undefined ? -1 : s.finishes.findIndex((f) => sameRepository(f.repository, was));
+      if (place < 0) place = s.finishes.length;
+      return { finishes: [...s.finishes.slice(0, place), now, ...s.finishes.slice(place + 1)] };
+    });
+    if (!saved) return;
+    // The address it was written by is kept as its one name.
+    props.onSaved(saved.finishes[place]);
+    props.onOpenChange(false);
   };
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.was ? "仕上げを直す" : "仕上げを足す"} size="wide">
       <form class="stack" onSubmit={submit}>
-        <Field label="ディレクトリ" hint="この中の仕事に使う。空ならどの仕事にも使う。">
-          <TextField class="mono" value={directory()} placeholder="/home/me/src/project" onInput={(e) => setDirectory(e.currentTarget.value)} />
+        <Field label="リポジトリ" hint="クローンした場所によらず、このリポジトリの仕事に使う。空なら、ほかのどの仕事にも使う。">
+          <TextField
+            class="mono"
+            value={repository()}
+            readOnly={props.was?.bundled}
+            placeholder="github.com/owner/name"
+            onInput={(e) => setRepository(e.currentTarget.value)}
+          />
         </Field>
-        <Field label="手順">
+        <Field label="手順" hint="Markdown で書ける。">
           <TextArea rows="10" required value={steps()} placeholder={EXAMPLE} onInput={(e) => setSteps(e.currentTarget.value)} />
         </Field>
         <DialogActions submit="保存" disabled={!steps().trim()} />
@@ -102,45 +136,98 @@ function FinishDialog(props: { was?: WorkerFinish; open: boolean; onOpenChange: 
   );
 }
 
-/** How work on code is finished: the owner's own steps, handed to every Adroit session that may change code. */
-function Finishes(props: { finishes: WorkerFinish[] }) {
-  const [editing, setEditing] = createSignal<{ was?: WorkerFinish }>();
-  const name = (f: WorkerFinish) => f.directory || "どの仕事にも";
-  const remove = (f: WorkerFinish) =>
-    whenConfirmed(
-      `「${name(f)}」の仕上げを消す`,
-      "消す",
-      () => save((s) => ({ finishes: s.finishes.filter((o) => o.directory !== f.directory) }), "消した"),
-    );
+const PAGE = "/settings/roles/worker";
+/** Stands in the address for the finish of any work; a repository's name has a slash, so is never this. */
+const ANY = "any";
+
+const keyOf = (f: { repository: string }) => f.repository || ANY;
+const hrefOf = (f: { repository: string }) => withParams(PAGE, { finish: keyOf(f) });
+const nameOf = (f: Shown) => f.repository || "どの仕事にも";
+
+const lastPart = (repository: string) => repository.split("/").at(-1) ?? repository;
+
+/** How work on code is finished: the owner's own steps, one set picked from the list and read beside it. */
+function Finishes(props: { settings: WorkerSettings }) {
+  const navigate = useNavigate();
+  const asked = useParam("finish");
+  const [editing, setEditing] = createSignal<{ was?: Shown }>();
+  const all = createMemo(() => shown(props.settings));
+  const picked = createMemo(() => all().find((f) => keyOf(f) === asked()));
+  const remove = (f: Shown) =>
+    whenConfirmed(`「${nameOf(f)}」の仕上げを${f.bundled ? "既定に戻す" : "消す"}`, f.bundled ? "戻す" : "消す", async () => {
+      const without = (s: WorkerSettings) => ({ finishes: s.finishes.filter((o) => !sameRepository(o.repository, f.repository)) });
+      const done = await save(without, f.bundled ? "既定に戻した" : "消した");
+      if (done && !f.bundled) navigate(PAGE, { scroll: false, replace: true });
+    });
   return (
     <Section
       title="仕上げ"
       label="仕上げ"
-      note="Adroit に委ねた実装を、どう終わらせるか。秘書が何を書いたかによらず、頼みに添えて渡す。仕事にいちばん近いディレクトリのもの一つを使う。"
+      note="外のエージェントに委ねた、コードを変える仕事を、どう終わらせるか。秘書が何を書いたかによらず、頼みに添えて渡す。仕事のリポジトリのものを使い、なければ「どの仕事にも」のものを使う。"
       action={
         <Button small icon={icons.plus} onClick={() => setEditing({})}>
           仕上げを足す
         </Button>
       }
     >
-      <List>
-        <For each={props.finishes} fallback={<EmptyState>まだない。頼みに書かれたとおりに終わる</EmptyState>}>
-          {(f) => (
-            <ListRow
-              title={<span classList={{ mono: !!f.directory }}>{name(f)}</span>}
-              sub={<span class="finish-steps">{f.steps}</span>}
-              end={
-                <>
-                  <IconButton plain icon={icons.pencil} label={`「${name(f)}」の仕上げを直す`} onClick={() => setEditing({ was: f })} />
-                  <IconButton plain icon={icons.x} label={`「${name(f)}」の仕上げを消す`} onClick={() => void remove(f)} />
-                </>
-              }
-            />
-          )}
-        </For>
-      </List>
+      <div class="finishes">
+        <div class="finish-split" classList={{ open: !!picked() }}>
+          <List class="finish-list" label="仕上げの一覧">
+            <For each={all()} fallback={<EmptyState>まだない。頼みに書かれたとおりに終わる</EmptyState>}>
+              {(f) => (
+                <ListRow
+                  href={hrefOf(f)}
+                  current={picked()?.repository === f.repository}
+                  title={f.repository ? <span class="mono">{lastPart(f.repository)}</span> : nameOf(f)}
+                  sub={f.repository ? <span class="mono finish-path">{f.repository}</span> : "ほかに当てはまるものがないとき"}
+                  end={f.own ? undefined : <Tag>既定</Tag>}
+                  leads
+                />
+              )}
+            </For>
+          </List>
+          <Show when={picked()}>
+            {(f) => (
+              <section class="finish-detail" aria-label="仕上げの詳細">
+                <LinkButton small class="finish-back" icon={icons.chevronLeft} href={PAGE} noScroll>
+                  仕上げの一覧
+                </LinkButton>
+                <header class="finish-head">
+                  <h3 classList={{ mono: !!f().repository }}>{nameOf(f())}</h3>
+                  <IconButton plain icon={icons.pencil} label={`「${nameOf(f())}」の仕上げを直す`} onClick={() => setEditing({ was: f() })} />
+                  <Show when={f().own}>
+                    <IconButton
+                      plain
+                      icon={f().bundled ? icons.refresh : icons.trash}
+                      label={`「${nameOf(f())}」の仕上げを${f().bundled ? "既定に戻す" : "消す"}`}
+                      onClick={() => void remove(f())}
+                    />
+                  </Show>
+                  <IconButton
+                    plain
+                    class="finish-close"
+                    icon={icons.x}
+                    label="詳細を閉じる"
+                    onClick={() => navigate(PAGE, { scroll: false })}
+                  />
+                </header>
+                <div class="rec-prose">
+                  <Markdown text={f().steps} />
+                </div>
+              </section>
+            )}
+          </Show>
+        </div>
+      </div>
       <Show when={editing()} keyed>
-        {(e) => <FinishDialog was={e.was} open onOpenChange={(open) => !open && setEditing(undefined)} />}
+        {(e) => (
+          <FinishDialog
+            was={e.was}
+            open
+            onOpenChange={(open) => !open && setEditing(undefined)}
+            onSaved={(f) => navigate(hrefOf(f), { scroll: false, replace: !!e.was })}
+          />
+        )}
       </Show>
     </Section>
   );
@@ -167,8 +254,7 @@ export default function Worker() {
         title="手代"
         note={
           <>
-            秘書やあなたがタスクとして委ねた仕事を、一つずつ片付けるエージェント。仕事ごとに生まれ、渡された道具と手帳のファイルだけを使い、済めば消える。あなたに確かめる道具は使えない。Adroit
-            に委ねた仕事は、あなたの承認を得てから Adroit のセッションとして始まる。
+            秘書やあなたがタスクとして委ねた仕事を、一つずつ片付けるエージェント。仕事ごとに生まれ、渡された道具と手帳のファイルだけを使い、済めば消える。あなたに確かめる道具は使えない。外のエージェントに委ねた仕事は、あなたの承認を得てから、そのセッションとして始まる。
           </>
         }
       />
@@ -181,7 +267,7 @@ export default function Worker() {
           {(s) => (
             <>
               <Pool settings={s()} />
-              <Finishes finishes={s().finishes} />
+              <Finishes settings={s()} />
             </>
           )}
         </Show>

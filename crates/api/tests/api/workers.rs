@@ -200,9 +200,13 @@ async fn the_owner_says_how_work_on_code_is_finished() {
     .await;
     let s = call(&api, "WorkerService/GetWorkerSettings", json!({})).await;
     assert_eq!(s["finishes"], finishes);
+    assert_eq!(
+        s["bundledFinishes"][0]["repository"],
+        "github.com/lambdalisue/famulen"
+    );
     for bad in [
         json!({ "steps": " " }),
-        json!({ "directory": "src", "steps": "x" }),
+        json!({ "repository": "src", "steps": "x" }),
     ] {
         let (status, _) = try_call(
             &api,

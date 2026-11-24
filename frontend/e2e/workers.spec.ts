@@ -111,27 +111,85 @@ test("how work on code is finished is written, rewritten and removed", async ({ 
   const section = page.getByRole("region", { name: "仕上げ" });
   await section.getByRole("button", { name: "仕上げを足す" }).click();
   const dialog = page.getByRole("dialog", { name: "仕上げを足す" });
-  await dialog.getByLabel("ディレクトリ").fill("src");
+  await dialog.getByLabel("リポジトリ").fill("src");
   await dialog.getByLabel("手順").fill("1. レビューする");
   await dialog.getByRole("button", { name: "保存" }).click();
-  await expect(toast(page)).toContainText("absolute path");
-  await dialog.getByLabel("ディレクトリ").fill("/src");
+  await expect(toast(page)).toContainText("host/owner/name");
+  await dialog.getByLabel("リポジトリ").fill("https://github.com/me/src.git");
   await dialog.getByRole("button", { name: "保存" }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(section).toContainText("1. レビューする");
+  const read = section.getByRole("region", { name: "仕上げの詳細" });
+  await expect(read.getByRole("listitem")).toHaveText("レビューする");
+  await expect(read.getByRole("heading", { name: "github.com/me/src", exact: true })).toBeVisible();
 
   // The other settings on the page leave it as it is.
   await page.getByText("一時停止する").click();
-  await expect.poll(() => call(request, "WorkerService", "GetWorkerSettings")).toMatchObject({ paused: true, finishes: [{ directory: "/src" }] });
+  await expect.poll(() => call(request, "WorkerService", "GetWorkerSettings")).toMatchObject({ paused: true, finishes: [{ repository: "github.com/me/src" }] });
 
-  await section.getByRole("button", { name: "「/src」の仕上げを直す" }).click();
+  await section.getByRole("button", { name: "「github.com/me/src」の仕上げを直す" }).click();
   await page.getByLabel("手順").fill("1. マージする");
   await page.getByRole("button", { name: "保存" }).click();
-  await expect(section).toContainText("1. マージする");
-  await section.getByRole("button", { name: "「/src」の仕上げを消す" }).click();
+  await expect(read.getByRole("listitem")).toHaveText("マージする");
+  await section.getByRole("button", { name: "「github.com/me/src」の仕上げを消す" }).click();
   await agree(page, "消す");
-  await expect(section).toContainText("まだない");
+  await expect(read).toHaveCount(0);
+  await expect(section).not.toContainText("github.com/me/src");
   await settle(request, false);
+});
+
+test("one finish is picked from the list and read beside it as Markdown, or in its place where there is no room", async ({ page, request }) => {
+  await call(request, "WorkerService", "SetWorkerSettings", {
+    slots: 2,
+    finishes: [
+      { repository: "github.com/me/api", steps: "# API の手順\n\n- **全部** 試す" },
+      { repository: "", steps: "1. マージする" },
+    ],
+  });
+  await visit(page, "/settings/roles/worker", "設定 · 手代");
+  const section = page.getByRole("region", { name: "仕上げ", exact: true });
+  const list = section.getByRole("list", { name: "仕上げの一覧" });
+  const read = section.getByRole("region", { name: "仕上げの詳細" });
+  await expect(list.getByRole("link")).toHaveText(["どの仕事にも", "famulen", "api"]);
+  await expect(read).toHaveCount(0);
+  await expect(section).not.toContainText("マージする");
+
+  await list.getByRole("link", { name: "api" }).click();
+  await expect(read.getByRole("heading", { name: "API の手順" })).toBeVisible();
+  await expect(read.locator("strong")).toHaveText("全部");
+  await list.getByRole("link", { name: "どの仕事にも" }).click();
+  await expect(read.getByRole("listitem")).toHaveText("マージする");
+  await page.reload();
+  await expect(read.getByRole("listitem")).toHaveText("マージする");
+  await expect(list).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(read).toBeVisible();
+  await expect(list).toBeHidden();
+  await read.getByRole("link", { name: "仕上げの一覧" }).click();
+  await expect(read).toHaveCount(0);
+  await expect(list).toBeVisible();
+  await settle(request, false);
+});
+
+test("the finish Famulen brings along is put in the owner's words, and back", async ({ page, request }) => {
+  await settle(request, false);
+  await visit(page, "/settings/roles/worker", "設定 · 手代");
+  const section = page.getByRole("region", { name: "仕上げ", exact: true });
+  const row = section.getByRole("listitem").filter({ hasText: "github.com/lambdalisue/famulen" });
+  await expect(row).toContainText("既定");
+  await row.getByRole("link").click();
+  const read = section.getByRole("region", { name: "仕上げの詳細" });
+  await expect(read).toContainText("just ci");
+
+  await read.getByRole("button", { name: "仕上げを直す" }).click();
+  await page.getByLabel("手順").fill("1. 自分で見る");
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(read.getByRole("listitem")).toHaveText("自分で見る");
+  await expect(row).not.toContainText("既定");
+  await read.getByRole("button", { name: "既定に戻す" }).click();
+  await agree(page, "戻す");
+  await expect(read).toContainText("just ci");
+  await expect(row).toContainText("既定");
 });
 
 test("how far a delegated task got and what its worker writes are seen as it goes on", async ({ page, request }) => {

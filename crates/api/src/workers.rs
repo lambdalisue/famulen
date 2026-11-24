@@ -84,18 +84,22 @@ fn standing(s: Standing) -> (&'static str, String) {
     (name, String::new())
 }
 
+fn finish(f: Finish) -> WorkerFinish {
+    WorkerFinish {
+        repository: f.repository,
+        steps: f.steps,
+        ..Default::default()
+    }
+}
+
 fn settings(s: Settings) -> WorkerSettings {
     WorkerSettings {
         slots: s.slots as i32,
         paused: s.paused,
-        finishes: s
-            .finishes
+        finishes: s.finishes.into_iter().map(finish).collect(),
+        bundled_finishes: workers::bundled_finishes()
             .into_iter()
-            .map(|f| WorkerFinish {
-                directory: f.directory,
-                steps: f.steps,
-                ..Default::default()
-            })
+            .map(finish)
             .collect(),
         ..Default::default()
     }
@@ -335,11 +339,9 @@ impl WorkerService for Api {
                 .to_owned_message()
                 .finishes
                 .into_iter()
-                .map(|f| Finish {
-                    directory: f.directory.trim().to_owned(),
-                    steps: f.steps.trim().to_owned(),
-                })
-                .collect(),
+                .map(|f| Finish::new(&f.repository, &f.steps))
+                .collect::<anyhow::Result<_>>()
+                .or_fail()?,
         };
         chosen.save(&self.app.store).or_fail()?;
         self.app.journal.record(

@@ -151,7 +151,7 @@ impl Pool {
                         let mut order = ordered(&self.app, &next.task, &next.code)?;
                         order.scopes = scopes(&self.app, &next.task.id, &order)?;
                         let settings = super::Settings::load(&self.app.store)?;
-                        order.finish = steps_for(&settings.finishes, &order);
+                        order.finish = steps_for(&settings.finishes, &order).await;
                         self.app.workers.runs.begin(&next.task.id, &order)?
                     }
                 });
