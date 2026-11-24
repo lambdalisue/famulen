@@ -318,7 +318,7 @@ name = "Say"
 [transport.command]
 program = "perl"
 unset = ["FAMULEN_TEST_UNSET"]
-timeout = "2s"
+timeout = "TIMEOUT"
 
 [[commands]]
 name = "echo"
@@ -343,7 +343,13 @@ description = "Never end."
 args = ["-e", "sleep 30"]
 "#;
 
+    /// Long enough for a busy machine to start the program.
     fn gateway() -> (Gateway, Connection) {
+        gateway_waiting("2m")
+    }
+
+    fn gateway_waiting(timeout: &str) -> (Gateway, Connection) {
+        let say = SAY.replace("TIMEOUT", timeout);
         let store = Store::open_in_memory().unwrap();
         let g = Gateway::new(
             store.clone(),
@@ -351,7 +357,7 @@ args = ["-e", "sleep 30"]
             reqwest::Client::new(),
             None,
         )
-        .with_definitions(None, &[("say.toml".into(), SAY.into())]);
+        .with_definitions(None, &[("say.toml".into(), say)]);
         let c = g.add_defined("say", Default::default(), None).unwrap();
         (g, c)
     }
@@ -381,6 +387,7 @@ args = ["-e", "sleep 30"]
         let failed = g.call_as_owner(&c, "fail", json!({})).await.unwrap();
         assert!(failed.is_error);
         assert_eq!(failed.text, "it broke");
+        let (g, c) = gateway_waiting("2s");
         let hung = g.call_as_owner(&c, "hang", json!({})).await.unwrap_err();
         assert!(hung.to_string().contains("did not end"), "{hung}");
     }
