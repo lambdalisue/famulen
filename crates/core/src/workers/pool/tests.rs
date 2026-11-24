@@ -848,23 +848,10 @@ async fn a_task_is_bound_to_where_it_was_delegated_and_to_nowhere_when_that_is_n
     }
 }
 
-#[tokio::test]
-async fn agents_without_a_model_of_their_own_are_bounded_a_day() {
-    let b = bench("pool-unassigned", Fake::default());
-    b.agent("x");
-    let spec = b.app.models.registered().unwrap()[0].spec.clone();
-    for _ in 0..crate::workers::UNASSIGNED_RUNS {
-        let usage = crate::models::Usage {
-            calls: 1,
-            ..Default::default()
-        };
-        b.app
-            .models
-            .record(crate::models::Role::Worker, &spec, &usage)
-            .unwrap();
-    }
-    b.pool.tick().await.unwrap();
-    assert!(b.fake.begun().is_empty());
+fn cap_worker(app: &App, calls: f64) {
+    let worker = crate::models::Role::Worker;
+    let model = app.models.assignment(worker).unwrap().unwrap().model;
+    app.models.assign(worker, model, Some(calls), None).unwrap();
 }
 
 #[tokio::test]
@@ -876,11 +863,12 @@ async fn a_start_tried_again_is_bounded_as_what_was_ordered_then() {
             ..Fake::default()
         },
     );
+    cap_worker(&b.app, 1.0);
     let id = b.agent("x");
     b.pool.tick().await.unwrap();
     let spec = b.app.models.registered().unwrap()[0].spec.clone();
     let usage = crate::models::Usage {
-        calls: crate::workers::UNASSIGNED_RUNS as _,
+        calls: 1,
         ..Default::default()
     };
     b.app
@@ -1339,13 +1327,8 @@ async fn an_agent_counts_before_the_next_is_started() {
         let task = delegated(title, &[("Runner", "agent")]);
         app.records.add(Writer::Secretary, TASKS, task).unwrap();
     }
-    let spec = app.models.registered().unwrap()[0].spec.clone();
-    let usage = crate::models::Usage {
-        calls: (crate::workers::UNASSIGNED_RUNS - 1) as _,
-        ..Default::default()
-    };
+    cap_worker(&app, 1.0);
     let worker = crate::models::Role::Worker;
-    app.models.record(worker, &spec, &usage).unwrap();
     let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
     pool.tick().await.unwrap();
     assert_eq!(app.workers.runs.recent(9).unwrap().len(), 1);
@@ -1354,7 +1337,7 @@ async fn an_agent_counts_before_the_next_is_started() {
         .used_today(worker, app.tz(), Utc::now())
         .unwrap()
         .1;
-    assert_eq!(used, crate::workers::UNASSIGNED_RUNS);
+    assert_eq!(used, 1);
 }
 
 #[cfg(unix)]

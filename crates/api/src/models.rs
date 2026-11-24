@@ -172,13 +172,12 @@ impl ModelService for Api {
             .ok_or_else(|| fail("say which role"))?;
         let cap = (r.cap > 0.0).then_some(r.cap);
         if r.model.is_empty() {
-            self.app.models.unassign(role).or_fail()?;
-        } else {
-            self.app
-                .models
-                .assign(role, &r.model, cap, Some(&r.effort))
-                .or_fail()?;
+            return Err(fail("choose a model"));
         }
+        self.app
+            .models
+            .assign(role, &r.model, cap, Some(&r.effort))
+            .or_fail()?;
         if role == CoreRole::Secretary {
             self.app.changed.notify_one();
         }

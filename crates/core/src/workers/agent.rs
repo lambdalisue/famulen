@@ -46,23 +46,25 @@ pub(super) struct Finish {
     pub(super) text: String,
 }
 
-/// The model a worker runs on: its role's, or the secretary's while the role
-/// has none.
+/// The model a worker runs on, as its role is assigned.
 fn model(app: &App) -> anyhow::Result<(String, Option<String>, Option<String>, ModelSpec)> {
     let effective = app.settings.effective()?;
-    if let Some(assigned) = app.models.assignment(Role::Worker)?
-        && let Some(m) = app.models.model(&assigned.model)?
-    {
-        let bin = m
-            .spec
-            .endpoint
-            .clone()
-            .filter(|e| !e.is_empty())
-            .unwrap_or(effective.claude.bin);
-        let model = Some(m.spec.model.clone()).filter(|m| !m.is_empty());
-        return Ok((bin, model, assigned.effort, m.spec));
-    }
-    Ok(crate::runtime::secretary_model(app, &effective))
+    let assigned = app
+        .models
+        .assignment(Role::Worker)?
+        .context("no model is assigned to the worker")?;
+    let m = app
+        .models
+        .model(&assigned.model)?
+        .with_context(|| format!("model {} is gone", assigned.model))?;
+    let bin = m
+        .spec
+        .endpoint
+        .clone()
+        .filter(|e| !e.is_empty())
+        .unwrap_or(effective.claude.bin);
+    let model = Some(m.spec.model.clone()).filter(|m| !m.is_empty());
+    Ok((bin, model, assigned.effort, m.spec))
 }
 
 /// The arguments a worker's Claude Code is started with. The directory of the

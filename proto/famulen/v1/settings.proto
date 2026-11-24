@@ -285,7 +285,7 @@ message Models {
 
 message AssignRoleRequest {
   Role role = 1;
-  // A registered model id, or empty to unassign.
+  // A registered model id.
   string model = 2;
   double cap = 3;
   // low, medium, high, xhigh, max, or empty for the model's default;

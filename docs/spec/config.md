@@ -30,7 +30,7 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 
 | 環境変数 | 設定ファイル | 中身 | 既定 |
 | --- | --- | --- | --- |
-| `FAMULEN_CLAUDE_MODEL` | `[claude] model` | 秘書の[役割](models.md#役割)にモデルを割り当てていないときの、Claude Code のモデル | Claude Code の既定 |
+| `FAMULEN_CLAUDE_MODEL` | `[claude] model` | 秘書の[役割](models.md#役割)に割り当てたものがモデル名を持たないときの、Claude Code のモデル | Claude Code の既定 |
 | `FAMULEN_CLAUDE_EFFORT` | `[claude] effort` | 秘書の割り当てに考える深さがないときの深さ（`low`・`medium`・`high`・`xhigh`・`max`） | Claude Code の既定 |
 | （なし） | `[claude] bin` | Claude Code の実行ファイル | `claude` |
 | `FAMULEN_TIMEZONE` | `timezone` | 主人のタイムゾーン（`Asia/Tokyo` などの IANA の名前） | このマシンのタイムゾーン、分からなければ UTC |

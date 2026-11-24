@@ -101,9 +101,6 @@ function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: st
               if (model !== r().model) void assign(model, r().cap);
             }}
           >
-            <option value="" selected={!r().model}>
-              使わない
-            </option>
             <For each={choices()}>
               {(m) => (
                 <option value={m.id} selected={m.id === r().model}>

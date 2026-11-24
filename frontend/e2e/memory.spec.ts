@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { call, detail, record, row, toast, visit } from "./support";
 
-type Models = { roles: { role: string; choices: string[] }[] };
+type Models = { roles: { role: string; model?: string; effort?: string; choices: string[] }[] };
 type Dreams = { dreams?: { id: string }[] };
 
 const LAYERS: [string, string][] = [
@@ -285,13 +285,12 @@ test.describe("memory drawn as Markdown", () => {
 test.describe("the dream button", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("is off while no dream model is chosen, and says where to choose one", async ({ page, request }) => {
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
-    await visit(page, "/memory", "記憶 · 夢");
-
-    await expect(page.getByRole("button", { name: "今すぐ夢を見る" })).toBeDisabled();
-    const why = page.getByRole("link", { name: "夢のモデルが決まっていない。設定の夢で決める" });
-    await expect(why).toHaveAttribute("href", "/settings/roles/dream");
+  let usual: { model: string; effort?: string };
+  test.beforeAll(async ({ request }) => {
+    const { roles } = await call<Models>(request, "ModelService", "GetModels");
+    const dream = roles.find((r) => r.role === "ROLE_DREAM");
+    expect(dream?.model).toBeTruthy();
+    usual = { model: dream?.model ?? "", effort: dream?.effort };
   });
 
   test("says the dream started, and the night it dreamt shows once it is over", async ({ page, request }) => {
@@ -312,7 +311,7 @@ test.describe("the dream button", () => {
     await expect(page.getByText("まだ夢を見ていない")).toHaveCount(0);
     await expect(button).toBeEnabled();
 
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", ...usual });
   });
 
   test("a night that forgot an item shows its commit, where the item went and why", async ({ page, request }) => {
@@ -347,8 +346,19 @@ test.describe("the dream button", () => {
     await expect(change.locator(".tag")).toHaveText("忘れた");
     await expect(change.locator(".sub")).toHaveText(/^long\/prospective\/e2e-call\.md → forgotten\/.+\.md · e2eで済んだ$/);
 
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", ...usual });
     await call(request, "ModelService", "UnregisterModel", { id: model.id });
+  });
+
+  test("is off once today's cap is reached, and says where to change it", async ({ page, request }) => {
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", ...usual, cap: 1 });
+    await visit(page, "/memory", "記憶 · 夢");
+
+    await expect(page.getByRole("button", { name: "今すぐ夢を見る" })).toBeDisabled();
+    const why = page.getByRole("link", { name: "今日の上限（1 回）に達した。設定の夢で上限を変えられる" });
+    await expect(why).toHaveAttribute("href", "/settings/roles/dream");
+
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", ...usual });
   });
 
   test("a night makes a task of a memo and asks about a doubtful record, which the owner clears", async ({ page, request }) => {
@@ -408,7 +418,7 @@ test.describe("the dream button", () => {
     const open = await call<Listed>(request, "RecordService", "ListRecords", { kind: "tasks", openOnly: true });
     expect(open.records?.map((t) => t.title).filter((t) => t.includes("e2e-stale"))).toEqual([]);
 
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
+    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", ...usual });
     await call(request, "ModelService", "UnregisterModel", { id: model.id });
   });
 });

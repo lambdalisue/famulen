@@ -475,13 +475,20 @@ test.describe("役のモデル", () => {
     await expect(tidy).not.toBeChecked();
   });
 
-  test("choosing 使わない takes the model off a role", async ({ page }) => {
-    await visit(page, "/settings/roles/dream", "設定 · 夢");
-    await chooseModel(page, "使わない");
-    await expect(toast(page)).toHaveText("保存した");
-    await page.reload();
-    await expect(modelPicker(page).locator("option:checked")).toHaveText("使わない");
-  });
+  for (const [path, title] of [
+    ["/settings", "設定 · 秘書"],
+    ["/settings/roles/worker", "設定 · 手代"],
+    ["/settings/lookout", "設定 · 見張り"],
+    ["/settings/roles/triage", "設定 · トリアージ"],
+    ["/settings/roles/assess", "設定 · 見極め"],
+    ["/settings/roles/dream", "設定 · 夢"],
+  ] as const) {
+    test(`${title} starts with a model and offers no way to have none`, async ({ page }) => {
+      await visit(page, path, title);
+      await expect(modelPicker(page)).not.toHaveValue("");
+      await expect(modelPicker(page).locator('option[value=""]')).toHaveCount(0);
+    });
+  }
 
   test("the dream's effort is set on its slider, kept after a reload and apart from the secretary's", async ({
     page,
@@ -634,19 +641,10 @@ test.describe("夢の頁", () => {
     expect((await plan(request)).coreLines).toBe(80);
   });
 
-  test("今すぐ夢を見る sits at the foot of the page and is off while no dream model is chosen", async ({
-    page,
-    request,
-  }) => {
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
-    await visit(page, "/settings/roles/dream", "設定 · 夢");
-    await expect(page.getByRole("button", { name: "今すぐ夢を見る" })).toBeDisabled();
-    await expect(page.getByText("夢のモデルが決まっていない。設定の夢で決める")).toBeVisible();
-
+  test("今すぐ夢を見る sits at the foot of the page", async ({ page, request }) => {
     await useClaudeForDream(request);
-    await page.reload();
+    await visit(page, "/settings/roles/dream", "設定 · 夢");
     await expect(page.getByRole("button", { name: "今すぐ夢を見る" })).toBeEnabled();
-    await call(request, "ModelService", "AssignRole", { role: "ROLE_DREAM", model: "" });
   });
 });
 

@@ -34,6 +34,26 @@ async fn each_role_keeps_its_own_effort_with_its_model() {
 }
 
 #[tokio::test]
+async fn taking_the_model_off_a_role_is_refused() {
+    let dir = temp();
+    let api = open(&dir);
+    let (_, before) = try_call(&api, "ModelService/GetModels", json!({})).await;
+    for r in ["ROLE_SECRETARY", "ROLE_DREAM", "ROLE_WORKER"] {
+        let (status, _) = try_call(
+            &api,
+            "ModelService/AssignRole",
+            json!({ "role": r, "model": "" }),
+        )
+        .await;
+        assert!(!status.is_success(), "{r}: {status}");
+
+        let (_, after) = try_call(&api, "ModelService/GetModels", json!({})).await;
+        assert!(role(&after, r)["model"].is_string(), "{r}");
+        assert_eq!(role(&after, r)["model"], role(&before, r)["model"], "{r}");
+    }
+}
+
+#[tokio::test]
 async fn an_unknown_effort_is_refused() {
     let dir = temp();
     let api = open(&dir);
@@ -60,6 +80,7 @@ async fn each_role_says_the_effort_it_returns_to() {
         ("ROLE_LOOKOUT", "medium"),
         ("ROLE_TRIAGE", "low"),
         ("ROLE_ASSESS", "low"),
+        ("ROLE_WORKER", "medium"),
     ] {
         assert_eq!(role(&models, r)["defaultEffort"], effort, "{r}");
         assert_eq!(role(&models, r)["effort"], effort, "{r}");

@@ -261,7 +261,7 @@ export default function Worker() {
       <div class="prefs">
         <RoleModel
           role={Role.WORKER}
-          cap="使わないにすると、秘書と同じモデルで、一日に決まった数まで動く。上限に達した日は、手代に委ねた仕事は次の日まで待つ。値段のあるモデルは円で、ないモデルは回数で数える。"
+          cap="上限に達した日は、手代に委ねた仕事は次の日まで待つ。値段のあるモデルは円で、ないモデルは回数で数える。"
         />
         <Show when={settings()}>
           {(s) => (
