@@ -52,6 +52,21 @@ fn an_account_field_may_be_a_secret() {
 }
 
 #[test]
+fn a_generated_account_field_is_a_secret_nobody_is_asked_for() {
+    let with = |field: &str| {
+        parse(&HTTP.replace(
+            "email = { label = \"Address\" }",
+            &format!("email = {{ label = \"Address\" }}\npass = {field}"),
+        ))
+    };
+    let def = with("{ generate = true }").unwrap();
+    let pass = def.fields.iter().find(|f| f.name == "pass").unwrap();
+    assert!(pass.generated && pass.secret && pass.optional);
+    assert!(with("{ generate = true, label = \"Pass\" }").is_err());
+    assert!(with("{ secret = true }").is_err());
+}
+
+#[test]
 fn an_unknown_field_a_missing_one_or_a_wrong_shape_is_refused() {
     let unknown = parse(&HTTP.replace("name = \"Billing\"", "name = \"Billing\"\ncolour = 1"));
     assert!(unknown.unwrap_err().to_string().contains("colour"));

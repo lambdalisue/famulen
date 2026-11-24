@@ -1,7 +1,6 @@
-# Gmail and Google Calendar of one Google account, with one login. New mail
-# is told through a Google Cloud Pub/Sub subscription the gateway pulls
-# from; calendar changes come to the gateway's HTTP receiver, when it is
-# reachable from Google.
+# Gmail and Google Calendar of one Google account, with one login. Mail is
+# read through the tools; calendar changes come to the gateway's HTTP receiver,
+# when it is reachable from Google.
 format = 1
 id = "google"
 name = "Google"
@@ -10,9 +9,7 @@ setup = "README.md"
 
 [account]
 display = "{account.email}"
-subscription = { label = "Pub/Sub の受け取り口（projects/<プロジェクト>/subscriptions/<名前>）", optional = true }
-topic = { label = "Pub/Sub のトピック（projects/<プロジェクト>/topics/<名前>）", optional = true }
-channel_token = { label = "カレンダーの変化の知らせの合言葉", optional = true, secret = true }
+channel_token = { generate = true }
 
 [app]
 id = "google"
@@ -22,7 +19,7 @@ client_secret = { env = "FAMULEN_GOOGLE_CLIENT_SECRET", secret = true }
 [login.oauth2]
 authorize = "https://accounts.google.com/o/oauth2/v2/auth"
 token = "https://oauth2.googleapis.com/token"
-scopes = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/pubsub"]
+scopes = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar"]
 query = { access_type = "offline", prompt = "consent" }
 refresh = true
 
@@ -34,11 +31,10 @@ values = { email = "{/email}" }
 http = { base = "https://www.googleapis.com" }
 
 [[tools]]
-name = "watch_mailbox"
-description = "Ask Gmail to tell the Pub/Sub topic about new mail. Expires in 7 days; ask again before then."
-method = "POST"
-path = "/gmail/v1/users/me/watch"
-body = { topicName = "{account.topic}", labelIds = ["INBOX"], labelFilterBehavior = "include" }
+name = "get_profile"
+description = "Read the mailbox's address and its latest history id."
+method = "GET"
+path = "/gmail/v1/users/me/profile"
 
 [[tools]]
 name = "list_history"
@@ -162,13 +158,6 @@ path = "/calendar/v3/channels/stop"
 body = { id = "{args.channel}", resourceId = "{args.resource}" }
 input = { type = "object", properties = { channel = { type = "string" }, resource = { type = "string" } }, required = ["channel", "resource"] }
 
-[receive.mail]
-destination = "lookout"
-
-[receive.mail.connect]
-protocol = "pubsub-pull"
-subscription = "{account.subscription}"
-
 [receive.calendar]
 destination = "calendar"
 
@@ -176,7 +165,7 @@ destination = "calendar"
 verify = { token = { value = "{header.X-Goog-Channel-Token}", equals = "{account.channel_token}" } }
 
 [permissions]
-watch_mailbox = "allow"
+get_profile = "allow"
 list_history = "allow"
 get_message = "allow"
 read_message = "allow"

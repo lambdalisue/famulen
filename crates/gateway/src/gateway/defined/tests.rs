@@ -228,6 +228,56 @@ async fn a_secret_account_field_is_sealed_and_filled_only_into_what_goes_out() {
 }
 
 #[tokio::test]
+async fn a_generated_account_value_is_made_once_kept_in_the_vault_and_not_set_by_hand() {
+    let (base, seen) = service().await;
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = gateway(&base, true).with_definitions(None, &[("chat.toml".into(), text)]);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    let given = BTreeMap::from([("phrase".to_owned(), "kaze".to_owned())]);
+    let other = g.add_defined("chat", given, None).unwrap();
+
+    let mut phrases = Vec::new();
+    for c in [&c, &other, &c] {
+        g.generate_account_values(&c.id).unwrap();
+        g.call_as_owner(c, "knock", json!({})).await.unwrap();
+        let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+        phrases.push(query["phrase"].clone());
+    }
+
+    assert!(c.secret.in_vault.contains("account.phrase"));
+    assert!(phrases[0].len() >= 32);
+    assert_ne!(phrases[1], "kaze", "one given is not taken");
+    assert_ne!(phrases[0], phrases[1], "each connection has its own");
+    assert_eq!(phrases[0], phrases[2], "one that is made is kept");
+    assert!(
+        g.set_account_value(OWNER, &c.id, "phrase", "kaze")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn a_connection_added_before_its_definition_generates_a_value_gets_it() {
+    let (base, seen) = service().await;
+    let g = gateway(&base, true);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = g.with_definitions(None, &[("chat.toml".into(), text)]);
+
+    g.sync_connections().unwrap();
+
+    g.call_as_owner(&c, "knock", json!({})).await.unwrap();
+    let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+    assert!(query["phrase"].len() >= 32);
+}
+
+#[tokio::test]
 async fn an_account_value_can_be_set_again_after_adding() {
     let (base, seen) = service().await;
     let g = gateway(&base, true);
@@ -283,6 +333,27 @@ async fn logging_in_the_same_account_again_replaces_its_tokens_and_drops_the_new
 
     assert_eq!(first, second);
     assert_eq!(g.connections.list().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn logging_in_the_same_account_again_keeps_its_generated_value() {
+    let (base, seen) = service().await;
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = gateway(&base, true).with_definitions(None, &[("chat.toml".into(), text)]);
+
+    let mut phrases = Vec::new();
+    for _ in 0..2 {
+        let id = logged_in(&g, &base).await;
+        let c = g.connections.get(&id).unwrap().unwrap();
+        g.call_as_owner(&c, "knock", json!({})).await.unwrap();
+        let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+        phrases.push(query["phrase"].clone());
+    }
+
+    assert_eq!(phrases[0], phrases[1]);
 }
 
 #[tokio::test]
