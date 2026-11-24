@@ -67,6 +67,27 @@ test("moving, resizing, adding and removing tiles is kept across a reload", asyn
   await page.getByRole("button", { name: "並べ替える" }).click();
 });
 
+test("a press goes on from the last one, however slowly that is saved and read again", async ({ page, request }) => {
+  await call(request, "SettingsService", "SetTiles", { tiles: [{ kind: "today" }, { kind: "approvals" }] });
+  await page.route(/SettingsService\/(SetTiles|GetHome)/, async (route) => {
+    await new Promise((done) => setTimeout(done, 500));
+    await route.continue();
+  });
+  await visit(page, "/", /^ホーム · /);
+  await page.getByRole("button", { name: "並べ替える" }).click();
+
+  const size = tile(page, "確認待ち").getByRole("button", { name: "大きさを変える" });
+  await size.click();
+  await size.click();
+  await tile(page, "確認待ち").getByRole("button", { name: "前へ" }).click();
+
+  await expect(headings(page)).toHaveText(["確認待ち", "今日"]);
+  await expect(tile(page, "確認待ち")).toHaveClass(/w2 h2/);
+  const home = () => call<{ tiles: unknown[] }>(request, "SettingsService", "GetHome").then((h) => h.tiles);
+  await expect.poll(home).toEqual([{ kind: "approvals", wide: true, tall: true }, { kind: "today" }]);
+  await page.getByRole("button", { name: "並べ替える" }).click();
+});
+
 test("the tiles show today's holds, tasks, memos and close due dates", async ({ page, request }) => {
   const today = dayFromToday(0);
   await record(request, "events", "ホームの仮押さえ", {
