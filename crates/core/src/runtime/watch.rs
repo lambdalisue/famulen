@@ -226,7 +226,7 @@ fn tells_of_people(source: &LookoutSource) -> bool {
 
 /// Keep what the lookout noted of people as episodic memory. Being no concern
 /// of the owner's does not matter here.
-fn note_people(
+async fn note_people(
     app: &App,
     source: &LookoutSource,
     items: &[Item],
@@ -239,6 +239,13 @@ fn note_people(
     if noted.is_empty() {
         return Ok(());
     }
+    let unnamed = people::unnamed(&app.records, source.feed, items, &noted)?;
+    let names = match app.connections.get(&source.connection)? {
+        Some(c) if !unnamed.is_empty() && crate::channel::is_slack(&c) => {
+            app.slack_names_of(&c.id, &unnamed).await
+        }
+        _ => Default::default(),
+    };
     let _hold = app.notebook.hold()?;
     people::write_down(
         &app.records,
@@ -250,6 +257,7 @@ fn note_people(
             workgroups: &app
                 .workgroups
                 .workgroups_of(MemberKind::Lookout, source.id.to_string())?,
+            names: &names,
         },
         items,
         &noted,
@@ -296,7 +304,7 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
             }
             let answer = answer?;
             if let Some(answer) = &answer
-                && let Err(error) = note_people(app, source_ref, &items, answer)
+                && let Err(error) = note_people(app, source_ref, &items, answer).await
             {
                 tracing::warn!(source = %source_ref.name, %error, "could not note what was seen of people");
             }
@@ -399,10 +407,11 @@ mod tests {
         assert_eq!(open_page(&app, &source, "http://127.0.0.1:1/b").await, None);
     }
 
-    #[test]
-    fn what_is_seen_of_people_in_chat_and_mail_becomes_episodic_memory() {
+    #[tokio::test]
+    async fn what_is_seen_of_people_in_chat_and_mail_becomes_episodic_memory() {
         let dir = crate::notebook::testing::TempDir::new("runtime-people");
-        let app = testing::app(dir.path());
+        let (app, connection, _) =
+            crate::slack::names::tests::with_slack(dir.path(), &[("U1", "倉谷匠")]).await;
         memory::ensure(&app.memory_dir).unwrap();
         let items = [Item {
             title: "a".into(),
@@ -416,7 +425,7 @@ mod tests {
         let mut source = LookoutSource {
             id: 1,
             name: "会社".into(),
-            connection: "w1".into(),
+            connection,
             tool: "get_feed".into(),
             args: serde_json::json!({}),
             interval: 60,
@@ -427,13 +436,13 @@ mod tests {
             last_run: None,
         };
 
-        note_people(&app, &source, &items, &answer).unwrap();
+        note_people(&app, &source, &items, &answer).await.unwrap();
         assert!(dreaming::waiting_notes(&app.memory_dir).unwrap().is_empty());
         source.tool = lookout::ARRIVED.into();
-        note_people(&app, &source, &items, &answer).unwrap();
+        note_people(&app, &source, &items, &answer).await.unwrap();
 
         let notes = dreaming::waiting_notes(&app.memory_dir).unwrap();
-        assert_eq!(notes[0].1.body(), "U1（会社）：経理の担当");
+        assert_eq!(notes[0].1.body(), "倉谷匠（会社、U1）：経理の担当");
     }
 
     #[test]

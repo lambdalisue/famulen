@@ -72,6 +72,8 @@ pub struct App {
     pub slack_app_icons: crate::slack::app_icon::AppIcons,
     /// How the secretary's posts on Slack show it.
     pub slack_looks: crate::slack::looks::Looks,
+    /// The names Slack gave lately for its members.
+    pub slack_names: crate::slack::names::Names,
     /// Where the gateway's receivers are reached from outside, if the owner
     /// made them reachable; calendar changes are asked to be sent there.
     pub receive_url: Option<String>,

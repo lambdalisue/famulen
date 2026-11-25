@@ -10,6 +10,7 @@ pub mod events;
 pub mod fake;
 pub mod looks;
 pub mod mrkdwn;
+pub mod names;
 pub mod presence;
 pub mod reply;
 pub mod web;
