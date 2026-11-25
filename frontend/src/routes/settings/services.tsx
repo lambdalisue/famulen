@@ -38,6 +38,7 @@ import {
   Disclosure,
   EmptyState,
   Field,
+  Keyed,
   List,
   ListRow,
   Loading,
@@ -465,7 +466,9 @@ function BuiltinTools() {
       />
       <BulkPermissions scope="" />
       <List>
-        <For each={tools() ?? []}>{(t) => <ToolRow t={t} scope="" owner="秘書の組み込み" readOnlyTag />}</For>
+        <Keyed each={tools() ?? []} by={(t) => t.name}>
+          {(t) => <ToolRow t={t()} scope="" owner="秘書の組み込み" readOnlyTag />}
+        </Keyed>
         <Show when={tools() && (tools() ?? []).length === 0}>
           <EmptyState>秘書がまだ動いていないので、道具の一覧がない</EmptyState>
         </Show>
@@ -497,7 +500,9 @@ function KindDetail(props: { kind: string }) {
         </For>
       </div>
       <List>
-        <For each={detail()?.tools ?? []}>{(t) => <ToolRow t={t} scope={scope()} owner={`サービス種「${props.kind}」`} readOnlyTag />}</For>
+        <Keyed each={detail()?.tools ?? []} by={(t) => t.name}>
+          {(t) => <ToolRow t={t()} scope={scope()} owner={`サービス種「${props.kind}」`} readOnlyTag />}
+        </Keyed>
         <Show when={detail() && (detail()?.tools ?? []).length === 0}>
           <EmptyState>この種類のつなぎ先は、まだ道具を読んでいない</EmptyState>
         </Show>
@@ -710,23 +715,23 @@ function ServiceDetail(props: { id: string }) {
             >
               <BulkPermissions scope={scope()} />
               <List>
-                <For each={detail()?.tools ?? []}>
+                <Keyed each={detail()?.tools ?? []} by={(t) => t.name}>
                   {(t) => (
                     <ToolRow
-                      t={t}
+                      t={t()}
                       scope={scope()}
                       owner={conn().name}
                       readOnlyTag={ours()}
                       source={
-                        <Show when={t.source === KIND_SOURCE && ours()}>
+                        <Show when={t().source === KIND_SOURCE && ours()}>
                           <a class="sub" href={kindHref(conn().kind)}>
-                            {t.source}
+                            {t().source}
                           </a>
                         </Show>
                       }
                     />
                   )}
-                </For>
+                </Keyed>
                 <Show when={ours() && (detail()?.tools ?? []).length === 0}>
                   <EmptyState>道具をまだ読んでいない。「道具を読み直す」を押す</EmptyState>
                 </Show>
