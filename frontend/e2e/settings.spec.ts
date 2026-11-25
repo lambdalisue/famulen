@@ -20,6 +20,7 @@ async function openStatus(page: Page) {
 
 const PAGES: [string, string, string][] = [
   ["ワークグループ", "/settings/workgroups", "ワークグループ"],
+  ["表示", "/settings/look", "表示"],
   ["秘書", "/settings", "秘書"],
   ["夢", "/settings/roles/dream", "夢"],
   ["見張り", "/settings/lookout", "見張り"],

@@ -5,6 +5,7 @@ import EventPeek, { createPeek, type Peek } from "~/components/records/EventPeek
 import EventPanel from "~/components/records/EventPanel";
 import { Button, Callout, IconButton, Legend, LinkButton, Loading, PageHeader, SegmentedLinks, SplitPane } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
+import { own } from "~/lib/colors";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { calendarQuery, lanes, minutesOn, onDay, timeOn, type Unit, unitOf } from "~/lib/calendar";
@@ -38,7 +39,7 @@ const label = (e: CalendarEvent) => (faint(e) ? "予定あり" : `${hold(e) ? "�
 /** Declined, or not answered yet: it stands back. */
 const quiet = (e: CalendarEvent) => e.response === "declined" || e.response === "needs_action" || e.status === "tentative";
 const looks = (e: CalendarEvent) => ({ faint: faint(e), hold: hold(e), quiet: quiet(e) });
-const color = (e: CalendarEvent) => ({ "--c": !faint(e) && e.color ? e.color : undefined });
+const color = (e: CalendarEvent) => ({ "--c": !faint(e) && e.color ? own(e.color) : undefined });
 
 /** A task due on a day. */
 function Due(props: { task: { id: string; title: string } }) {
@@ -245,7 +246,7 @@ export default function Calendar() {
               <Legend
                 class="d-only"
                 items={[
-                  ...d().calendars.map((c) => ({ text: c.name, style: { background: c.color } })),
+                  ...d().calendars.map((c) => ({ text: c.name, style: { background: own(c.color) } })),
                   { text: "ワークグループの外（予定あり）", style: { background: "var(--faint-event)" } },
                   { text: `${owner.aide()}の仮押さえ`, style: { border: "1.5px dashed var(--workgroup)" } },
                 ]}

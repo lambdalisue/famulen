@@ -2,8 +2,8 @@ import { type ComponentProps, type JSX, Show, splitProps } from "solid-js";
 import { chevronLeft } from "~/lib/icons";
 import Icon from "./Icon";
 
-/** `primary` is the page's one main action, `go` agrees to something, `danger` removes, `ghost` stands back. */
-export type ButtonVariant = "primary" | "go" | "danger" | "ghost";
+/** `primary` is the one main action where it stands, `danger` removes, `ghost` stands back. */
+export type ButtonVariant = "primary" | "danger" | "ghost";
 
 type Look = { variant?: ButtonVariant; small?: boolean; icon?: string };
 

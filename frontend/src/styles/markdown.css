@@ -1,6 +1,6 @@
 .md { min-width: 0; overflow-wrap: anywhere; }
 .md .markdown-viewer { padding: 0 !important; background: transparent !important; min-height: 0 !important; max-width: none !important; }
-.md .markdown-body { font-size: var(--t-md); max-width: none; margin: 0; padding: 0; }
+.md .markdown-body { color: inherit; background: transparent; font-size: var(--t-md); max-width: none; margin: 0; padding: 0; }
 .md .markdown-viewer[hidden] { display: none; }
 .md-plain { margin: 0; white-space: pre-wrap; font: inherit; font-size: var(--t-md); line-height: 1.8; overflow-wrap: anywhere; }
 .md-link { cursor: pointer; border-radius: 2px; }
@@ -29,7 +29,7 @@ span.markdown-body::before, span.markdown-body::after { display: none !important
 .msg .markdown-body :is(th, td) { padding: 4px 10px; }
 .msg .markdown-body blockquote { margin-inline: 0; padding: 0 0 0 10px; }
 .msg .markdown-body pre { padding: 8px 10px; line-height: 1.55; }
-.msg.owner .markdown-body :is(a, .md-link, blockquote) { color: inherit; }
+.msg.owner .markdown-body :is(a, .md-link) { color: var(--accent-ink); }
 .msg.owner .markdown-body a { text-decoration: underline; }
-.msg.owner .markdown-body :is(code, pre, tr, th, td) { background: rgba(255, 255, 255, .14); color: inherit; border-color: rgba(255, 255, 255, .3); }
+.msg.owner .markdown-body :is(code, pre, tr, th, td) { background: var(--veil); color: inherit; border-color: var(--accent-line); }
 .msg.owner .markdown-body pre code { background: transparent; }

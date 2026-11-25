@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "~/components/ui";
 import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
+import { own } from "~/lib/colors";
 import * as icons from "~/lib/icons";
 import { excerptOf } from "~/lib/records";
 import { whenOf } from "./EventPanel";
@@ -53,7 +54,7 @@ function Card(props: { event: CalendarEvent; box: DOMRect }) {
       class="ev-card"
       role="tooltip"
       ref={card}
-      style={{ "--c": e().color || undefined, left: `${left()}px`, top: `${top()}px`, width: `${width()}px` }}
+      style={{ "--c": own(e().color), left: `${left()}px`, top: `${top()}px`, width: `${width()}px` }}
     >
       <b>
         {e().status === "hold" ? "仮 · " : ""}

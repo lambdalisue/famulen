@@ -5,6 +5,7 @@ import TaskRow from "~/components/records/TaskRow";
 import { Button, EmptyState, Icon, IconButton, Keyed, LinkButton, List, ListRow, Loading, PageHeader, Select, Tag } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import type { Tile } from "~/gen/famulen/v1/settings_pb";
+import { own } from "~/lib/colors";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { openSheet } from "~/lib/ask";
@@ -76,7 +77,7 @@ function TodayTile() {
           <div
             class="home-ev"
             classList={{ past: past(e), next: e === next(), faint: e.mode === CalendarMode.FAINT }}
-            style={{ "--c": e.color || undefined }}
+            style={{ "--c": own(e.color) }}
           >
             <time class="mono">{timeOn(e, day())}</time>
             <span class="item-main">
@@ -93,7 +94,7 @@ function TodayTile() {
               </Show>
             </span>
             <Show when={e.meeting && !past(e)}>
-              <LinkButton small variant="go" icon={icons.video} href={e.meeting} class="home-join">
+              <LinkButton small variant="primary" icon={icons.video} href={e.meeting} class="home-join">
                 入る
               </LinkButton>
             </Show>

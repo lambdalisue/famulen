@@ -1,3 +1,4 @@
+import { own } from "~/lib/colors";
 import { clock } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
@@ -129,7 +130,7 @@ export function CalendarsSection(props: { connection: string; account: string; t
           <For each={mine()}>
             {(c) => (
               <ListRow
-                lead={<span class="swatch-square" style={{ background: c.color }} />}
+                lead={<span class="swatch-square" style={{ background: own(c.color) }} />}
                 title={c.name}
                 sub={
                   <>

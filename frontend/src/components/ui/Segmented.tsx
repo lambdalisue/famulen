@@ -1,11 +1,14 @@
 import { SegmentGroup } from "@ark-ui/solid/segment-group";
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
+import Icon from "./Icon";
 import Keyed from "./Keyed";
 
 /** One choice out of a few, each shown. */
 export function Segmented(props: {
   label: string;
-  items: [string, string][];
+  items: [value: string, text: string, icon?: string][];
+  /** Show the icons alone; the words are still read out. */
+  brief?: boolean;
   value: string;
   onChoose: (value: string) => void;
   class?: string;
@@ -21,9 +24,10 @@ export function Segmented(props: {
     >
       <SegmentGroup.Indicator class="segs-indicator" />
       <For each={props.items}>
-        {([value, text]) => (
-          <SegmentGroup.Item value={value} class="segs-item">
-            <SegmentGroup.ItemText>{text}</SegmentGroup.ItemText>
+        {([value, text, icon]) => (
+          <SegmentGroup.Item value={value} class="segs-item" title={props.brief ? text : undefined}>
+            <Show when={icon}>{(svg) => <Icon svg={svg()} size={16} />}</Show>
+            <SegmentGroup.ItemText class={props.brief ? "sr" : undefined}>{text}</SegmentGroup.ItemText>
             <SegmentGroup.ItemControl />
             <SegmentGroup.ItemHiddenInput />
           </SegmentGroup.Item>

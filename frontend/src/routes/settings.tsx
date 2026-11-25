@@ -5,7 +5,13 @@ import { Icon } from "~/components/ui";
 
 /** Every settings page, by group: path, label and icon. */
 export const NAV: [string, [string, string, string][]][] = [
-  ["", [["/settings/workgroups", "ワークグループ", icons.layoutGrid]]],
+  [
+    "",
+    [
+      ["/settings/workgroups", "ワークグループ", icons.layoutGrid],
+      ["/settings/look", "表示", icons.palette],
+    ],
+  ],
   [
     "エージェント",
     [

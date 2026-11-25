@@ -7,14 +7,16 @@ import mathUrl from "@arto-app/markdown/bundles/page-math.iife.js?url";
 import mermaidUrl from "@arto-app/markdown/bundles/page-mermaid.iife.js?url";
 import wasmUrl from "@arto-app/markdown/wasm/arto_markdown_wasm_bg.wasm?url";
 import type { Library } from "@arto-app/markdown/wasm";
+import { createEffect, createRoot } from "solid-js";
 import { isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { RecordLink } from "~/gen/famulen/v1/records_pb";
 import { memoryHref } from "./memory";
 import { hrefOf } from "./records";
+import { dark } from "./theme";
 
 declare global {
   interface Window {
-    ArtoRenderer?: { render: (viewer: HTMLElement) => void };
+    ArtoRenderer?: { render: (viewer: HTMLElement) => void; setTheme: (theme: "light" | "dark") => Promise<void> };
     handleMarkdownLinkClick?: (path: string, button: number) => void;
   }
 }
@@ -45,6 +47,11 @@ function script(src: string): Promise<void> {
   return made;
 }
 
+/** Draw the notes, now and after, in the theme of the page. */
+function followDark() {
+  createRoot(() => createEffect(() => void window.ArtoRenderer?.setTheme(dark() ? "dark" : "light")));
+}
+
 let engine: Promise<typeof import("@arto-app/markdown/wasm")> | undefined;
 
 function start() {
@@ -56,6 +63,7 @@ function start() {
     document.head.prepend(link);
     const [arto] = await Promise.all([import("@arto-app/markdown/wasm"), script(runtimeUrl)]);
     await arto.default({ module_or_path: wasmUrl });
+    followDark();
     return arto;
   })();
   return engine;

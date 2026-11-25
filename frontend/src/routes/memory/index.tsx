@@ -13,10 +13,10 @@ import { useParam } from "~/lib/params";
 import { setView } from "~/lib/view";
 
 const OPS: [string, string][] = [
-  ["足した", "#2a78d6"],
-  ["直した", "#eb6834"],
-  ["置き換えた", "#1baf7a"],
-  ["忘れた", "#eda100"],
+  ["足した", "var(--op-added)"],
+  ["直した", "var(--op-edited)"],
+  ["置き換えた", "var(--op-replaced)"],
+  ["忘れた", "var(--op-forgotten)"],
 ];
 
 /** What a bar is made of, in the order of OPS. */

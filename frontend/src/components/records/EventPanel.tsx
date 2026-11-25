@@ -1,3 +1,4 @@
+import { own } from "~/lib/colors";
 import { addDays, dateLabel, hm, localDate } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
@@ -95,14 +96,14 @@ function Facts(props: { event: CalendarEvent }) {
   return (
     <>
       <Show when={e().meeting}>
-        <LinkButton variant="go" class="ev-join" icon={icons.video} href={e().meeting}>
+        <LinkButton variant="primary" class="ev-join" icon={icons.video} href={e().meeting}>
           会議に入る
         </LinkButton>
       </Show>
       <Show when={e().stale}>
         <Callout tone="warn">Google を読めなかったので、前に読んだ中身を出している。</Callout>
       </Show>
-      <dl class="ev-facts" style={{ "--c": e().color || undefined }}>
+      <dl class="ev-facts" style={{ "--c": own(e().color) }}>
         <Fact icon={icons.clock} label="日時">
           <b>{whenOf(e())}</b>
           <span class="sub">
@@ -143,7 +144,7 @@ function Facts(props: { event: CalendarEvent }) {
               </Show>
             }
           >
-            <span class="dot" style={{ background: e().color || "var(--accent)" }} /> {e().calendarName || "Google"}
+            <span class="dot" style={{ background: own(e().color) }} /> {e().calendarName || "Google"}
           </Fact>
         </Show>
         <Show when={marks()}>
@@ -180,7 +181,7 @@ function FromGoogle(props: { event: CalendarEvent; back: string }) {
   };
   return (
     <article class="rec event">
-      <h2 class="event-title" style={{ "--c": e().color || undefined }}>
+      <h2 class="event-title" style={{ "--c": own(e().color) }}>
         {e().title || "（題名なし）"}
       </h2>
       <Facts event={e()} />

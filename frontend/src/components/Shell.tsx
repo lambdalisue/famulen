@@ -3,7 +3,9 @@ import { Title } from "@solidjs/meta";
 import { revalidate, useLocation, useNavigate } from "@solidjs/router";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
+import { chooseWorkgroup, workgroup } from "~/lib/workgroup";
+import { own } from "~/lib/colors";
+import { followTheme } from "~/lib/theme";
 import { approvalId, useWaiting } from "~/lib/inbox";
 import { look, say } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -16,6 +18,7 @@ import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { followKeyboard, isNarrow, layoutHeld } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
+import ThemeChoice from "./ThemeChoice";
 import Lightbox, { closeImage } from "./Lightbox";
 import AideIcon from "./AideIcon";
 import { followPortrait } from "./PageIcons";
@@ -60,7 +63,7 @@ export default function Shell(props: { children?: JSX.Element }) {
 
   const tab = () => tabOf(location.pathname);
   const current = () => workgroups()?.find((c) => c.id === workgroup()) ?? workgroups()?.[0];
-  const color = () => current()?.color ?? "#0F6E68";
+  const color = () => own(current()?.color ?? "");
   const aide = owner.aide;
   const more = () => !BOTTOM.includes(tab().key);
   const mobileTitle = () => pageTitle() || tab().label;
@@ -95,6 +98,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   );
 
   onMount(() => {
+    followTheme();
     followEvents(workgroup);
     followKeyboard();
     onCleanup(followNotices((id) => void showRequest(id)));
@@ -142,7 +146,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   };
 
   return (
-    <div class="app" style={{ "--workgroup": color(), "--wg-tint": tint(color()) }}>
+    <div class="app" style={{ "--workgroup": color() }}>
       <Title>
         {tab().label} · {aide()}
       </Title>
@@ -186,7 +190,7 @@ export default function Shell(props: { children?: JSX.Element }) {
                     class={`wg-btn${c.id === current()?.id ? " on" : ""}`}
                     onClick={() => choose(c.id)}
                   >
-                    <span class="dot" style={{ background: c.color }} />
+                    <span class="dot" style={{ background: own(c.color) }} />
                     {c.name}
                   </button>
                 )}
@@ -201,6 +205,7 @@ export default function Shell(props: { children?: JSX.Element }) {
                 : `${current()?.name}のものだけを使い、ほかの予定は薄く出す`}
             </span>
             <Alive />
+            <ThemeChoice label="テーマの切り替え" brief />
           </header>
           <nav class="tabs" aria-label="セクション">
             <For each={SECTIONS}>
@@ -263,7 +268,7 @@ export default function Shell(props: { children?: JSX.Element }) {
           <For each={workgroups()}>
             {(c) => (
               <button type="button" class="sheet-row" aria-pressed={c.id === current()?.id} onClick={() => choose(c.id)}>
-                <span class="dot" style={{ background: c.color }} />
+                <span class="dot" style={{ background: own(c.color) }} />
                 <b class="grow">{c.name}</b>
                 <Show when={c.id === current()?.id}>
                   <Icon svg={icons.check} size={18} />

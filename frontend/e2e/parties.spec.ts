@@ -138,7 +138,7 @@ for (const [name, viewport] of [
       await expect(inList).toHaveAttribute("src", "/party-pictures/e2e-picture");
       await expect(row(page, `無地 ${name}`).locator(".avatar")).toHaveText("無");
       const box = await row(page, `画像 ${name}`).locator(".avatar").boundingBox();
-      expect([box?.width, box?.height]).toEqual([32, 32]);
+      expect([box?.width, box?.height]).toEqual([36, 36]);
 
       await row(page, `画像 ${name}`).click();
       await expect(detail(page).locator(".rec-title .avatar img")).toBeVisible();

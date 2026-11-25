@@ -1,6 +1,6 @@
 /* Any two may touch, as a column leaves out what was not used, so every pair
    is checked for color vision deficiencies; check them all before changing one. */
-.usage, .usage-tip { --usage-1: #008c78; --usage-2: #b87a1c; --usage-3: #2f4f95; --usage-4: #5a95e0; --usage-5: #8e2f33; --usage-6: #c570b0; --usage-other: #8C8A82; }
+.usage, .usage-tip { --usage-1: light-dark(#008c78, #41e6b7); --usage-2: light-dark(#b87a1c, #e7b828); --usage-3: light-dark(#2f4f95, #4579d3); --usage-4: light-dark(#5a95e0, #62a9f0); --usage-5: light-dark(#8e2f33, #e01421); --usage-6: light-dark(#c570b0, #b03388); --usage-other: #8C8A82; }
 .usage { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .usage h2 { font-size: var(--t-md); }
 .usage-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -20,14 +20,14 @@
 .usage-columns { grid-area: 1 / 2; position: relative; display: grid; }
 .usage-column { display: flex; align-items: flex-end; justify-content: center; min-width: 0; height: 100%; padding: 0 1px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
 .usage-column:disabled { cursor: default; }
-.usage-column:not(:disabled):hover, .usage-column[aria-pressed=true] { background: rgba(27, 27, 25, .06); }
+.usage-column:not(:disabled):hover, .usage-column[aria-pressed=true] { background: var(--veil); }
 .usage-stack { width: 100%; max-width: 24px; display: flex; flex-direction: column-reverse; gap: 2px; border-radius: 4px 4px 0 0; overflow: hidden; }
 .usage-stack > span { flex: 1 0 0; min-height: 2px; }
 .usage-ticks { grid-column: 2; display: grid; min-height: 20px; overflow: hidden; font-size: var(--t-xs); color: var(--muted); }
 /* A tick is wider than its column; it is centered over it and takes no room. */
 .usage-ticks > span { position: relative; min-width: 0; height: 20px; }
 .usage-ticks > span > span { position: absolute; left: 50%; top: 4px; transform: translateX(-50%); white-space: nowrap; }
-.usage-tip { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); font-size: var(--t-sm); z-index: 60; }
+.usage-tip { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-2); font-size: var(--t-sm); z-index: 60; }
 .usage-tip-row { display: flex; align-items: center; gap: 6px; }
 .usage-tip-row i { width: 12px; height: 3px; border-radius: 2px; }
 .usage-tip-row span { color: var(--muted); }

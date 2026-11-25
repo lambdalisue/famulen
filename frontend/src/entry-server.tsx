@@ -3,6 +3,7 @@ import { createHandler, StartServer } from "@solidjs/start/server";
 import PageIcons from "./components/PageIcons";
 import { api } from "./lib/api";
 import { portraitOf } from "./lib/portrait";
+import { EARLY, GROUND } from "./lib/theme";
 
 export default createHandler(
   (event) => (
@@ -16,7 +17,9 @@ export default createHandler(
             <meta name="mobile-web-app-capable" content="yes" />
             <meta name="apple-mobile-web-app-title" content="Famulen" />
             <PageIcons portrait={event.locals.portrait ?? portraitOf(undefined)} />
-            <meta name="theme-color" content="#F4F3EE" />
+            <meta name="theme-color" media="(prefers-color-scheme: light)" content={GROUND.light} />
+            <meta name="theme-color" media="(prefers-color-scheme: dark)" content={GROUND.dark} />
+            <script innerHTML={EARLY} />
             {assets}
           </head>
           <body>
