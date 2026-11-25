@@ -3,7 +3,9 @@
 //! memory layers can be committed, logged and put back without touching the
 //! records beside them.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
@@ -56,13 +58,15 @@ const AS_WRITTEN: [(&str, &str); 2] = [("core.autocrlf", "false"), ("core.eol", 
 /// they are written.
 pub(crate) fn init(dir: &Path) -> anyhow::Result<()> {
     if !dir.join(".git").exists() {
-        create(dir)?;
+        return create(dir);
     }
+    let set = git(dir, &["config", "--local", "--list"])?;
     for (key, value) in AS_WRITTEN {
-        let set = command(dir, &["config", "--local", "--get", key])
-            .output()
-            .context("running git config")?;
-        if String::from_utf8_lossy(&set.stdout).trim() != value {
+        let current = set
+            .lines()
+            .rev()
+            .find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
+        if current != Some(value) {
             git(dir, &["config", "--local", key, value])?;
         }
     }
@@ -73,24 +77,40 @@ fn create(dir: &Path) -> anyhow::Result<()> {
     // An empty template keeps the user's global hook templates out of the
     // notebook.
     git(dir, &["init", "-q", "--template=", "-b", "main"])?;
-    for (key, value) in [
-        ("user.name", COMMITTER_NAME),
-        ("user.email", COMMITTER_EMAIL),
-        ("commit.gpgsign", "false"),
-        ("core.hooksPath", ".git/hooks"),
-        ("core.quotePath", "false"),
-    ] {
-        git(dir, &["config", key, value])?;
+    let mut config = format!(
+        "[user]\n\tname = {COMMITTER_NAME}\n\temail = {COMMITTER_EMAIL}\n\
+         [commit]\n\tgpgsign = false\n\
+         [core]\n\thooksPath = .git/hooks\n\tquotePath = false\n"
+    );
+    for (key, value) in AS_WRITTEN {
+        let name = key.strip_prefix("core.").expect("a key of core");
+        config.push_str(&format!("\t{name} = {value}\n"));
     }
-    Ok(())
+    // Not with `git config`, which sets one value per process: starting one
+    // is slow on macOS.
+    let path = dir.join(".git").join("config");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(config.as_bytes()))
+        .with_context(|| format!("writing {}", path.display()))
 }
 
-static COMMITTING: Mutex<()> = Mutex::new(());
-
-/// Wait for the commits of this process to be done, and keep others from
-/// starting.
-pub(crate) fn committing() -> MutexGuard<'static, ()> {
-    COMMITTING.lock().unwrap_or_else(|p| p.into_inner())
+/// Wait for the commits this process makes to the repository `dir` is in to
+/// be done, and keep others from starting.
+pub(crate) fn committing(dir: &Path) -> MutexGuard<'static, ()> {
+    static COMMITTING: Mutex<BTreeMap<PathBuf, &'static Mutex<()>>> = Mutex::new(BTreeMap::new());
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let root = dir
+        .ancestors()
+        .find(|at| at.join(".git").exists())
+        .unwrap_or(&dir);
+    let turn = *COMMITTING
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .entry(root.to_path_buf())
+        .or_insert_with(|| Box::leak(Box::default()));
+    turn.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// Record every change under `dir` as one commit by `author`, or do nothing
@@ -111,7 +131,7 @@ pub fn commit_paths(
 ) -> anyhow::Result<Option<String>> {
     // git keeps one index per repository and refuses a second writer while
     // the first holds `index.lock`, so commits from this process take turns.
-    let _turn = committing();
+    let _turn = committing(dir);
     let mut known = Vec::new();
     for path in paths {
         let path = path.as_ref();
@@ -133,15 +153,11 @@ pub fn commit_paths(
     let state = format!(":(top){STATE}");
     let args = ["rm", "-rq", "--cached", "--ignore-unmatch", "--", &state];
     git(dir, &args)?;
-    let changed = if has_head(dir)? {
-        !command(dir, &with_paths(&["diff", "--cached", "--quiet"]))
-            .status()
-            .context("running git diff")?
-            .success()
-    } else {
-        !git(dir, &with_paths(&["ls-files"]))?.trim().is_empty()
-    };
-    if !changed {
+    let unchanged = command(dir, &with_paths(&["diff", "--cached", "--quiet"]))
+        .status()
+        .context("running git diff")?
+        .success();
+    if unchanged {
         return Ok(None);
     }
     let output = command(
@@ -157,7 +173,6 @@ pub fn commit_paths(
     .stderr(std::process::Stdio::piped())
     .spawn()
     .and_then(|mut child| {
-        use std::io::Write as _;
         child
             .stdin
             .take()
@@ -484,6 +499,54 @@ mod tests {
         });
 
         assert_eq!(log(dir.path(), 20).unwrap().len(), 9);
+    }
+
+    #[test]
+    fn a_commit_waits_for_none_to_another_repository() {
+        let (busy, free) = (repo("git-busy"), repo("git-free"));
+        write(free.path(), "README.md", "notes\n");
+        let _turn = committing(busy.path());
+        let (done, finished) = std::sync::mpsc::channel();
+
+        let root = free.path().to_owned();
+        std::thread::spawn(move || done.send(commit_all(&root, &me(), "set up").unwrap()));
+
+        let commit = finished.recv_timeout(std::time::Duration::from_secs(30));
+        assert!(commit.is_ok_and(|id| id.is_some()));
+    }
+
+    #[test]
+    fn a_directory_of_a_repository_takes_turns_with_the_whole() {
+        let root = repo("git-turns");
+        let memory = root.path().join("memory");
+        write(root.path(), "memory/core.md", "a\n");
+        let turn = committing(root.path());
+        let (done, finished) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || done.send(commit_all(&memory, &me(), "set up").unwrap()));
+
+        let early = finished.recv_timeout(std::time::Duration::from_millis(300));
+        assert!(early.is_err(), "it waits");
+        drop(turn);
+        assert!(finished.recv().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_new_repository_is_set_up_as_this_tool_wants_it() {
+        let dir = repo("git-config");
+
+        for (key, value) in [
+            ("user.name", COMMITTER_NAME),
+            ("user.email", COMMITTER_EMAIL),
+            ("commit.gpgsign", "false"),
+            ("core.hooksPath", ".git/hooks"),
+            ("core.quotePath", "false"),
+            ("core.autocrlf", "false"),
+            ("core.eol", "lf"),
+        ] {
+            let set = git(dir.path(), &["config", "--local", "--get-all", key]).unwrap();
+            assert_eq!(set.trim(), value, "{key}");
+        }
     }
 
     #[test]

@@ -137,7 +137,7 @@ impl Gateway {
         tool: &str,
         args: Value,
     ) -> anyhow::Result<ToolResult> {
-        let ctx = self.context(connection, def, args.clone(), true)?;
+        let mut ctx = self.context(connection, def, args.clone(), true)?;
         let http = def.transport.http.as_ref();
         let described = http.is_some_and(|h| h.openapi.is_some());
         let operation = if def.tools.iter().any(|t| t.name == tool) || !described {
@@ -166,12 +166,18 @@ impl Gateway {
             self.send_filled(def, &ctx, out).await?
         } else if let Some(t) = def.tools.iter().find(|t| t.name == tool) {
             ok = t.ok.as_deref();
+            let auth = t.auth.as_deref().or(auth);
+            if let Some(name) = auth
+                && let Some(token) = self.exchange(&connection.id, def, name).await?
+            {
+                ctx.tokens.insert(name.to_owned(), token);
+            }
             let out = Outgoing {
                 method: t.method.as_str(),
                 target: &t.path,
                 query: &t.query,
                 body: t.body.as_ref(),
-                auth: t.auth.as_deref().or(auth),
+                auth,
                 same_host: t.same_host,
             };
             self.send_defined(def, &ctx, out).await?

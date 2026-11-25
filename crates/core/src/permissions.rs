@@ -218,6 +218,10 @@ impl Permissions {
                 ..Call::new(SECRETARY, "", tool_name, input.clone())
             },
         };
+        let call = Call {
+            origin: self.store.call_origin()?,
+            ..call
+        };
         Ok(match self.gateway.judge_assessed(&call).await? {
             Verdict::Allow { .. } => Decision::Allow,
             Verdict::Hold(ticket) => Decision::Held(ticket.id),
@@ -461,6 +465,16 @@ impl Permissions {
                 })
             })
             .collect()
+    }
+
+    /// A connection, where it is still there.
+    pub fn connection(&self, id: impl AsRef<str>) -> Option<crate::connections::Connection> {
+        self.connections.get(id).ok().flatten()
+    }
+
+    /// The connection a call of `tool` is made through, where it is still there.
+    pub fn connection_of(&self, tool: &str) -> Option<crate::connections::Connection> {
+        self.connection(crate::wording::connection_of(tool)?)
     }
 
     /// The gateway that judges the calls.

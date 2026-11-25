@@ -2,7 +2,7 @@
 
 use serde_json::json;
 
-use crate::support::{call, open, temp, try_call};
+use crate::support::{call, define, open, temp, try_call};
 
 #[tokio::test]
 async fn the_secretary_is_called_fam_until_named() {
@@ -105,4 +105,67 @@ async fn a_time_zone_there_is_not_is_refused_and_nothing_is_changed() {
     let persona = call(&api, "SettingsService/GetPersona", json!({})).await;
     assert_eq!(persona["gender"], "PERSONA_GENDER_MALE");
     assert_eq!(persona["name"], "ファム");
+}
+
+/// A Slack that takes a trade of the app's token and refuses its icon.
+async fn slack_refusing_icons() -> String {
+    let router = axum::Router::new().fallback(|uri: http::Uri| async move {
+        if uri.path().ends_with("/tooling.tokens.rotate") {
+            json!({ "ok": true, "token": "t-1", "refresh_token": "r-1" }).to_string()
+        } else {
+            json!({ "ok": false, "error": "app_edit_disabled" }).to_string()
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    base
+}
+
+#[tokio::test]
+async fn a_gender_slack_would_not_follow_is_kept_and_the_owner_is_told() {
+    let dir = temp();
+    let base = slack_refusing_icons().await;
+    define(
+        &dir,
+        "slack",
+        &include_str!("../../../gateway/services/slack/slack.toml")
+            .replace("https://slack.com/api", &format!("{base}/api")),
+    );
+    let api = open(&dir);
+    api.app()
+        .gateway
+        .add_defined(
+            "slack",
+            [("app", "A1"), ("config_refresh", "r-0")]
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .into(),
+            None,
+        )
+        .unwrap();
+
+    let renamed = call(
+        &api,
+        "SettingsService/UpdatePersona",
+        json!({ "name": "ミナ" }),
+    )
+    .await;
+    assert_eq!(
+        renamed["troubles"],
+        json!(null),
+        "only a gender is followed"
+    );
+    let chosen = call(
+        &api,
+        "SettingsService/UpdatePersona",
+        json!({ "gender": "PERSONA_GENDER_FEMALE" }),
+    )
+    .await;
+
+    assert_eq!(chosen["gender"], "PERSONA_GENDER_FEMALE");
+    let trouble = chosen["troubles"][0].as_str().unwrap();
+    assert!(trouble.contains("app_edit_disabled"), "{trouble}");
+    let later = call(&api, "SettingsService/GetPersona", json!({})).await;
+    assert_eq!(later["gender"], "PERSONA_GENDER_FEMALE");
+    assert_eq!(later["troubles"], json!(null));
 }

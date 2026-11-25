@@ -38,6 +38,7 @@ pub fn parse(text: &str) -> anyhow::Result<Definition> {
         order_tokens(login, &raw);
         check_login(login, has_app)?;
     }
+    check_exchange(&def)?;
     check_transport(&def)?;
     check_tools(&def)?;
     for (name, receive) in &def.receive {
@@ -60,8 +61,23 @@ fn account_fields(account: toml::Table) -> anyhow::Result<(Vec<AccountField>, Op
         }
         let at = format!("account.{name}");
         anyhow::ensure!(is_name(&name), "account field {name:?} is not a name");
-        let table = table(&value, &["label", "optional", "secret"], &at)?;
+        let table = table(&value, &["label", "optional", "secret", "generate"], &at)?;
+        if flag(table, "generate", &at)? {
+            anyhow::ensure!(
+                table.len() == 1,
+                "{at} is generated, so nothing else is said of it"
+            );
+            fields.push(AccountField {
+                label: String::new(),
+                optional: true,
+                secret: true,
+                generated: true,
+                name,
+            });
+            continue;
+        }
         fields.push(AccountField {
+            generated: false,
             label: string(table, "label", &at)?,
             optional: flag(table, "optional", &at)?,
             secret: flag(table, "secret", &at)?,
@@ -150,6 +166,46 @@ fn check_login(login: &Login, has_app: bool) -> anyhow::Result<()> {
                 oauth2.values.contains_key(name),
                 "login.oauth2.same names {name:?}, which is not in values"
             );
+        }
+    }
+    Ok(())
+}
+
+fn check_exchange(def: &Definition) -> anyhow::Result<()> {
+    let Some(login) = &def.login else {
+        return Ok(());
+    };
+    for (name, exchange) in &login.exchange {
+        anyhow::ensure!(is_name(name), "login.exchange {name:?} is not a name");
+        anyhow::ensure!(
+            login.oauth2.is_some() || login.session.is_some(),
+            "login.exchange goes with login.oauth2 or login.session"
+        );
+        let brought = [
+            login.oauth2.as_ref().map(|o| &o.tokens),
+            login.session.as_ref().map(|s| &s.tokens),
+        ];
+        anyhow::ensure!(
+            !brought.into_iter().flatten().any(|t| t.contains_key(name)),
+            "login.exchange.{name} is a token the login already brings"
+        );
+        anyhow::ensure!(
+            !exchange.renews.is_empty(),
+            "login.exchange.{name}.renews names no field"
+        );
+        for field in exchange.renews.keys() {
+            anyhow::ensure!(
+                def.fields.iter().any(|f| f.secret && &f.name == field),
+                "login.exchange.{name} renews {field:?}, which is no secret account field"
+            );
+            let embed = format!("{{account.{field}}}");
+            for tool in &def.tools {
+                anyhow::ensure!(
+                    !format!("{}{:?}{:?}", tool.path, tool.query, tool.body).contains(&embed),
+                    "{} embeds {embed}, which only the exchange may hand over",
+                    tool.name
+                );
+            }
         }
     }
     Ok(())

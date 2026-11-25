@@ -22,6 +22,7 @@ mod judge;
 mod keeping;
 mod logins;
 mod model_keys;
+mod push;
 mod receive;
 mod redefining;
 mod secrets;
@@ -30,6 +31,7 @@ pub use commands::{Choice, Question};
 pub use judge::*;
 pub use keeping::{DELETE_SECRET, DESCRIBE_SECRET, Holder, PUT_SECRET, VAULT};
 pub use model_keys::model_key_name;
+pub use push::{Pushed, Subscription};
 pub use receive::{Arrival, Destination, Receipt};
 pub use redefining::{CHANGE_DEFINITION, DEFINITIONS, DefinitionChange};
 pub use vault::*;
@@ -66,6 +68,9 @@ pub struct Gateway {
     /// The answers that finished a login, with the connection each logged
     /// in. Held while one is being finished, so two of the same wait.
     finished: Arc<Mutex<HashMap<String, String>>>,
+    /// Held, by connection, while a token is traded for, so no value is
+    /// handed over twice.
+    exchanging: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// The keys issuers publish, with when they were fetched.
     jwks: Arc<std::sync::RwLock<HashMap<String, (i64, jsonwebtoken::jwk::JwkSet)>>>,
     /// Told of every ticket as it is held.
@@ -73,6 +78,7 @@ pub struct Gateway {
     /// Weighs what the auto permission leaves to a model; set by the program
     /// using the gateway.
     assessor: Arc<std::sync::RwLock<Option<Arc<dyn Assessor>>>>,
+    push: push::Push,
 }
 
 /// Tells whether the owner is at the machine.
@@ -105,11 +111,13 @@ impl Gateway {
             running: Default::default(),
             openapi: Arc::default(),
             finished: Arc::default(),
+            exchanging: Arc::default(),
             presence: Arc::new(crate::presence::now),
             endpoints: Default::default(),
             jwks: Arc::default(),
             held: tokio::sync::broadcast::channel(64).0,
             assessor: Arc::default(),
+            push: Default::default(),
         }
     }
 
@@ -214,6 +222,24 @@ impl Gateway {
         let by = Call {
             actor: actor.to_owned(),
             ask,
+            ..Call::default()
+        };
+        self.serve(by, server, message).await
+    }
+
+    /// [`Self::handle`] for a call made for `origin`, which its ticket keeps.
+    pub async fn handle_from(
+        &self,
+        origin: Option<String>,
+        actor: &str,
+        ask: Option<String>,
+        server: &str,
+        message: &Value,
+    ) -> Option<Value> {
+        let by = Call {
+            actor: actor.to_owned(),
+            ask,
+            origin,
             ..Call::default()
         };
         self.serve(by, server, message).await

@@ -6,18 +6,22 @@ pub mod adroit;
 mod agent;
 mod bounds;
 mod dispatch;
+mod finish;
 mod order;
 mod pool;
 mod queue;
 mod runners;
 mod runs;
+mod sight;
 
 pub use dispatch::*;
+pub use finish::*;
 pub use order::*;
 pub use pool::{Pool, run};
 pub use queue::*;
 pub use runners::{Began, Looked, Runners};
 pub use runs::*;
+pub use sight::*;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -37,12 +41,16 @@ const SETTINGS_KEY: &str = "setting.workers";
 pub const MOST_SLOTS: u32 = 20;
 
 /// How the owner lets the pool work.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     /// How many runs go on at once.
     pub slots: u32,
     /// No run is started while set; those going on go on.
     pub paused: bool,
+    /// How the owner wants work on code finished.
+    // `finishes` as stored held directories, which name no repository.
+    #[serde(default, rename = "repository_finishes")]
+    pub finishes: Vec<Finish>,
 }
 
 impl Default for Settings {
@@ -50,6 +58,7 @@ impl Default for Settings {
         Self {
             slots: 2,
             paused: false,
+            finishes: Vec::new(),
         }
     }
 }
@@ -67,6 +76,7 @@ impl Settings {
             (1..=MOST_SLOTS).contains(&self.slots),
             "1 to {MOST_SLOTS} tasks run at once"
         );
+        check_finishes(&self.finishes)?;
         store.set_state(SETTINGS_KEY, serde_json::to_string(self)?)
     }
 }
@@ -75,6 +85,7 @@ impl Settings {
 #[derive(Clone)]
 pub struct Workers {
     pub runs: Runs,
+    pub sights: Sights,
     /// Where an agent works, one directory for each run.
     pub(crate) dir: PathBuf,
     /// Where no agent's tool may reach, on top of what is sealed for the
@@ -89,6 +100,7 @@ impl Workers {
     pub fn new(store: Store, dir: PathBuf, sealed: Vec<PathBuf>) -> Self {
         Self {
             runs: Runs::new(store),
+            sights: Sights::default(),
             dir,
             sealed,
             poke: Arc::default(),
@@ -191,7 +203,7 @@ mod tests {
             assert!(
                 Settings {
                     slots,
-                    paused: false
+                    ..Settings::default()
                 }
                 .save(&store)
                 .is_err()
@@ -200,6 +212,10 @@ mod tests {
         let chosen = Settings {
             slots: 5,
             paused: true,
+            finishes: vec![Finish {
+                repository: String::new(),
+                steps: "Review it.".into(),
+            }],
         };
         chosen.save(&store).unwrap();
         assert_eq!(Settings::load(&store).unwrap(), chosen);

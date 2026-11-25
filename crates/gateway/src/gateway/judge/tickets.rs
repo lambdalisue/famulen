@@ -41,6 +41,8 @@ pub struct Ticket {
     /// The input as it may be shown: secret fields read `…`.
     pub shown: Value,
     pub reason: String,
+    /// What the caller said it makes the call for.
+    pub origin: Option<String>,
     /// `held`, `approved`, `rejected`, `always_allowed` or `lapsed`.
     pub status: String,
     pub created_at: i64,
@@ -101,7 +103,14 @@ impl Gateway {
                     input
                 ],
             )?;
-            conn.last_insert_rowid()
+            let id = conn.last_insert_rowid();
+            if let Some(origin) = &call.origin {
+                conn.execute(
+                    "INSERT INTO ticket_origins (ticket, origin) VALUES (?1, ?2)",
+                    params![id, origin],
+                )?;
+            }
+            id
         };
         if let Some(vault) = sealing {
             let name = sealed_name(id);
@@ -123,6 +132,7 @@ impl Gateway {
             tool: call.tool.clone(),
             shown,
             reason: reason.to_owned(),
+            origin: call.origin.clone(),
             status: "held".into(),
             created_at,
         })
@@ -172,8 +182,8 @@ impl Gateway {
     fn tickets_where(&self, filter: &str) -> anyhow::Result<Vec<Ticket>> {
         let conn = self.store.conn();
         let mut statement = conn.prepare(&format!(
-            "SELECT id, actor, connection, tool, shown, reason, status, created_at
-             FROM tickets WHERE {filter} ORDER BY id"
+            "SELECT id, actor, connection, tool, shown, reason, status, created_at, origin
+             FROM tickets LEFT JOIN ticket_origins ON ticket = id WHERE {filter} ORDER BY id"
         ))?;
         let rows = statement.query_map([], |row| {
             Ok((
@@ -186,6 +196,7 @@ impl Gateway {
                     reason: row.get(5)?,
                     status: row.get(6)?,
                     created_at: row.get(7)?,
+                    origin: row.get(8)?,
                 },
                 row.get::<_, String>(4)?,
             ))

@@ -462,6 +462,37 @@ test.describe("見張り", () => {
     }
   });
 
+  test("what the owner chose in the dialog stays when the choices arrive late", async ({ page, request }) => {
+    const r = await call<Connected>(request, "ConnectionService", "AddConnection", { target: "e2e-hook", how: "definition", env: "token=e2e" });
+    const id = r.connection.id;
+    const added = await call<{ id: string }>(request, "LookoutService", "AddLookout", { name: "遅い見張り", connection: id });
+    let arrive = () => {};
+    const late = new Promise<void>((done) => {
+      arrive = done;
+    });
+    await page.route("**/famulen.v1.LookoutService/GetLookoutChoices*", async (route) => {
+      await late;
+      await route.continue();
+    });
+    try {
+      await visit(page, "/settings/lookout", "設定 · 見張り");
+      await page.getByRole("button", { name: "遅い見張りを直す" }).click();
+      const dialog = page.getByRole("dialog", { name: "見張りを直す" });
+      await dialog.getByLabel("名前").fill("変えた見張り");
+      await dialog.getByRole("radiogroup", { name: "どこへの決め方" }).getByText("上書き", { exact: true }).click();
+      const arrived = page.waitForResponse(/GetLookoutChoices/);
+      arrive();
+      await arrived;
+      await dialog.getByRole("button", { name: "保存" }).click();
+      await expect(toast(page)).toHaveText("見張りを直した");
+      await expect(page.locator(".list > .item").filter({ hasText: "変えた見張り" })).toContainText("秘書へ");
+    } finally {
+      arrive();
+      await call(request, "LookoutService", "RemoveLookout", { id: added.id });
+      await call(request, "ConnectionService", "DeleteConnection", { id });
+    }
+  });
+
   test("a source reads only the places chosen for it, and the rest stays with the one choosing none", async ({ page, request }) => {
     const r = await call<Connected>(request, "ConnectionService", "AddConnection", {
       target: "e2e-hook",

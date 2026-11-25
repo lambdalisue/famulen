@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import { IconButton } from "~/components/ui";
+import { IconButton, Keyed } from "~/components/ui";
 import * as icons from "~/lib/icons";
 import { type FieldLike, fieldOf, type FieldSpec, type FieldValue, nameOf, same } from "~/lib/records";
 import FieldEdit, { FieldView } from "../FieldEdit";
@@ -48,17 +48,17 @@ export default function Fields(props: {
   return (
     <>
       <dl class="rec-fields">
-        <For each={shown()}>
+        <Keyed each={shown()} by={(t) => t.name}>
           {(t) => (
             <FieldRow
-              type={t}
-              field={fieldOf(props, t.name)}
+              type={t()}
+              field={fieldOf(props, t().name)}
               aide={props.aide}
-              open={added().includes(t.name)}
-              onSave={(v) => props.onSave(t.name, v)}
+              open={added().includes(t().name)}
+              onSave={(v) => props.onSave(t().name, v)}
             />
           )}
-        </For>
+        </Keyed>
         <For each={unknown()}>
           {(f) => (
             <div class="rec-field">

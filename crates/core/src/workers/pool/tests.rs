@@ -10,7 +10,7 @@ use crate::notebook::testing::TempDir;
 use crate::paths::at;
 use crate::records::{Patch, log_lines};
 use crate::workers::order::tests::delegated;
-use crate::workers::{Order, Settings, WORKER};
+use crate::workers::{Finish, Order, Settings, WORKER};
 
 type Meanwhile = Box<dyn FnOnce(&App) + Send>;
 
@@ -145,14 +145,19 @@ impl Bench {
     fn slots(&self, slots: u32) {
         Settings {
             slots,
-            paused: false,
+            ..Settings::default()
         }
         .save(&self.app.store)
         .unwrap();
     }
 
     fn pause(&self, paused: bool) {
-        Settings { slots: 2, paused }.save(&self.app.store).unwrap();
+        Settings {
+            paused,
+            ..Settings::default()
+        }
+        .save(&self.app.store)
+        .unwrap();
     }
 
     /// The time until a failed start is tried again has passed.
@@ -283,8 +288,8 @@ async fn nothing_starts_while_the_pool_is_paused_and_what_runs_goes_on() {
     let a = b.agent("a");
     b.pool.tick().await.unwrap();
     Settings {
-        slots: 2,
         paused: true,
+        ..Settings::default()
     }
     .save(&b.app.store)
     .unwrap();
@@ -293,6 +298,47 @@ async fn nothing_starts_while_the_pool_is_paused_and_what_runs_goes_on() {
     b.pool.tick().await.unwrap();
     assert_eq!(b.fake.begun(), ["a"]);
     assert_eq!(b.status(&a), "done");
+}
+
+#[tokio::test]
+async fn work_on_code_is_handed_the_owners_steps_to_finish_it_and_the_secretary_checks_them() {
+    let b = bench("pool-finish", Fake::default());
+    Settings {
+        finishes: vec![Finish {
+            repository: String::new(),
+            steps: "Merge it.".into(),
+        }],
+        ..Settings::default()
+    }
+    .save(&b.app.store)
+    .unwrap();
+    b.adroit("直す");
+    b.agent("調べる");
+    b.pool.tick().await.unwrap();
+    let finishes: Vec<String> = b
+        .app
+        .workers
+        .runs
+        .open()
+        .unwrap()
+        .into_iter()
+        .map(|r| r.order.finish)
+        .collect();
+    assert_eq!(finishes, ["Merge it.", ""]);
+
+    b.fake.look_as("直す", Looked::Done("マージした".into()));
+    b.fake.look_as("調べる", Looked::Done("書いた".into()));
+    b.app.workers.heard_of("s1").unwrap();
+    b.pool.tick().await.unwrap();
+    let told = b.told();
+    assert_eq!(told.len(), 2);
+    for Input { text, .. } in told {
+        assert_eq!(
+            text.contains("steps to finish it"),
+            text.contains("マージした"),
+            "{text}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1375,6 +1421,40 @@ async fn an_agent_uses_only_what_it_was_handed_and_asks_nobody() {
         .used_today(crate::models::Role::Worker, app.tz(), Utc::now())
         .unwrap();
     assert_eq!(calls, 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn what_an_agent_writes_can_be_watched_and_stays_after_its_end() {
+    let script = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"読む。"}]}}'
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"}]}}]}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"済んだ"}'
+"#;
+    let (app, _dir, _id) = run_agent("pool-agent-watched", script, &[("Runner", "agent")]).await;
+    let (run, sight, why) = crate::workers::watch(&app, 1).await.unwrap();
+    assert_eq!((run.state, why.as_str()), (State::Ended, ""));
+    let texts: Vec<_> = sight.lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!((texts, sight.done()), (vec!["読む。"], Some(1.0)));
+    assert!(crate::workers::watch(&app, 2).await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_plan_an_agent_writes_is_told_without_waiting_for_the_next_look() {
+    let dir = TempDir::new("pool-agent-told");
+    let script = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"in_progress"}]}}]}}'
+sleep 300
+"#;
+    let (app, pool, _id) = agent_app(&dir, script, &[("Runner", "agent")]);
+    pool.tick().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), app.workers.poked())
+        .await
+        .expect("the pool is told of the plan");
+    assert_eq!(app.workers.sights.of(1).doing(), "読む");
 }
 
 #[cfg(unix)]

@@ -1,7 +1,9 @@
-import { expect, test } from "@playwright/test";
-import { agree, dayFromToday, detail, field, record, row, toast, visit } from "./support";
+import { expect, type Page, test } from "@playwright/test";
+import { agree, call, dayFromToday, detail, field, record, row, toast, visit } from "./support";
 
 const deadline = (what: string, days: number) => [{ name: "Deadlines", items: [{ text: what, fields: [{ name: "On", value: dayFromToday(days) }] }] }];
+
+const categories = (page: Page) => page.getByRole("navigation", { name: "分類" });
 
 for (const [kind, path, view, add] of [
   ["holdings", "/things", "物", "物を足す"],
@@ -32,7 +34,8 @@ for (const [kind, path, view, add] of [
       await record(request, kind, `${view}の甲`, { fields: { Category: "甲類" }, notes: "棚の上" });
       await record(request, kind, `${view}の乙`, { fields: { Category: "乙類" } });
       await visit(page, path, view);
-      await page.getByLabel("分類で絞る").selectOption("甲類");
+      if (kind === "holdings") await categories(page).getByRole("link", { name: "甲類" }).click();
+      else await page.getByLabel("分類で絞る").selectOption("甲類");
       await expect(row(page, `${view}の甲`)).toBeVisible();
       await expect(row(page, `${view}の乙`)).toHaveCount(0);
       await page.getByRole("radiogroup", { name: "並べ方" }).getByText("カード").click();
@@ -51,6 +54,16 @@ for (const [kind, path, view, add] of [
     });
   });
 }
+
+test("what is being typed as another item stays when the record is read again", async ({ page, request }) => {
+  const r = await record(request, "holdings", "打ちかけの物", { fields: { Status: "owned" } });
+  await visit(page, `/things?id=${r.id}`, "物 · 打ちかけの物");
+  await detail(page).getByRole("button", { name: "＋ 期限" }).click();
+  await detail(page).getByLabel("期限を足す").fill("点検");
+  await call(request, "RecordService", "SaveRecord", { kind: "holdings", id: r.id, title: "読み直した物" });
+  await expect(detail(page)).toContainText("読み直した物");
+  await expect(detail(page).getByLabel("期限を足す")).toHaveValue("点検");
+});
 
 test("a thing says how it was got and several deadlines, and one let go is left out until asked for", async ({ page, request }) => {
   const r = await record(request, "holdings", "譲るカメラ", { fields: { Status: "owned" } });
@@ -74,6 +87,9 @@ test("a thing says how it was got and several deadlines, and one let go is left 
   await detail(page).getByLabel("期限を足す").fill("保証");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await detail(page).getByLabel("期限を足す").fill("点検");
+  // What is typed while the one before is saved stays.
+  await expect(detail(page).locator(".rec-item")).toHaveText([/保証/]);
+  await expect(detail(page).getByLabel("期限を足す")).toHaveValue("点検");
   await detail(page).getByLabel("期限を足す").press("Enter");
   await expect(detail(page).locator(".rec-item")).toHaveText([/保証/, /点検/]);
 
@@ -83,4 +99,66 @@ test("a thing says how it was got and several deadlines, and one let go is left 
   await expect(row(page, "譲るカメラ")).toHaveCount(0);
   await page.getByLabel("手放した物も").check();
   await expect(row(page, "譲るカメラ")).toBeVisible();
+});
+
+test("a category's tab stays in the address and over what is opened from it", async ({ page, request }) => {
+  await record(request, "holdings", "棚の辞書", { fields: { Category: "辞書類" } });
+  await record(request, "holdings", "棚の地図", { fields: { Category: "地図類" } });
+  await visit(page, "/things", "物");
+  await categories(page).getByRole("link", { name: "辞書類 1" }).click();
+  await expect(row(page, "棚の地図")).toHaveCount(0);
+  await row(page, "棚の辞書").getByRole("link").click();
+  await page.reload();
+  await expect(detail(page).getByLabel("題名")).toHaveValue("棚の辞書");
+  await expect(row(page, "棚の地図")).toHaveCount(0);
+  await page.getByRole("button", { name: "詳細を閉じる" }).click();
+  await expect(categories(page).getByRole("link", { name: "辞書類 1" })).toHaveAttribute("aria-current", "true");
+
+  await page.getByRole("button", { name: "物を足す" }).click();
+  await page.getByRole("dialog").getByLabel("名前").fill("棚の図鑑");
+  await page.getByRole("dialog").getByRole("button", { name: "足す", exact: true }).click();
+  await expect(field(page, "分類")).toContainText("辞書類");
+  await expect(row(page, "棚の図鑑")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "棚の図鑑を消す" }).click();
+  await agree(page, "消す");
+  await expect(categories(page).getByRole("link", { name: "辞書類 1" })).toHaveAttribute("aria-current", "true");
+
+  await categories(page).getByRole("link", { name: "地図類" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(categories(page).getByRole("link", { name: "地図類" })).toHaveAttribute("aria-current", "true");
+  await expect(categories(page).getByRole("link", { name: "地図類" })).toBeFocused();
+});
+
+test("a large category shows a few among all, and the rest in its own tab", async ({ page, request }) => {
+  for (let i = 100; i < 220; i++) await record(request, "holdings", `蔵書 ${i}`, { fields: { Category: "蔵書類" } });
+  // Found by words, as digits may stand in the code of any record.
+  await record(request, "holdings", "蔵書の目録", { fields: { Category: "蔵書類" } });
+  await visit(page, "/things", "物");
+  await expect(row(page, "蔵書")).toHaveCount(5);
+  await expect(categories(page).getByRole("link").nth(1)).toHaveText("蔵書類 121");
+  await page.getByRole("link", { name: "蔵書類 121 件を見る" }).click();
+  await expect(row(page, "蔵書")).toHaveCount(100);
+  await expect(row(page, "蔵書 100")).toBeInViewport();
+  const list = page.locator(".rec-rows");
+  expect(await list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
+  await page.getByRole("button", { name: "あと 21 件" }).click();
+  await expect(row(page, "蔵書")).toHaveCount(121);
+
+  await page.getByLabel("物を探す").fill("蔵書の目録");
+  await expect(row(page, "蔵書")).toHaveCount(1);
+  await categories(page).getByRole("link", { name: "甲類" }).click();
+  await expect(page.getByText("当てはまるものがない")).toBeVisible();
+});
+
+test("categories past those that fit are picked from a list", async ({ page, request }) => {
+  for (let i = 1; i <= 9; i++) await record(request, "holdings", `余りの品 ${i}`, { fields: { Category: `余り ${i}` } });
+  await visit(page, "/things", "物");
+  await page.getByRole("combobox", { name: "ほかの分類" }).selectOption("余り 9");
+  await expect(page.locator("[data-record]")).toHaveText([/余りの品 9/]);
+  await expect(page.getByRole("combobox", { name: "ほかの分類" })).toHaveValue("余り 9");
+  await page.getByLabel("物を探す").fill("余り");
+  await expect(categories(page).getByRole("link", { name: "すべて 9" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "ほかの分類" })).toHaveValue("余り 9");
 });

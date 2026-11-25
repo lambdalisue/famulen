@@ -16,6 +16,7 @@ name = "Hook"
 [account]
 region = { label = "地域", optional = true }
 token = { label = "合言葉", secret = true }
+made = { generate = true }
 
 [transport]
 http = { base = "https://hook.example" }
@@ -82,6 +83,11 @@ async fn the_definitions_are_listed_with_their_receivers_tools_fields_and_what_d
         .find(|d| d["id"] == "google")
         .cloned()
         .unwrap();
+    assert_eq!(
+        google.get("fields"),
+        None,
+        "a Google account is added by its login alone"
+    );
     assert_ne!(
         google["appReady"],
         json!(true),

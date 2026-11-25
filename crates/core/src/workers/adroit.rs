@@ -24,6 +24,8 @@ const RESULT_CHARS: usize = 6000;
 /// How long a session just started may look as if it had ended its turn
 /// before it took up its first prompt.
 const TAKES_UP_SECS: i64 = 180;
+/// How many turns are read for whoever watches a session.
+const WATCHED_TURNS: u32 = 20;
 
 pub fn is_adroit(c: &Connection) -> bool {
     matches!(&c.transport, Transport::Defined { definition, .. } if definition == ADROIT)
@@ -84,7 +86,7 @@ fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
     let order = &run.order;
     let mut input = json!({
         "dir": order.directory,
-        "prompt": order.request,
+        "prompt": super::finish::prompt(order),
         "name": format!("{} {}", token(run), order.title.replace('\n', " ")),
     });
     if order.worktree {
@@ -187,6 +189,7 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
     .await;
     match session {
         Ok(session) => {
+            app.workers.sights.read(run.id, &session);
             let age = crate::store::now() - run.started_at.unwrap_or_default();
             Ok(read_standing(&session, age))
         }
@@ -204,6 +207,20 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
             )))
         }
     }
+}
+
+/// Read what a run's session wrote, for whoever watches it.
+pub(super) async fn watch(app: &App, run: &Run) -> anyhow::Result<()> {
+    let connection = connection_kept(app, run)?;
+    let session = read(
+        app,
+        &connection,
+        "read_session",
+        json!({ "session": run.session, "turns": WATCHED_TURNS }),
+    )
+    .await?;
+    app.workers.sights.read(run.id, &session);
+    Ok(())
 }
 
 /// How a session stands, `age` seconds after it was started.

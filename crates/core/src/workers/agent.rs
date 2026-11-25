@@ -193,6 +193,7 @@ impl Drop for Workdir {
 /// A run made ready, so that what cannot be started fails at once.
 pub(super) struct Job {
     app: App,
+    run: i64,
     workdir: Workdir,
     bounds: Bounds,
     sealed: Vec<PathBuf>,
@@ -231,6 +232,7 @@ impl Job {
         let mut job = Self {
             bounds: Bounds::new(&run.order.tools, &workdir.0, directory.as_deref(), &sealed),
             app: app.clone(),
+            run: run.id,
             workdir,
             sealed,
             message: message(run, &handed),
@@ -538,8 +540,14 @@ async fn converse(job: Arc<Job>) -> anyhow::Result<Finish> {
                         text: text.chars().take(RESULT_CHARS).collect(),
                     });
                 }
-                Ok(Inbound::Other(event)) if event["type"] == "assistant" => {
-                    counted.message(&event);
+                Ok(Inbound::Other(event)) => {
+                    job.app.workers.sights.event(job.run, &event);
+                    if job.app.workers.sights.has_changed() {
+                        job.app.workers.poke();
+                    }
+                    if event["type"] == "assistant" {
+                        counted.message(&event);
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => tracing::debug!(%error, %line, "unreadable line from a worker"),

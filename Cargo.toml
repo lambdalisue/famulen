@@ -39,6 +39,9 @@ jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust
 base64 = "0.23.1"
 rand = "0.10.4"
 age = "0.12.1"
+aes-gcm = "0.11.1"
+hkdf = "0.13.0"
+p256 = { version = "0.14.0", features = ["ecdh"] }
 ulid = "3.0.0"
 url = "2.5.9"
 ox_content_allocator = "3.9.0"

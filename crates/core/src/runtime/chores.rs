@@ -21,9 +21,6 @@ use crate::store::Store;
 const CHORE_TICK: Duration = Duration::from_secs(60);
 const FIND_MODELS_EVERY: Duration = Duration::from_secs(60 * 60);
 const CALENDAR_EVERY: i64 = 15 * 60;
-/// How often each Google account's mail is read again from the last read,
-/// for the mail whose notice was taken but not read.
-const MAIL_CATCH_UP_EVERY: i64 = 5 * 60;
 const DIGEST_AT: u32 = 8;
 
 /// Build the engine again between turns once a change to a service definition
@@ -51,10 +48,23 @@ pub(super) async fn keep_finding_models(app: App) {
     }
 }
 
+/// Apart from the other chores, since a model may take long over each mail.
+pub(super) async fn read_purchases(app: App) {
+    let mut tick = tokio::time::interval(CHORE_TICK);
+    loop {
+        tick.tick().await;
+        if let Err(error) = crate::purchases::screen_left(&app).await {
+            tracing::warn!(%error, "could not screen the mail left for what was bought");
+        }
+        if let Err(error) = crate::purchases::read_waiting(&app).await {
+            tracing::warn!(%error, "could not read the mail of what was bought");
+        }
+    }
+}
+
 pub(super) async fn chores(app: App) {
     let mut tick = tokio::time::interval(CHORE_TICK);
     let mut last_calendar = 0_i64;
-    let mut last_mail = 0_i64;
     loop {
         tick.tick().await;
         let tz = app.tz();
@@ -65,10 +75,7 @@ pub(super) async fn chores(app: App) {
             app.refresh_calendars().await;
             app.console.notify(Event::Records);
         }
-        if now.timestamp() - last_mail >= MAIL_CATCH_UP_EVERY {
-            last_mail = now.timestamp();
-            app.catch_up_mail().await;
-        }
+        app.read_every_mail().await;
         app.renew_google_watches(app.receive_url.as_deref()).await;
         if let Err(error) = app.gateway.refresh_due().await {
             tracing::warn!(%error, "could not refresh logins");

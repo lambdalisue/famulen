@@ -179,7 +179,9 @@ export default function StatusPanel() {
               <div role="listitem" class="item">
                 <span class="mono sub when">{shortTime(a.createdAt, tz())}</span>
                 <Tag tone="warn">確かめる</Tag>
-                <span class="grow mono">{a.tool}</span>
+                <span class="grow">
+                  {a.deed} <span class="sub">{a.place}</span>
+                </span>
               </div>
             )}
           </For>

@@ -1,5 +1,6 @@
 import { SegmentGroup } from "@ark-ui/solid/segment-group";
 import { For } from "solid-js";
+import Keyed from "./Keyed";
 
 /** One choice out of a few, each shown. */
 export function Segmented(props: {
@@ -51,13 +52,13 @@ export function SegmentedOf<T>(props: { label: string; items: readonly (readonly
 export function SegmentedLinks(props: { label: string; items: [href: string, text: string, on: boolean][]; class?: string }) {
   return (
     <nav class={`segs ${props.class ?? ""}`} aria-label={props.label}>
-      <For each={props.items}>
-        {([href, text, on]) => (
-          <a class="segs-item" classList={{ on }} href={href} aria-current={on ? "true" : undefined}>
-            {text}
+      <Keyed each={props.items} by={([href]) => href}>
+        {(item) => (
+          <a class="segs-item" classList={{ on: item()[2] }} href={item()[0]} aria-current={item()[2] ? "true" : undefined}>
+            {item()[1]}
           </a>
         )}
-      </For>
+      </Keyed>
     </nav>
   );
 }

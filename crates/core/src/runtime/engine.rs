@@ -47,7 +47,6 @@ pub(super) fn start_engine(
     let effective = app.settings.effective()?;
     let tz = effective.timezone;
     let workspaces = app.workspaces()?;
-    let main = workspaces.iter().find(|w| w.main);
     let clients = app.slack_clients()?;
     let console = app.console.clone();
     let (bin, model, effort, spec) = secretary(app, &effective);
@@ -55,7 +54,7 @@ pub(super) fn start_engine(
         clients.as_ref(),
         store.clone(),
         app.permissions.clone(),
-        main.map(|m| m.owner.clone()).unwrap_or_default(),
+        workspaces.into_iter().map(|w| (w.id, w.owner)).collect(),
         config.memory_dir(),
         tools,
         Some(console.clone()),
@@ -66,6 +65,7 @@ pub(super) fn start_engine(
     services.turn_ended = Some(app.inputs.clone());
     services.in_flight = links.in_flight.clone();
     services.gateway = Some(app.gateway.clone());
+    services.approvals = services.approvals.with_notices(app.notices.clone());
     let services = Arc::new(services);
     install_answerer(app, &services);
     let scheduler = Scheduler::new(store.clone(), app.records.clone(), tz);

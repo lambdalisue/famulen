@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at INTEGER NOT NULL,
     answered_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS ticket_origins (
+    ticket INTEGER PRIMARY KEY,
+    origin TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS passes (
     ticket     INTEGER PRIMARY KEY,
     actor      TEXT NOT NULL,

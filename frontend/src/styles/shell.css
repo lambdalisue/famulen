@@ -29,10 +29,19 @@
 /* A page in two columns scrolls each by itself. */
 .pane:has(> .framed, > .split-pane) { padding: 0; overflow: hidden; gap: 0; }
 .framed { flex: 1; min-height: 0; display: flex; }
-.side { width: var(--side); flex-shrink: 0; border-right: 1px solid var(--line); padding: var(--s4) var(--s3); display: flex; flex-direction: column; gap: var(--s1); overflow-y: auto; }
-.side h3 { padding: var(--s3) 10px 2px; }
+.side { width: var(--side); flex-shrink: 0; border-right: 1px solid var(--line); padding: var(--s3); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overscroll-behavior: contain; }
+.side > * { flex-shrink: 0; }
+.side h3 { padding: 10px 10px 0; }
+/* Where there is more past an edge, what is at the edge fades rather than being cut through. */
+@property --fade-top { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fade-bottom { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@supports (animation-timeline: scroll(self)) {
+  .side { mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent); animation: side-top linear both, side-bottom linear both; animation-timeline: scroll(self), scroll(self); animation-range: 0 40px, calc(100% - 40px) 100%; }
+  @keyframes side-top { from { --fade-top: 0px; } to { --fade-top: 40px; } }
+  @keyframes side-bottom { from { --fade-bottom: 40px; } to { --fade-bottom: 0px; } }
+}
 .side > .sub { margin-top: auto; padding: var(--s4) 10px 0; }
-.nav-item { text-align: left; border-radius: var(--r); min-height: 38px; padding: 6px 10px; display: flex; gap: var(--s2); align-items: center; font-size: var(--t-md); text-decoration: none; color: var(--ink2); }
+.nav-item { text-align: left; border-radius: var(--r); min-height: 36px; padding: 5px 10px; display: flex; gap: var(--s2); align-items: center; font-size: var(--t-md); text-decoration: none; color: var(--ink2); }
 .nav-item:hover { background: var(--soft); }
 .nav-item.on { background: var(--pressed); color: var(--ink); font-weight: 600; }
 .nav-item .stack { flex: 1; gap: 0; }

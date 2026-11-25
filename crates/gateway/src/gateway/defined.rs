@@ -70,7 +70,9 @@ impl Gateway {
         }
         let (secret_values, values): (BTreeMap<_, _>, BTreeMap<_, _>) = values
             .into_iter()
-            .filter(|(_, v)| !v.trim().is_empty())
+            .filter(|(k, v)| {
+                !v.trim().is_empty() && !def.fields.iter().any(|f| f.generated && &f.name == k)
+            })
             .partition(|(k, _)| def.fields.iter().any(|f| f.secret && &f.name == k));
         let id = self.fresh_id(&def.id)?;
         let connection = self.connections.add(
@@ -91,11 +93,41 @@ impl Gateway {
             };
             self.sealed().set_secret(&id, &secret)?;
         }
+        self.generate_account_values(&id)?;
         self.refresh_display(&connection.id)?;
         self.log_change_by(OWNER, &id, "connection.add", &def.id)?;
         self.connections
             .get(&connection.id)?
             .ok_or_else(|| anyhow::anyhow!("connection {id} vanished"))
+    }
+
+    /// Make the account values the definition generates and the connection
+    /// does not have yet. A connection added before its definition asked for
+    /// one gets it here.
+    pub(super) fn generate_account_values(&self, id: &str) -> anyhow::Result<()> {
+        let row = self.connections.require(id)?;
+        let Some(Ok(def)) = self.definition_of(&row) else {
+            return Ok(());
+        };
+        let missing: Vec<_> = def
+            .fields
+            .iter()
+            .filter(|f| {
+                f.generated
+                    && !row.secret.account.contains_key(&f.name)
+                    && !row.secret.in_vault.contains(&format!("account.{}", f.name))
+            })
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let mut secret = self.sealed().require(id)?.secret;
+        for field in missing {
+            secret
+                .account
+                .insert(field.name.clone(), crate::mcp::generate_state());
+        }
+        self.sealed().set_secret(id, &secret)
     }
 
     /// Set one of a connection's account values after adding it, as `actor`;
@@ -113,7 +145,7 @@ impl Gateway {
         let field = def
             .fields
             .iter()
-            .find(|f| f.name == name)
+            .find(|f| f.name == name && !f.generated)
             .ok_or_else(|| anyhow::anyhow!("{} has no account field {name}", def.name))?;
         let value = value.trim();
         if field.secret {
@@ -163,6 +195,7 @@ impl Gateway {
             .filter_map(|k| k.strip_prefix("account."));
         Ok(values
             .keys()
+            .chain(connection.secret.account.keys())
             .map(String::as_str)
             .chain(sealed)
             .map(str::to_owned)

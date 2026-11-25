@@ -31,6 +31,8 @@ export const BOTTOM = ["home", "calendar", "task", "memo"];
 const MORE: Tab = { key: "more", label: "ほか", path: "/more", icon: icons.layoutGrid };
 
 export function tabOf(path: string): Tab {
+  // A run is of a delegated task.
+  if (path.startsWith("/runs/")) return tabOf("/tasks");
   const all = [...SECTIONS, ...ASIDE, MORE];
   return all.find((t) => t.path !== "/" && (path === t.path || path.startsWith(`${t.path}/`))) ?? SECTIONS[0];
 }
@@ -51,6 +53,7 @@ export function wayBack(path: string, search: string): { href: string; label: st
   if (path === "/settings/services" && search) return { href: "/settings/services", label: "サービス" };
   if (path.startsWith("/settings")) return { href: "/settings/menu", label: "設定" };
   if (path.startsWith("/memory")) return { href: "/memory/menu", label: "記憶" };
+  if (path.startsWith("/runs/")) return { href: "/tasks?tab=delegated", label: "委託" };
   const params = new URLSearchParams(search);
   const picked = ["id", "event", "record"].filter((p) => params.has(p));
   if (picked.length > 0) return { href: withParams(`${path}${search}`, Object.fromEntries(picked.map((p) => [p, ""]))), label: tabOf(path).label };

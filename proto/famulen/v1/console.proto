@@ -71,6 +71,22 @@ message Approval {
   repeated ApprovalQuestion questions = 7;
   // What the secretary says of it, beside what is asked.
   string summary = 8;
+  // What it does, in the owner's words.
+  string deed = 20;
+  // Where it does it: the service, and the account.
+  string place = 21;
+  // What it is given, a row for each; empty when it is not given named things.
+  repeated ApprovalGiven given = 22;
+}
+
+// One thing a held call is given.
+message ApprovalGiven {
+  string name = 1;
+  string text = 2;
+  // It is read as it is typed, such as a command.
+  bool code = 3;
+  // What it is made of, when it is not one text.
+  repeated ApprovalGiven rows = 4;
 }
 
 message ApprovalQuestion {
@@ -146,7 +162,8 @@ message ConsoleEvent {
     ConsoleMessage message = 1;
     // The inbox (approvals, held inputs, account questions) changed.
     Empty inbox = 2;
-    // Records or settings changed.
+    // Records or settings changed, or may have: told also when the stream
+    // begins and when changes were missed.
     Empty records = 3;
   }
 }

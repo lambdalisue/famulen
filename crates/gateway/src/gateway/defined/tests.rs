@@ -228,6 +228,56 @@ async fn a_secret_account_field_is_sealed_and_filled_only_into_what_goes_out() {
 }
 
 #[tokio::test]
+async fn a_generated_account_value_is_made_once_kept_in_the_vault_and_not_set_by_hand() {
+    let (base, seen) = service().await;
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = gateway(&base, true).with_definitions(None, &[("chat.toml".into(), text)]);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    let given = BTreeMap::from([("phrase".to_owned(), "kaze".to_owned())]);
+    let other = g.add_defined("chat", given, None).unwrap();
+
+    let mut phrases = Vec::new();
+    for c in [&c, &other, &c] {
+        g.generate_account_values(&c.id).unwrap();
+        g.call_as_owner(c, "knock", json!({})).await.unwrap();
+        let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+        phrases.push(query["phrase"].clone());
+    }
+
+    assert!(c.secret.in_vault.contains("account.phrase"));
+    assert!(phrases[0].len() >= 32);
+    assert_ne!(phrases[1], "kaze", "one given is not taken");
+    assert_ne!(phrases[0], phrases[1], "each connection has its own");
+    assert_eq!(phrases[0], phrases[2], "one that is made is kept");
+    assert!(
+        g.set_account_value(OWNER, &c.id, "phrase", "kaze")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn a_connection_added_before_its_definition_generates_a_value_gets_it() {
+    let (base, seen) = service().await;
+    let g = gateway(&base, true);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = g.with_definitions(None, &[("chat.toml".into(), text)]);
+
+    g.sync_connections().unwrap();
+
+    g.call_as_owner(&c, "knock", json!({})).await.unwrap();
+    let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+    assert!(query["phrase"].len() >= 32);
+}
+
+#[tokio::test]
 async fn an_account_value_can_be_set_again_after_adding() {
     let (base, seen) = service().await;
     let g = gateway(&base, true);
@@ -283,6 +333,27 @@ async fn logging_in_the_same_account_again_replaces_its_tokens_and_drops_the_new
 
     assert_eq!(first, second);
     assert_eq!(g.connections.list().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn logging_in_the_same_account_again_keeps_its_generated_value() {
+    let (base, seen) = service().await;
+    let text = chat(&base).replace(
+        "phrase = { label = \"Phrase\", optional = true, secret = true }",
+        "phrase = { generate = true }",
+    );
+    let g = gateway(&base, true).with_definitions(None, &[("chat.toml".into(), text)]);
+
+    let mut phrases = Vec::new();
+    for _ in 0..2 {
+        let id = logged_in(&g, &base).await;
+        let c = g.connections.get(&id).unwrap().unwrap();
+        g.call_as_owner(&c, "knock", json!({})).await.unwrap();
+        let (_, _, query, _) = seen.lock().unwrap().last().cloned().unwrap();
+        phrases.push(query["phrase"].clone());
+    }
+
+    assert_eq!(phrases[0], phrases[1]);
 }
 
 #[tokio::test]
@@ -707,4 +778,237 @@ http = {{ base = "{base}/api" }}
     let (target, auth, _, _) = seen.last().unwrap();
     assert_eq!(target, "GET /api/me");
     assert_eq!(auth, "Bearer k-1");
+}
+
+/// A service whose `admin` token is traded for with a ticket that is spent
+/// in doing so; it answers each trade with the next ticket, or refuses.
+async fn trading(refuse: bool) -> (String, Seen) {
+    let seen: Seen = Arc::default();
+    async fn record(
+        State((seen, refuse)): State<(Seen, bool)>,
+        uri: axum::http::Uri,
+        headers: HeaderMap,
+        body: String,
+    ) -> String {
+        let auth = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let mut seen = seen.lock().unwrap();
+        seen.push((uri.path().to_owned(), auth, BTreeMap::new(), body));
+        if uri.path() != "/trade" {
+            return r#"{"ok":true}"#.to_owned();
+        }
+        let n = seen.iter().filter(|s| s.0 == "/trade").count();
+        if refuse {
+            r#"{"ok":false,"error":"ticket_spent"}"#.to_owned()
+        } else {
+            json!({ "ok": true, "token": format!("admin-{n}"), "ticket": format!("t-{n}") })
+                .to_string()
+        }
+    }
+    let app = axum::Router::new()
+        .route("/{*rest}", post(record))
+        .with_state((seen.clone(), refuse));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (base, seen)
+}
+
+fn trader(base: &str) -> Gateway {
+    let text = chat(base)
+        .replace(
+            "[app]",
+            "ticket = { label = \"Ticket\", optional = true, secret = true }\n\n[app]",
+        )
+        .replace(
+            "[transport]",
+            &format!(
+                "[login.exchange.admin]\npost = \"{base}/trade\"\nform = {{ ticket = \"{{account.ticket}}\" }}\ntoken = \"{{/token}}\"\nrenews = {{ ticket = \"{{/ticket}}\" }}\n\n[transport]"
+            ),
+        )
+        .replace(
+            "[permissions]",
+            "[[tools]]\nname = \"rule\"\ndescription = \"Rule.\"\nmethod = \"POST\"\npath = \"/rule\"\nauth = \"admin\"\nok = \"{/ok}\"\n\n[permissions]",
+        );
+    gateway(base, true).with_definitions(None, &[("chat.toml".into(), text)])
+}
+
+#[tokio::test]
+async fn an_exchanged_token_goes_out_and_the_spent_value_is_replaced_in_the_vault() {
+    let (base, seen) = trading(false).await;
+    let g = trader(&base);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    g.set_account_value(OWNER, &c.id, "ticket", "t-0")
+        .await
+        .unwrap();
+
+    let (one, two) = tokio::join!(
+        g.call_as_owner(&c, "rule", json!({})),
+        g.call_as_owner(&c, "rule", json!({}))
+    );
+
+    assert!(!one.unwrap().is_error && !two.unwrap().is_error);
+    let seen = seen.lock().unwrap();
+    let of = |path: &str| -> Vec<(String, String)> {
+        seen.iter()
+            .filter(|s| s.0 == path)
+            .map(|s| (s.1.clone(), s.3.clone()))
+            .collect()
+    };
+    assert_eq!(
+        of("/trade"),
+        [
+            (String::new(), "ticket=t-0".to_owned()),
+            (String::new(), "ticket=t-1".to_owned())
+        ],
+        "no ticket is handed over twice"
+    );
+    let mut ruled: Vec<String> = of("/api/rule").into_iter().map(|r| r.0).collect();
+    ruled.sort();
+    assert_eq!(ruled, ["Bearer admin-1", "Bearer admin-2"]);
+    let row = g.connections.require(&c.id).unwrap();
+    assert!(row.secret.account.is_empty() && row.secret.tokens.is_empty());
+    let opened = g.sealed().require(&c.id).unwrap();
+    assert_eq!(opened.secret.account["ticket"], "t-2");
+    assert!(opened.secret.tokens.is_empty(), "the token is not kept");
+}
+
+#[tokio::test]
+async fn a_refused_exchange_says_why_sends_nothing_on_and_keeps_the_value() {
+    let (base, seen) = trading(true).await;
+    let g = trader(&base);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    let unset = g.call_as_owner(&c, "rule", json!({})).await.unwrap_err();
+    assert!(seen.lock().unwrap().is_empty(), "{unset}");
+    g.set_account_value(OWNER, &c.id, "ticket", "t-secret")
+        .await
+        .unwrap();
+
+    let error = g.call_as_owner(&c, "rule", json!({})).await.unwrap_err();
+
+    let error = error.to_string();
+    assert!(error.contains("ticket_spent"), "{error}");
+    assert!(!error.contains("t-secret"), "{error}");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    let opened = g.sealed().require(&c.id).unwrap();
+    assert_eq!(opened.secret.account["ticket"], "t-secret");
+}
+
+#[tokio::test]
+async fn connecting_the_same_account_again_keeps_the_secret_values_set_on_it() {
+    let (base, _) = service().await;
+    let g = gateway(&base, true);
+    let id = logged_in(&g, &base).await;
+    g.set_account_value(OWNER, &id, "phrase", "kaze")
+        .await
+        .unwrap();
+
+    assert_eq!(logged_in(&g, &base).await, id);
+
+    let opened = g.sealed().require(&id).unwrap();
+    assert_eq!(opened.secret.account["phrase"], "kaze");
+}
+
+#[test]
+fn without_a_vault_a_secret_field_counts_as_set_too() {
+    let store = Store::open_in_memory().unwrap();
+    let g = Gateway::new(
+        store.clone(),
+        Connections::new(store),
+        reqwest::Client::new(),
+        None,
+    )
+    .with_definitions(None, &[("chat.toml".into(), chat("http://127.0.0.1:9"))]);
+
+    let c = g
+        .add_defined(
+            "chat",
+            BTreeMap::from([("phrase".into(), "kaze".into())]),
+            None,
+        )
+        .unwrap();
+
+    assert!(g.account_names(&c.id).unwrap().contains("phrase"));
+}
+
+#[tokio::test]
+async fn what_is_set_on_a_connection_while_it_logs_in_again_is_kept() {
+    let g = {
+        let store = Store::open_in_memory().unwrap();
+        Gateway::new(
+            store.clone(),
+            Connections::new(store),
+            reqwest::Client::new(),
+            Some(super::super::vault::tests::scratch()),
+        )
+    };
+    let (asked, was_asked) = (
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let (go, done) = (asked.clone(), was_asked.clone());
+    let app = axum::Router::new().route(
+        "/oauth/token",
+        post(move || async move {
+            done.notify_one();
+            go.notified().await;
+            r#"{"access_token":"b","authed_user":{"id":"U1","access_token":"u"},"team":{"id":"T1","name":"Acme"}}"#
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let g = g
+        .with_definitions(None, &[("chat.toml".into(), chat(&base))])
+        .with_env(|name| name.starts_with("CHAT_").then(|| "v".to_owned()));
+    let c = g
+        .add_defined(
+            "chat",
+            BTreeMap::from([("phrase".into(), "old".into())]),
+            None,
+        )
+        .unwrap();
+    let url = g.begin_defined_login(&c.id, "https://console/cb").unwrap();
+    let state = query_param(url.split_once('?').unwrap().1, "state").unwrap();
+
+    let answer = format!("code=c1&state={state}");
+    let (id, ()) = tokio::join!(g.finish_defined_login(&answer), async {
+        was_asked.notified().await;
+        g.set_account_value(OWNER, &c.id, "phrase", "new")
+            .await
+            .unwrap();
+        asked.notify_one();
+    });
+
+    let opened = g.sealed().require(id.unwrap()).unwrap();
+    assert_eq!(opened.secret.account["phrase"], "new");
+}
+
+#[tokio::test]
+async fn a_trade_whose_caller_went_away_still_keeps_the_next_value() {
+    let (base, seen) = trading(false).await;
+    let g = trader(&base);
+    let c = g.add_defined("chat", BTreeMap::new(), None).unwrap();
+    g.set_account_value(OWNER, &c.id, "ticket", "t-0")
+        .await
+        .unwrap();
+
+    {
+        let call = g.call_as_owner(&c, "rule", json!({}));
+        tokio::pin!(call);
+        // Begun, then dropped before the service answers.
+        assert!(futures_util::poll!(call.as_mut()).is_pending());
+    }
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while g.sealed().require(&c.id).unwrap().secret.account["ticket"] != "t-1" {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }

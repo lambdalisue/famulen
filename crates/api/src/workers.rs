@@ -5,7 +5,8 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Order, Outcome, Run, Runner, Settings, Standing, State, WORKER, is_delegated,
+    self, Finish, Order, Outcome, Run, Runner, Settings, Sight, Standing, State, WORKER,
+    is_delegated,
 };
 use famulen_core::workgroups::ALL;
 
@@ -43,6 +44,27 @@ fn run(r: Run) -> WorkerRun {
     }
 }
 
+/// A run with what can be seen of it.
+fn seen(r: Run, sight: &Sight) -> WorkerRun {
+    WorkerRun {
+        steps: sight
+            .steps
+            .iter()
+            .map(|s| WorkerStep {
+                id: s.id.clone(),
+                parent: s.parent.clone(),
+                title: s.title.clone(),
+                status: s.status.clone(),
+                note: s.note.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        percent: (sight.done().unwrap_or_default() * 100.0) as i32,
+        doing: sight.doing(),
+        ..run(r)
+    }
+}
+
 fn standing(s: Standing) -> (&'static str, String) {
     let name = match s {
         Standing::Next => "queued",
@@ -62,10 +84,23 @@ fn standing(s: Standing) -> (&'static str, String) {
     (name, String::new())
 }
 
+fn finish(f: Finish) -> WorkerFinish {
+    WorkerFinish {
+        repository: f.repository,
+        steps: f.steps,
+        ..Default::default()
+    }
+}
+
 fn settings(s: Settings) -> WorkerSettings {
     WorkerSettings {
         slots: s.slots as i32,
         paused: s.paused,
+        finishes: s.finishes.into_iter().map(finish).collect(),
+        bundled_finishes: workers::bundled_finishes()
+            .into_iter()
+            .map(finish)
+            .collect(),
         ..Default::default()
     }
 }
@@ -182,7 +217,13 @@ impl WorkerService for Api {
                     runner,
                     state: state.into(),
                     why,
-                    run: q.run.map(run).into(),
+                    run: q
+                        .run
+                        .map(|r| {
+                            let sight = self.app.workers.sights.of(r.id);
+                            seen(r, &sight)
+                        })
+                        .into(),
                     ..Default::default()
                 }
             })
@@ -203,6 +244,30 @@ impl WorkerService for Api {
         Response::ok(ListDelegatedResponse {
             queue,
             ended,
+            ..Default::default()
+        })
+    }
+
+    async fn read_run(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ReadRunRequest>,
+    ) -> ServiceResult<RunOutput> {
+        let (run, sight, why) = workers::watch(&self.app, request.id).await.or_fail()?;
+        Response::ok(RunOutput {
+            run: Some(seen(run, &sight)).into(),
+            lines: sight
+                .lines
+                .into_iter()
+                .map(|l| WorkerLine {
+                    id: l.id,
+                    at: l.at,
+                    kind: l.kind.as_str().into(),
+                    text: l.text,
+                    ..Default::default()
+                })
+                .collect(),
+            why,
             ..Default::default()
         })
     }
@@ -270,13 +335,22 @@ impl WorkerService for Api {
         let chosen = Settings {
             slots: u32::try_from(request.slots).map_err(fail)?,
             paused: request.paused,
+            finishes: request
+                .to_owned_message()
+                .finishes
+                .into_iter()
+                .map(|f| Finish::new(&f.repository, &f.steps))
+                .collect::<anyhow::Result<_>>()
+                .or_fail()?,
         };
         chosen.save(&self.app.store).or_fail()?;
         self.app.journal.record(
             "setting",
             format!(
-                "workers: {} at once, paused {}",
-                chosen.slots, chosen.paused
+                "workers: {} at once, paused {}, {} finishes",
+                chosen.slots,
+                chosen.paused,
+                chosen.finishes.len()
             ),
         );
         changed(self);

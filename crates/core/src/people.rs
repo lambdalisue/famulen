@@ -88,14 +88,20 @@ pub fn noted_from(answer: &Value) -> Vec<Noted> {
 /// Who wrote an item, as its service names them. Mail says it of itself, so it
 /// is not told from here whose it is.
 fn writer(feed: Feed, item: &Item) -> Option<String> {
-    let first = item.body.lines().next()?;
-    let (_, from) = first.split_once("from: ")?;
+    // Only the lines written before the text of the message are read.
+    let mut lines = item.body.lines();
     let id = match feed {
-        Feed::Chat => from.split(" · ").next()?,
-        Feed::Mail => match from.rsplit_once('<') {
-            Some((_, address)) => address.trim_end().trim_end_matches('>'),
-            None => from,
-        },
+        Feed::Chat => {
+            let (_, from) = lines.next()?.split_once("from: ")?;
+            from.split(" · ").next()?
+        }
+        Feed::Mail => {
+            let from = lines.take(2).find_map(|l| l.strip_prefix("from: "))?;
+            match from.rsplit_once('<') {
+                Some((_, address)) => address.trim_end().trim_end_matches('>'),
+                None => from,
+            }
+        }
         Feed::Other => return None,
     };
     let id = id.trim();
@@ -354,10 +360,13 @@ mod tests {
     fn someone_spoken_of_is_noted_by_name_and_mail_by_the_address_it_claims_tied_to_no_party() {
         let b = book();
         party(&b, "田中", "Tanaka@example.com", true);
-        let mail = Item {
-            title: "件名".into(),
-            body: "from: Tanaka <Tanaka@example.com>\n本文".into(),
-        };
+        let mail = crate::arrivals::mail_item(&json!({
+            "id": "m1",
+            "snippet": "本文",
+            "payload": { "headers": [
+                { "name": "From", "value": "Tanaka <Tanaka@example.com>" },
+            ] }
+        }));
 
         let notes = write(
             &b,
@@ -432,7 +441,13 @@ mod tests {
         assert_eq!(noted_from(&answer), [noted(0, "", "a")]);
         assert!(noted_from(&json!({})).is_empty());
         let schema = with_people(crate::lookout::verdict_schema());
-        assert_eq!(schema["required"], json!(["items", "groups", "people"]));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("people"))
+        );
+        assert!(schema["properties"].get("people").is_some());
         let many = vec![json!({ "item": 0, "who": "", "note": "a" }); 50];
         assert_eq!(noted_from(&json!({ "people": many })).len(), MOST_NOTES);
     }

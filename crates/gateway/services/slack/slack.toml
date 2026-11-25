@@ -8,6 +8,7 @@ setup = "README.md"
 
 [account]
 display = "{account.team_name}"
+config_refresh = { label = "アプリの設定用トークンの Refresh Token（xoxe-）", optional = true, secret = true }
 
 [app]
 id = "slack"
@@ -23,16 +24,31 @@ tokens = { bot = "{/access_token}", user = "{/authed_user/access_token}" }
 values = { team = "{/team/id}", team_name = "{/team/name}", user = "{/authed_user/id}", bot_user = "{/bot_user_id}", app = "{/app_id}" }
 same = ["team"]
 
+[login.exchange.config]
+post = "https://slack.com/api/tooling.tokens.rotate"
+form = { refresh_token = "{account.config_refresh}" }
+token = "{/token}"
+renews = { config_refresh = "{/refresh_token}" }
+
 [transport]
 http = { base = "https://slack.com/api", auth = "bot" }
 
 [[tools]]
 name = "post_message"
-description = "Post a message to a channel or a DM, in a thread when `thread` is given, beside the image at `icon` when one is."
+description = "Post a message to a channel or a DM, in a thread when `thread` is given, beside the image at `icon` and under `name` when they are."
 method = "POST"
 path = "/chat.postMessage"
-body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}" }
-input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" } }, required = ["channel", "text"] }
+body = { channel = "{args.channel}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}", username = "{args.name}" }
+input = { type = "object", properties = { channel = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" }, name = { type = "string" } }, required = ["channel", "text"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "post_ephemeral"
+description = "Post a message to a channel that only `user` sees, until they reload Slack; in a thread when `thread` is given, beside the image at `icon` and under `name` when they are."
+method = "POST"
+path = "/chat.postEphemeral"
+body = { channel = "{args.channel}", user = "{args.user}", text = "{args.text}", thread_ts = "{args.thread}", blocks = "{args.blocks}", icon_url = "{args.icon}", username = "{args.name}" }
+input = { type = "object", properties = { channel = { type = "string" }, user = { type = "string" }, text = { type = "string" }, thread = { type = "string" }, blocks = { type = "array" }, icon = { type = "string" }, name = { type = "string" } }, required = ["channel", "user", "text"] }
 ok = "{/ok}"
 
 [[tools]]
@@ -69,6 +85,17 @@ method = "POST"
 path = "/reactions.add"
 body = { channel = "{args.channel}", timestamp = "{args.ts}", name = "{args.name}" }
 input = { type = "object", properties = { channel = { type = "string" }, ts = { type = "string" }, name = { type = "string" } }, required = ["channel", "ts", "name"] }
+ok = "{/ok}"
+
+[[tools]]
+name = "set_app_icon"
+description = "Set the app's own icon, the one in the sidebar and the lists, to the public image at `icon`."
+method = "POST"
+path = "/apps.icon.set"
+body = { app_id = "{account.app}", url = "{args.icon}" }
+input = { type = "object", properties = { icon = { type = "string" } }, required = ["icon"] }
+auth = "config"
+open_world = true
 ok = "{/ok}"
 
 [[tools]]
@@ -120,7 +147,9 @@ token = "{app.app_token}"
 account = { team = ["{/payload/team_id}", "{/payload/team/id}"] }
 
 [permissions]
+set_app_icon = "confirm"
 post_message = "allow"
+post_ephemeral = "confirm"
 update_message = "allow"
 open_dm = "allow"
 add_reaction = "allow"

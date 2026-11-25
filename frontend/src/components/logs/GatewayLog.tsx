@@ -22,6 +22,7 @@ const ACTORS: [string, string][] = [
   ["worker", "手代"],
   ["lookout", "見張り"],
   ["assessor", "見極め"],
+  ["famulen", "Famulen"],
 ];
 
 const DECISIONS: [string, string][] = [

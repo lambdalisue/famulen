@@ -297,10 +297,18 @@ impl Store {
 
     /// The inputs held for the owner, oldest first.
     pub fn held(&self) -> anyhow::Result<Vec<StoredInput>> {
+        self.inputs_in("SELECT id FROM inputs WHERE status = 'held' ORDER BY id")
+    }
+
+    /// The inputs waiting for their turn or in it, oldest first.
+    pub fn in_hand(&self) -> anyhow::Result<Vec<StoredInput>> {
+        self.inputs_in("SELECT id FROM inputs WHERE status IN ('pending', 'running') ORDER BY id")
+    }
+
+    fn inputs_in(&self, select_ids: &str) -> anyhow::Result<Vec<StoredInput>> {
         let ids: Vec<i64> = {
             let conn = self.conn();
-            let mut stmt =
-                conn.prepare("SELECT id FROM inputs WHERE status = 'held' ORDER BY id")?;
+            let mut stmt = conn.prepare(select_ids)?;
             stmt.query_map([], |r| r.get(0))?
                 .collect::<Result<_, _>>()?
         };
@@ -321,6 +329,19 @@ impl Store {
             "UPDATE inputs SET status = ?2, error = ?3, updated_at = ?4 WHERE id = ?1 AND status = 'held'",
             params![id, status, error, now()],
         )? == 1)
+    }
+
+    /// What a call made now is made for: the input of the running turn.
+    pub fn call_origin(&self) -> anyhow::Result<Option<String>> {
+        Ok(self.running()?.map(|turn| turn.input.to_string()))
+    }
+
+    /// The input a call was made for, by its [`Store::call_origin`].
+    pub fn input_of_origin(&self, origin: &str) -> anyhow::Result<Option<Input>> {
+        Ok(match origin.parse() {
+            Ok(id) => self.get(id)?.map(|row| row.input),
+            Err(_) => None,
+        })
     }
 
     pub fn running(&self) -> anyhow::Result<Option<Turn>> {
@@ -433,6 +454,23 @@ CREATE TABLE IF NOT EXISTS approvals (
     ts          TEXT,
     created_at  INTEGER NOT NULL,
     answered_at INTEGER
+);
+-- Where a request was asked, when not in the main workspace's DM.
+CREATE TABLE IF NOT EXISTS approval_places (
+    approval  INTEGER PRIMARY KEY,
+    workspace TEXT NOT NULL,
+    channel   TEXT NOT NULL,
+    thread    TEXT NOT NULL
+);
+-- The browsers notices are sent to.
+CREATE TABLE IF NOT EXISTS notice_devices (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh   TEXT NOT NULL,
+    auth     TEXT NOT NULL,
+    name     TEXT NOT NULL,
+    added_at INTEGER NOT NULL,
+    failed   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS wakeups (
     id    INTEGER PRIMARY KEY,
@@ -562,6 +600,35 @@ CREATE TABLE IF NOT EXISTS lookout_heard (
     source TEXT NOT NULL,
     title  TEXT NOT NULL,
     body   TEXT NOT NULL
+);
+-- mail that may tell of a purchase: unscreened, waiting, read or failed
+CREATE TABLE IF NOT EXISTS purchase_mails (
+    id         INTEGER PRIMARY KEY,
+    connection TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    at         INTEGER NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'waiting',
+    tries      INTEGER NOT NULL DEFAULT 0,
+    next_at    INTEGER NOT NULL DEFAULT 0,
+    -- what an unscreened one is screened by
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL DEFAULT '',
+    UNIQUE (connection, message)
+);
+-- what was added from mail; it outlives the record
+CREATE TABLE IF NOT EXISTS purchases (
+    holding   TEXT PRIMARY KEY,
+    mail      INTEGER NOT NULL,
+    shop      TEXT NOT NULL,
+    number    TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    bought_on TEXT NOT NULL
+);
+-- what each mail settled
+CREATE TABLE IF NOT EXISTS purchase_settled (
+    mail    INTEGER NOT NULL,
+    holding TEXT NOT NULL,
+    PRIMARY KEY (mail, holding)
 );
 CREATE TABLE IF NOT EXISTS slack_taken (
     workspace TEXT NOT NULL,

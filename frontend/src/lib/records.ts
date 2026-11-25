@@ -190,6 +190,8 @@ const NAMES: { [name: string]: string } = {
   On: "日付",
   From: "どこから",
   Price: "金額",
+  Order: "注文番号",
+  "Ordered as": "注文の品名",
   Reason: "理由",
   Deadlines: "期限",
   What: "何の期限か",

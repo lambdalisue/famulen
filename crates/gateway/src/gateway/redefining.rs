@@ -202,6 +202,9 @@ impl Gateway {
             .collect();
         for connection in made_from {
             self.clients.lock().await.remove(&connection);
+            if let Err(error) = self.generate_account_values(&connection) {
+                tracing::warn!(%connection, %error, "could not make the generated account values");
+            }
             if let Err(error) = self.tools_of(&connection).await {
                 tracing::debug!(%connection, %error, "the tools were not read again");
             }

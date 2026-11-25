@@ -3,7 +3,8 @@
  * bottom, the top for display only.
  */
 @media (--phone) {
-  .app { border-top: 0; padding-top: env(safe-area-inset-top); background: var(--wg-tint); }
+  :root { --clear-top: env(safe-area-inset-top); }
+  .app { border-top: 0; padding-top: var(--clear-top); background: var(--wg-tint); }
   .topbar, .tabs, .d-only { display: none !important; }
   .m-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; border-top: 3px solid var(--workgroup); padding: 10px 12px 6px 16px; background: var(--wg-tint); }
   .m-title { flex: 1; min-width: 0; font-size: 22px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -13,7 +14,7 @@
   .main { height: 100%; }
 
   /* The whole page scrolls as one, and clears what floats at the bottom. */
-  .pane, .pane:has(> .framed, > .split-pane) { padding: 8px 16px calc(240px + env(safe-area-inset-bottom)); background: var(--bg); gap: var(--s3); overflow-y: auto; display: block; }
+  .pane, .pane:has(> .framed, > .split-pane) { padding: 8px 16px calc(var(--composer, 182px) + 80px + env(safe-area-inset-bottom)); background: var(--bg); gap: var(--s3); overflow-y: auto; display: block; }
   .pane > * + * { margin-top: var(--s3); }
   .framed, .split-pane { display: block; }
   .split-left, .split-pane.open > .split-left, .split-pane.floats.open > .split-left { overflow: visible; padding: 0; gap: var(--s3); }
@@ -25,6 +26,10 @@
   .rec-glance, .rec-item { background: var(--card); }
   .rec-glance > .rec-fields { grid-template-columns: repeat(auto-fill, minmax(min(136px, 100%), 1fr)); }
   .page { max-width: none; }
+  .run-body { display: flex; flex-direction: column; }
+  .run-plan { overflow: visible; }
+  .run-lines { max-height: 60vh; padding: 10px 12px; }
+  .run-line { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   /* The title of the page is in the bar above it. */
   .page-head h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .page-head-line { min-height: 0; }
@@ -77,32 +82,46 @@
   .m-tab.on { color: var(--ink); font-weight: 600; }
   .m-tab.on svg { color: var(--workgroup); }
 
-  /* The conversation is pulled up from the composer over the page. */
-  .chat { position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 25; width: auto; border: 0; padding-top: 6px; background: var(--bg); box-shadow: 0 -10px 12px -2px var(--bg); }
+  /* The conversation is pulled up from the composer over the whole screen. */
+  .chat { position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 25; width: auto; max-width: none; border: 0; padding-top: 6px; background: var(--bg); box-shadow: 0 -10px 12px -2px var(--bg); }
+  .chat-edge { display: none; }
   .chat .messages, .chat .m-sheetbar, .chat #approvals { display: none; }
-  .m-peek { display: flex; flex-direction: column; gap: 4px; min-height: 48px; margin: 0 12px 6px; padding: 6px 12px 8px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); text-align: left; cursor: pointer; }
+  .m-peek { display: flex; flex-direction: column; gap: 6px; min-height: 64px; margin: 0 12px 6px; padding: 6px 12px 8px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); text-align: left; cursor: pointer; }
+  .m-peek, .m-sheetbar { touch-action: none; user-select: none; -webkit-user-select: none; }
   .peek-line { display: flex; align-items: center; gap: var(--s2); width: 100%; min-width: 0; }
-  .peek-text { flex: 1; min-width: 0; font-size: var(--t-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .peek-text { flex: 1; min-width: 0; min-height: 3em; font-size: var(--t-base); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .composer { margin: 0 12px 10px; border-width: 1.5px; }
   .composer .send { font-size: 0; gap: 0; width: 44px; padding: 0; border-radius: 10px; }
   .composer textarea { font-size: 16px; }
-  body:is(.sheet-half, .sheet-full) .chat { top: 45vh; top: 45dvh; background: var(--panel); border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px rgba(27, 27, 25, .18); }
-  body.sheet-full .chat { top: calc(env(safe-area-inset-top) + 8px); }
-  body:is(.sheet-half, .sheet-full) .chat .messages { display: flex; }
-  body:is(.sheet-half, .sheet-full) .chat #approvals { display: flex; }
-  body:is(.sheet-half, .sheet-full) .chat .m-sheetbar { display: flex; flex-direction: column; gap: 4px; padding: 2px 16px 4px; }
-  body:is(.sheet-half, .sheet-full) .m-peek, body:is(.sheet-half, .sheet-full) .m-float { display: none; }
-  body.typing .m-tabbar, body.typing .m-peek, body.typing .m-float { display: none; }
-  body.typing .chat { bottom: 0; }
+  body.chat-open .chat { --under: calc(56px + env(safe-area-inset-bottom)); top: var(--seen-top, 0px); bottom: auto; height: calc(var(--seen-height, 100dvh) - var(--under)); padding-top: var(--clear-top); background: var(--panel); box-shadow: none; z-index: 28; }
+  body.chat-open .chat .messages { display: block; min-height: 0; }
+  body.chat-open .chat #approvals { display: flex; }
+  body.chat-open .chat .m-sheetbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 16px 4px; border-bottom: 1px solid var(--line2); }
+  body.chat-open :is(.m-peek, .m-float) { display: none; }
+  body.typing :is(.m-tabbar, .m-peek, .m-float) { display: none; }
+  body.typing.chat-open .chat { --under: 0px; }
   body.typing .m-dismiss { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--muted); }
 
-  .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + 168px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
+  .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + var(--composer, 182px) + 8px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
   .m-float > * { pointer-events: auto; }
   .m-toggles:is(nav), .m-toggles > .segs { background: var(--card); box-shadow: 0 4px 12px rgba(27, 27, 25, .18); }
+  .m-toggles { min-width: 0; margin-right: var(--s3); }
+  .m-toggles > .records-tabs > .segs { background: none; }
+  .m-toggles > .records-tabs { border-radius: var(--r); background: var(--card); box-shadow: 0 4px 12px rgba(27, 27, 25, .18); }
   .m-toggles .segs-item.on, .m-toggles .segs-indicator { background: var(--soft); box-shadow: none; }
   .m-fab.icon-plain { margin-left: auto; width: 56px; height: 56px; border-radius: 50%; background: var(--workgroup); color: #fff; box-shadow: 0 6px 16px rgba(27, 27, 25, .22), 0 1px 3px rgba(27, 27, 25, .2); }
   dialog.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .dialog-positioner { align-items: flex-end; padding: 0; }
   .dialog, .dialog.wide { width: 100%; max-height: 92dvh; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
-  .toasts { bottom: calc(56px + 180px + env(safe-area-inset-bottom)); }
+  .toasts { bottom: calc(56px + var(--composer, 182px) + 18px + env(safe-area-inset-bottom)); }
+}
+
+/*
+ * On the home screen of iOS the glass of the status bar blurs a little below
+ * the safe area too, so what is at the top keeps clear of that as well.
+ */
+@media (--phone) and (display-mode: standalone) {
+  @supports (-webkit-touch-callout: none) {
+    :root { --clear-top: calc(env(safe-area-inset-top) + 14px); }
+  }
 }

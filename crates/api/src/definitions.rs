@@ -54,6 +54,7 @@ impl Api {
                 fields: d
                     .fields
                     .iter()
+                    .filter(|f| !f.generated)
                     .map(|f| AccountField {
                         name: f.name.clone(),
                         label: f.label.clone(),
@@ -116,6 +117,7 @@ impl Api {
         let mut values: Vec<AccountValue> = def
             .fields
             .iter()
+            .filter(|f| !f.generated)
             .map(|f| AccountValue {
                 name: f.name.clone(),
                 label: f.label.clone(),

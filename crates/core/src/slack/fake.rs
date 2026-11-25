@@ -7,10 +7,14 @@ use super::web::{Outgoing, Slack};
 #[derive(Default)]
 pub struct FakeSlack {
     pub posts: Mutex<Vec<(String, Outgoing)>>,
+    /// By channel and the one who sees it.
+    pub ephemerals: Mutex<Vec<(String, String, Outgoing)>>,
     pub updates: Mutex<Vec<(String, String, Outgoing)>>,
     pub reactions: Mutex<Vec<(String, String, String)>>,
     pub statuses: Mutex<Vec<(String, String, String)>>,
     pub fail: bool,
+    /// Slack refuses messages for one person.
+    pub no_ephemeral: bool,
     /// Slack shows no status here.
     pub no_status: bool,
 }
@@ -18,6 +22,10 @@ pub struct FakeSlack {
 impl FakeSlack {
     pub fn posts(&self) -> Vec<(String, Outgoing)> {
         self.posts.lock().unwrap().clone()
+    }
+
+    pub fn ephemerals(&self) -> Vec<(String, String, Outgoing)> {
+        self.ephemerals.lock().unwrap().clone()
     }
 
     pub fn statuses(&self) -> Vec<(String, String, String)> {
@@ -37,6 +45,20 @@ impl Slack for &FakeSlack {
         let mut posts = self.posts.lock().unwrap();
         posts.push((channel.into(), message));
         Ok(format!("9.{}", posts.len()))
+    }
+
+    async fn post_ephemeral(
+        &self,
+        channel: &str,
+        user: &str,
+        message: Outgoing,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.no_ephemeral, "user_not_in_channel");
+        self.ephemerals
+            .lock()
+            .unwrap()
+            .push((channel.into(), user.into(), message));
+        Ok(())
     }
 
     async fn update(&self, channel: &str, ts: &str, message: Outgoing) -> anyhow::Result<()> {

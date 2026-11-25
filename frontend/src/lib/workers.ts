@@ -1,11 +1,15 @@
 import { query } from "@solidjs/router";
-import type { DelegatedTask, WorkerRun } from "~/gen/famulen/v1/workers_pb";
+import type { DelegatedTask, WorkerRun, WorkerStep } from "~/gen/famulen/v1/workers_pb";
 import { api } from "./api";
 
-export type { DelegatedTask, WorkerRun };
+export type { DelegatedTask, WorkerRun, WorkerStep };
 
 export const delegatedQuery = query((asked: { workgroup?: string; task?: string } = {}) => api.workers.listDelegated(asked), "delegated");
 export const workerSettingsQuery = query(() => api.workers.getWorkerSettings({}), "workerSettings");
+
+export const runOutputQuery = query((id: string) => api.workers.readRun({ id: BigInt(id) }), "runOutput");
+
+export const runHref = (run: WorkerRun) => `/runs/${run.id}`;
 
 const STATES: { [state: string]: string } = {
   queued: "順番待ち",
@@ -37,6 +41,39 @@ export const outcomeText = (outcome: string) => OUTCOMES[outcome] ?? outcome;
 export function standingText(t: DelegatedTask): string {
   if (t.state === "still" && t.run?.outcome) return outcomeText(t.run.outcome);
   return STATES[t.state] ?? t.state;
+}
+
+const RUN_STATES: { [state: string]: string } = {
+  starting: "始めている",
+  asking: "承認待ち",
+  running: "実行中",
+  waiting: "あなたの答え待ち",
+  unreachable: "Adroit に届かない",
+  ending: "終わりを書いている",
+};
+
+/** How a run stands; one that ended says how. */
+export const runText = (r: WorkerRun) => (r.state === "ended" ? outcomeText(r.outcome) : (RUN_STATES[r.state] ?? r.state));
+
+/** The steps of a plan with how deep each lies, each below the one it is part of. */
+export function outline(steps: WorkerStep[]): { step: WorkerStep; depth: number }[] {
+  const ids = new Set(steps.map((s) => s.id));
+  const taken = new Set<WorkerStep>();
+  const below = (parent: string, depth: number): { step: WorkerStep; depth: number }[] =>
+    steps
+      .filter((s) => (ids.has(s.parent) ? s.parent : "") === parent && !taken.has(s))
+      .flatMap((step) => {
+        taken.add(step);
+        return [{ step, depth }, ...(step.id ? below(step.id, depth + 1) : [])];
+      });
+  return below("", 0);
+}
+
+/** How long it has gone on, or went on, in words. */
+export function lastedText(r: WorkerRun, now: number): string {
+  if (!r.startedAt) return "";
+  const minutes = Math.max(0, Math.floor(((r.endedAt ? Number(r.endedAt) : now / 1000) - Number(r.startedAt)) / 60));
+  return minutes < 60 ? `${minutes} 分` : `${Math.floor(minutes / 60)} 時間 ${minutes % 60} 分`;
 }
 
 export const runnerText = (runner: string) => ({ adroit: "Adroit", agent: "手代" })[runner] ?? "委託先なし";

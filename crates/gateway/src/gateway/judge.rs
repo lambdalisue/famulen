@@ -32,6 +32,9 @@ pub struct Call {
     pub connection: String,
     pub tool: String,
     pub input: Value,
+    /// What the caller makes this call for, in its own words; kept on the
+    /// ticket and never judged by.
+    pub origin: Option<String>,
     /// What the tool says of itself, for a tool the gateway has not listed,
     /// such as the caller's built-in tools.
     pub marks: Option<Marks>,

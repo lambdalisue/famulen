@@ -57,7 +57,7 @@ pub(crate) fn connection(c: &core::Connection) -> Connection {
         _ => "",
     };
     let watching = match definition {
-        famulen_core::arrivals::GOOGLE => "メールとカレンダーの知らせを受けている",
+        famulen_core::arrivals::GOOGLE => "メールとカレンダーを読んでいる",
         famulen_core::channel::DEFINITION => "あなたへの頼みと、ほかの発言を受けている",
         _ => "",
     };
@@ -524,7 +524,15 @@ impl ConnectionService for Api {
             self.app
                 .journal
                 .record("setting", format!("service {id} logged in"));
-            self.app.slack_icons.installed(&id);
+            self.app.slack_looks.installed(&id);
+            // Mail that comes from here on is read, not only what comes after
+            // the next regular read.
+            let c = self.need_connection(&id).or_fail()?;
+            if famulen_core::arrivals::is_google(&c)
+                && let Err(error) = self.app.read_mail(&id).await
+            {
+                tracing::warn!(%error, connection = %id, "could not mark where to read the mail from");
+            }
             // The account is connected whether or not it could be greeted.
             if let Err(error) = self.app.greet(&id).await {
                 tracing::warn!(%error, connection = %id, "cannot greet the owner");

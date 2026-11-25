@@ -9,8 +9,11 @@ import "famulen/v1/records.proto";
 message DelegateTaskRequest {
   string title = 1;
   // The whole request, as Markdown: the goal, what is already known, what to
-  // leave alone, how to check the work, and for code whether to commit or
-  // push. The worker knows nothing but this.
+  // leave alone, and how to check the work. The worker knows nothing but this
+  // and, for code, the owner's standing steps to finish it (a review, a pull
+  // request, a merge and the like; get_worker_settings), which are added by
+  // themselves: do not write how to finish, unless the owner asked otherwise
+  // for this work, and then say that they did.
   string request = 2;
   // adroit: a session in the owner's Adroit, for code and for anything the
   // owner may want to watch or steer. Its start is asked of the owner.
@@ -49,6 +52,17 @@ message DelegateTaskRequest {
   repeated string files = 17;
 }
 
+// One step of the plan a worker keeps.
+message WorkerStep {
+  string id = 1;
+  // The step it is part of, or empty.
+  string parent = 2;
+  string title = 3;
+  // pending, in_progress, completed or blocked.
+  string status = 4;
+  string note = 5;
+}
+
 // One run of a delegated task.
 message WorkerRun {
   int64 id = 1;
@@ -75,6 +89,35 @@ message WorkerRun {
   int64 created_at = 12;
   int64 started_at = 13;
   int64 ended_at = 14;
+  // Its plan, when it keeps one, while it goes on. The worker's words.
+  repeated WorkerStep steps = 15;
+  // How much of its plan is done, of 100.
+  int32 percent = 16;
+  // What it does now, in the worker's words.
+  string doing = 17;
+}
+
+message ReadRunRequest {
+  int64 id = 1;
+}
+
+// Something a worker was asked, wrote or called.
+message WorkerLine {
+  // Unix milliseconds.
+  int64 at = 1;
+  // asked, said, called (a tool) or answered (by a tool).
+  string kind = 2;
+  string text = 3;
+  // Tells it from the other lines of its run.
+  uint64 id = 4;
+}
+
+message RunOutput {
+  WorkerRun run = 1;
+  // Oldest first. Of an Adroit session what it wrote, not what it called.
+  repeated WorkerLine lines = 2;
+  // Why it could not be read anew.
+  string why = 3;
 }
 
 // A delegated task that is not over.
@@ -110,11 +153,25 @@ message ListDelegatedResponse {
   repeated WorkerRun ended = 2;
 }
 
+// How the owner wants delegated work on code finished.
+message WorkerFinish {
+  // Work on this repository wherever it is cloned, as host/path or any address
+  // it is cloned by; work on any other when empty.
+  string repository = 1;
+  // As Markdown.
+  string steps = 2;
+}
+
 message WorkerSettings {
   // How many tasks run at once.
   int32 slots = 1;
   // No task is started while set; those running go on.
   bool paused = 2;
+  // Handed to every session that may change code.
+  repeated WorkerFinish finishes = 3;
+  // What Famulen brings along, each used unless the owner has one for the same
+  // repository. Not set.
+  repeated WorkerFinish bundled_finishes = 4;
 }
 
 // Delegated tasks: work put on the task list that a pool of workers picks up.
@@ -125,6 +182,11 @@ service WorkerService {
   // How the delegated tasks and their runs stand.
   rpc ListDelegated(ListDelegatedRequest) returns (ListDelegatedResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // A run with what can be seen of it while it goes on, and after.
+  rpc ReadRun(ReadRunRequest) returns (RunOutput) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
   }
   // Put a delegated task back in the queue, by its code or id: one that
   // failed, was not approved, or fell short of its request. Change its notes
