@@ -3,6 +3,8 @@
 //! model without tools, whose answer adds and settles holdings and nothing
 //! else.
 
+pub mod past;
+
 use base64::Engine;
 use chrono::Utc;
 use rusqlite::params;
@@ -154,57 +156,99 @@ struct Waiting {
     id: i64,
     connection: String,
     message: String,
+    /// It was found going back over the mailbox.
+    past: bool,
 }
 
-/// Put a mail in line, once.
+/// Put a mail in line, once. One that going back over the mailbox came upon
+/// first is taken from there: it has arrived.
 pub fn enqueue(store: &Store, connection: &str, message: &str) -> anyhow::Result<bool> {
-    let added = store.conn().execute(
+    let mut conn = store.conn();
+    let tx = conn.transaction()?;
+    let added = tx.execute(
         "INSERT OR IGNORE INTO purchase_mails (connection, message, at) VALUES (?1, ?2, ?3)",
         params![connection, message, now()],
     )?;
+    if added == 0 && tx.execute(UNPAST, [connection, message])? > 0 {
+        tx.execute(
+            "UPDATE purchase_mails SET state = 'waiting', next_at = 0, title = '', body = ''
+             WHERE connection = ?1 AND message = ?2 AND state = 'unscreened'",
+            [connection, message],
+        )?;
+    }
+    tx.commit()?;
     Ok(added > 0)
 }
 
-fn waiting(store: &Store, at: i64) -> anyhow::Result<Vec<Waiting>> {
+const UNPAST: &str = "DELETE FROM purchase_past_mails WHERE mail IN
+    (SELECT id FROM purchase_mails WHERE connection = ?1 AND message = ?2)";
+
+/// Mail that waits, what arrived before what is gone back over; the latter
+/// only while it is gone on with, and when `past` asks for it.
+fn waiting(store: &Store, at: i64, past: bool) -> anyhow::Result<Vec<Waiting>> {
     let conn = store.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, connection, message FROM purchase_mails
-         WHERE state = 'waiting' AND next_at <= ?2 ORDER BY tries, id LIMIT ?1",
+        "SELECT m.id, m.connection, m.message, p.mail IS NOT NULL FROM purchase_mails m
+         LEFT JOIN purchase_past_mails p ON p.mail = m.id
+         WHERE m.state = 'waiting' AND m.next_at <= ?2 AND (p.mail IS NULL OR (?3 AND EXISTS
+             (SELECT 1 FROM purchase_past g WHERE g.connection = m.connection AND g.state != 'stopped')))
+         ORDER BY p.mail IS NOT NULL, m.tries, m.id LIMIT ?1",
     )?;
-    let rows = stmt.query_map([AT_ONCE as i64, at], |r| {
+    let rows = stmt.query_map(params![AT_ONCE as i64, at, past], |r| {
         Ok(Waiting {
             id: r.get(0)?,
             connection: r.get(1)?,
             message: r.get(2)?,
+            past: r.get(3)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 fn read(store: &Store, id: i64) -> anyhow::Result<()> {
-    store.conn().execute(
-        "UPDATE purchase_mails SET state = 'read' WHERE id = ?1",
-        [id],
+    settle_mail(store, id, "read")
+}
+
+/// Keep a return of what is not known, to be read again once the mailbox is
+/// gone back over.
+fn unmatched(store: &Store, id: i64) -> anyhow::Result<()> {
+    settle_mail(store, id, "unmatched")
+}
+
+fn settle_mail(store: &Store, id: i64, state: &str) -> anyhow::Result<()> {
+    let conn = store.conn();
+    conn.execute(
+        "UPDATE purchase_mails SET state = ?2 WHERE id = ?1",
+        params![id, state],
     )?;
+    conn.execute("DELETE FROM purchase_away WHERE mail = ?1", [id])?;
     Ok(())
 }
 
 fn failed(store: &Store, id: i64, at: i64) -> anyhow::Result<()> {
-    store.conn().execute(
+    let conn = store.conn();
+    conn.execute(
         "UPDATE purchase_mails SET tries = tries + 1, next_at = ?3 + ?4 * (1 << tries),
              state = CASE WHEN tries + 1 >= ?2 THEN 'failed' ELSE state END
          WHERE id = ?1",
         params![id, TRIES, at, AGAIN_AFTER],
     )?;
+    conn.execute("DELETE FROM purchase_away WHERE mail = ?1", [id])?;
     Ok(())
 }
 
 /// Put it off without counting it as a try, as when what reads it is away:
 /// that is no fault of the mail. It is given up in time all the same.
 fn away(store: &Store, id: i64, at: i64) -> anyhow::Result<()> {
-    store.conn().execute(
+    let conn = store.conn();
+    conn.execute(
+        "INSERT OR IGNORE INTO purchase_away (mail, since) VALUES (?1, ?2)",
+        params![id, at],
+    )?;
+    conn.execute(
         "UPDATE purchase_mails SET next_at = ?2 + ?3,
-             state = CASE WHEN ?2 - at > ?4 THEN 'failed' ELSE state END
+             state = CASE WHEN ?2 - (SELECT since FROM purchase_away WHERE mail = ?1) > ?4
+                 THEN 'failed' ELSE state END
          WHERE id = ?1",
         params![id, at, AGAIN_AFTER, WAITS],
     )?;
@@ -212,11 +256,14 @@ fn away(store: &Store, id: i64, at: i64) -> anyhow::Result<()> {
 }
 
 /// Whether a mail of the same connection put in line before this one waits.
+/// What arrived does not wait for what is gone back over, which may take weeks.
 fn earlier_waits(store: &Store, mail: &Waiting) -> anyhow::Result<bool> {
     Ok(store.conn().query_row(
-        "SELECT EXISTS (SELECT 1 FROM purchase_mails
-             WHERE connection = ?1 AND id < ?2 AND state IN ('waiting', 'unscreened'))",
-        params![mail.connection, mail.id],
+        "SELECT EXISTS (SELECT 1 FROM purchase_mails m
+             LEFT JOIN purchase_past_mails p ON p.mail = m.id
+             WHERE m.connection = ?1 AND m.id < ?2 AND m.state IN ('waiting', 'unscreened')
+                 AND (?3 OR p.mail IS NULL))",
+        params![mail.connection, mail.id, mail.past],
         |r| r.get(0),
     )?)
 }
@@ -259,7 +306,9 @@ pub fn leave(store: &Store, source: &LookoutSource, items: &[Item]) -> anyhow::R
     }
     for item in items {
         if let Some(message) = crate::arrivals::message_of(item) {
-            store.conn().execute(
+            let conn = store.conn();
+            conn.execute(UNPAST, [source.connection.as_str(), message])?;
+            conn.execute(
                 "INSERT OR IGNORE INTO purchase_mails (connection, message, at, state, title, body)
                  VALUES (?1, ?2, ?3, 'unscreened', ?4, ?5)",
                 params![source.connection, message, now(), item.title, item.body],
@@ -282,27 +331,17 @@ async fn answer(app: &App, system: &str, prompt: &str, schema: &Value) -> anyhow
         .ok_or_else(|| anyhow::anyhow!("the model answered without JSON"))
 }
 
-/// Screen some of the mail left unscreened.
+/// Screen some of the mail left unscreened: what arrived, or else what is
+/// gone back over.
 pub async fn screen_left(app: &App) -> anyhow::Result<()> {
     let at = now();
-    let left: Vec<(i64, Item)> = {
-        let conn = app.store.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, title, body FROM purchase_mails
-             WHERE state = 'unscreened' AND next_at <= ?2 ORDER BY id LIMIT ?1",
-        )?;
-        stmt.query_map([SCREENED as i64, at], |r| {
-            Ok((
-                r.get(0)?,
-                Item {
-                    title: r.get(1)?,
-                    body: r.get(2)?,
-                },
-            ))
-        })?
-        .collect::<Result<_, _>>()?
+    let left = unscreened(&app.store, at, false)?;
+    let (left, may) = if left.is_empty() {
+        (unscreened(&app.store, at, true)?, past::may_ask(app)?)
+    } else {
+        (left, may_ask(app)?)
     };
-    if left.is_empty() || !may_ask(app)? {
+    if left.is_empty() || !may {
         return Ok(());
     }
     let items: Vec<Item> = left.iter().map(|(_, i)| i.clone()).collect();
@@ -324,11 +363,33 @@ pub async fn screen_left(app: &App) -> anyhow::Result<()> {
             "read"
         };
         conn.execute(
-            "UPDATE purchase_mails SET state = ?2, title = '', body = '' WHERE id = ?1",
+            "UPDATE purchase_mails SET state = ?2, title = '', body = '', next_at = 0 WHERE id = ?1",
             params![id, state],
         )?;
     }
     Ok(())
+}
+
+fn unscreened(store: &Store, at: i64, past: bool) -> anyhow::Result<Vec<(i64, Item)>> {
+    let conn = store.conn();
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.title, m.body FROM purchase_mails m
+         LEFT JOIN purchase_past_mails p ON p.mail = m.id
+         WHERE m.state = 'unscreened' AND m.next_at <= ?2 AND (p.mail IS NOT NULL) = ?3
+             AND (p.mail IS NULL OR EXISTS (SELECT 1 FROM purchase_past g
+                 WHERE g.connection = m.connection AND g.state != 'stopped'))
+         ORDER BY m.id LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![SCREENED as i64, at, past], |r| {
+        Ok((
+            r.get(0)?,
+            Item {
+                title: r.get(1)?,
+                body: r.get(2)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Why a mail could not be read.
@@ -343,8 +404,13 @@ enum Stopped {
 /// the daily cap they wait for the next day.
 pub async fn read_waiting(app: &App) -> anyhow::Result<()> {
     let at = now();
-    for mail in waiting(&app.store, at)? {
-        if !may_ask(app)? {
+    for mail in waiting(&app.store, at, past::may_ask(app)?)? {
+        let may = if mail.past {
+            past::may_ask(app)?
+        } else {
+            may_ask(app)?
+        };
+        if !may {
             break;
         }
         let kept = read_one(app, &mail).await;
@@ -355,7 +421,8 @@ pub async fn read_waiting(app: &App) -> anyhow::Result<()> {
             Ok(Kept::Unknown) if earlier_waits(&app.store, &mail)? => {
                 away(&app.store, mail.id, at)?;
             }
-            Ok(_) => read(&app.store, mail.id)?,
+            Ok(Kept::Unknown) => unmatched(&app.store, mail.id)?,
+            Ok(Kept::All) => read(&app.store, mail.id)?,
             Err(Stopped::Away(error)) => {
                 tracing::warn!(connection = %mail.connection, %error, "a mail of a purchase waits");
                 away(&app.store, mail.id, at)?;
@@ -372,7 +439,8 @@ pub async fn read_waiting(app: &App) -> anyhow::Result<()> {
 async fn read_one(app: &App, mail: &Waiting) -> Result<Kept, Stopped> {
     let message = message(app, mail).await.map_err(Stopped::Away)?;
     let text = text_of(app, &message).map_err(Stopped::Mail)?;
-    let known = known(&app.records, &app.store).map_err(Stopped::Mail)?;
+    let known =
+        known(&app.records, &app.store, &text, &received(app, &message)).map_err(Stopped::Mail)?;
     let prompt = prompt(&app.records, &text, &known).map_err(Stopped::Mail)?;
     let answer = app
         .models
@@ -415,15 +483,20 @@ async fn message(app: &App, mail: &Waiting) -> anyhow::Result<Value> {
         .await
 }
 
+/// The day a mail was received, or empty.
+fn received(app: &App, message: &Value) -> String {
+    message["internalDate"]
+        .as_str()
+        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms.parse().ok()?))
+        .map(|at| at.with_timezone(&app.tz()).date_naive().to_string())
+        .unwrap_or_default()
+}
+
 fn text_of(app: &App, message: &Value) -> anyhow::Result<String> {
     let text = mail_text(&message["payload"])
         .ok_or_else(|| anyhow::anyhow!("the mail has no text that can be read"))?;
     let head = crate::arrivals::mail_item(message);
-    let received = message["internalDate"]
-        .as_str()
-        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms.parse().ok()?))
-        .map(|at| at.with_timezone(&app.tz()).date_naive().to_string())
-        .unwrap_or_default();
+    let received = received(app, message);
     Ok(format!(
         "{}\nreceived: {received}\n{}\n{}",
         head.title,
@@ -538,16 +611,35 @@ fn ledger(store: &Store) -> anyhow::Result<Vec<(i64, Known)>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// The things mail told of, the latest first, for the model to tell that a
-/// mail speaks of one of them.
-fn known(records: &Records, store: &Store) -> anyhow::Result<Vec<Known>> {
+/// The things mail told of, for the model to tell that a mail speaks of one
+/// of them: those it names the order or the shop of first, then those of
+/// about its day.
+fn known(
+    records: &Records,
+    store: &Store,
+    text: &str,
+    received: &str,
+) -> anyhow::Result<Vec<Known>> {
     let mut list: Vec<Known> = made(records)?.iter().map(Known::of).collect();
     for (_, thing) in ledger(store)? {
         if !list.iter().any(|k| k.id == thing.id) {
             list.push(thing);
         }
     }
-    list.sort_by(|a, b| b.on.cmp(&a.on));
+    let text = plain(text);
+    let day = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok();
+    let received = day(received);
+    let names = |said: &str| {
+        let said = plain(said);
+        !said.is_empty() && text.contains(&said)
+    };
+    list.sort_by_cached_key(|k| {
+        let far = match (day(&k.on), received) {
+            (Some(on), Some(received)) => (on - received).num_days().abs(),
+            _ => i64::MAX,
+        };
+        (!names(&k.order), !names(&k.shop), far)
+    });
     list.truncate(KNOWN);
     Ok(list)
 }
@@ -862,7 +954,7 @@ fn settle(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::records::testing::records;
 
@@ -888,7 +980,7 @@ mod tests {
         workgroups: &[String],
         told: &Told,
     ) -> Kept {
-        let known = known(records, store).unwrap();
+        let known = known(records, store, "", "").unwrap();
         let into = Target {
             records,
             store,
@@ -1194,16 +1286,49 @@ mod tests {
         assert!(!enqueue(&store, "g", "m1").unwrap());
         let mut at = now();
         for _ in 0..TRIES {
-            let w = waiting(&store, at).unwrap();
+            let w = waiting(&store, at, true).unwrap();
             assert_eq!(w.len(), 1);
             failed(&store, w[0].id, at).unwrap();
-            assert!(waiting(&store, at + 60).unwrap().is_empty());
+            assert!(waiting(&store, at + 60, true).unwrap().is_empty());
             at += 7 * 24 * 3600;
         }
-        assert!(waiting(&store, at).unwrap().is_empty());
+        assert!(waiting(&store, at, true).unwrap().is_empty());
         enqueue(&store, "g", "m2").unwrap();
-        read(&store, waiting(&store, at).unwrap()[0].id).unwrap();
-        assert!(waiting(&store, at).unwrap().is_empty());
+        read(&store, waiting(&store, at, true).unwrap()[0].id).unwrap();
+        assert!(waiting(&store, at, true).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_model_is_shown_what_a_mail_names_before_what_is_merely_later() {
+        let (_dir, r) = records("purchases-known");
+        let store = Store::open_in_memory().unwrap();
+        let mut old = told("ordered", "OLD-1", &["昔の本"]);
+        old.on = "2021-05-01".into();
+        put_from(&r, &store, 1, &[], &old);
+        for n in 0..=KNOWN {
+            let t = told("ordered", &format!("N-{n}"), &[&format!("本 {n}")]);
+            put_from(&r, &store, 2, &[], &t);
+        }
+        let shows = |text: &str, on: &str| {
+            known(&r, &store, text, on)
+                .unwrap()
+                .iter()
+                .any(|k| k.order == "OLD-1")
+        };
+        assert!(!shows("", "2026-11-25"));
+        assert!(shows("注文番号 OLD-1 を配達しました", "2026-11-25"));
+        assert!(shows("", "2021-05-03"), "of about its day");
+    }
+
+    #[test]
+    fn one_that_had_to_be_tried_again_has_its_whole_wait_before_it() {
+        let store = Store::open_in_memory().unwrap();
+        enqueue(&store, "g", "m1").unwrap();
+        let at = now();
+        away(&store, 1, at).unwrap();
+        failed(&store, 1, at + WAITS).unwrap();
+        away(&store, 1, at + WAITS + 60).unwrap();
+        assert_eq!(waiting(&store, i64::MAX, true).unwrap().len(), 1);
     }
 
     #[test]
@@ -1213,13 +1338,13 @@ mod tests {
         let start = now();
         let mut at = start;
         while at < start + WAITS {
-            let w = waiting(&store, at).unwrap();
+            let w = waiting(&store, at, true).unwrap();
             away(&store, w[0].id, at).unwrap();
             at += 24 * 3600;
         }
-        assert_eq!(waiting(&store, at).unwrap().len(), 1);
+        assert_eq!(waiting(&store, at, true).unwrap().len(), 1);
         away(&store, 1, at + 24 * 3600).unwrap();
-        assert!(waiting(&store, i64::MAX).unwrap().is_empty());
+        assert!(waiting(&store, i64::MAX, true).unwrap().is_empty());
     }
 
     #[test]
@@ -1258,7 +1383,7 @@ mod tests {
         for source in &sources {
             mark(&store, source, &items, &answer).unwrap();
         }
-        let w = waiting(&store, now()).unwrap();
+        let w = waiting(&store, now(), true).unwrap();
         assert_eq!(w.len(), 1);
         assert_eq!(
             (w[0].connection.as_str(), w[0].message.as_str()),
@@ -1294,7 +1419,7 @@ mod tests {
         assert_eq!(mail_text(&attached), None);
     }
 
-    async fn with_model(app: &App, answer: Value) {
+    pub(crate) async fn with_model(app: &App, answer: Value) {
         let answer = json!({ "choices": [{ "message": { "content": answer.to_string() } }] });
         let router =
             axum::Router::new().fallback(move || std::future::ready(axum::Json(answer.clone())));
@@ -1335,7 +1460,7 @@ mod tests {
         read_waiting(&app).await.unwrap();
 
         assert_eq!(only(&app.records).title(), "暗号の本");
-        assert!(waiting(&app.store, i64::MAX).unwrap().is_empty());
+        assert!(waiting(&app.store, i64::MAX, true).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1347,7 +1472,7 @@ mod tests {
         read_waiting(&app).await.unwrap();
 
         assert!(app.records.list(HOLDINGS).unwrap().is_empty());
-        assert_eq!(waiting(&app.store, i64::MAX).unwrap().len(), 1);
+        assert_eq!(waiting(&app.store, i64::MAX, true).unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1361,7 +1486,7 @@ mod tests {
 
         read_waiting(&app).await.unwrap();
 
-        assert_eq!(waiting(&app.store, now()).unwrap().len(), 1);
+        assert_eq!(waiting(&app.store, now(), true).unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1400,7 +1525,7 @@ mod tests {
             .unwrap();
         read_waiting(&app).await.unwrap();
         assert!(
-            waiting(&app.store, now() + AGAIN_AFTER + 60)
+            waiting(&app.store, now() + AGAIN_AFTER + 60, true)
                 .unwrap()
                 .iter()
                 .any(|w| w.message == "m1")
@@ -1415,7 +1540,7 @@ mod tests {
             .execute("UPDATE purchase_mails SET next_at = 0", [])
             .unwrap();
         read_waiting(&app).await.unwrap();
-        assert!(waiting(&app.store, i64::MAX).unwrap().is_empty());
+        assert!(waiting(&app.store, i64::MAX, true).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1437,14 +1562,14 @@ mod tests {
             .unwrap();
         screen_left(&app).await.unwrap();
         assert!(
-            waiting(&app.store, i64::MAX).unwrap().is_empty(),
+            waiting(&app.store, i64::MAX, true).unwrap().is_empty(),
             "over the cap"
         );
         app.models.assign(Role::Lookout, "m", None, None).unwrap();
 
         screen_left(&app).await.unwrap();
 
-        let w = waiting(&app.store, i64::MAX).unwrap();
+        let w = waiting(&app.store, i64::MAX, true).unwrap();
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].message, "m2");
     }

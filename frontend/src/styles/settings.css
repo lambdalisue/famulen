@@ -101,6 +101,9 @@
 .bulk { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line2); border-radius: var(--r); padding: 10px 12px; font-size: var(--t-base); }
 .bulk-which { width: 9.5em; }
 .permission-seg { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 100%; }
+.past-purchases { flex-wrap: wrap; }
+.past-purchases > .grow { flex: 1 1 240px; min-width: 0; }
+.past-purchases > .select { width: auto; }
 .permission-seg .segs { overflow-x: auto; scrollbar-width: none; }
 .change .disclosure-trigger { width: 100%; font-weight: 400; color: var(--ink); }
 .service-add { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }

@@ -601,7 +601,7 @@ CREATE TABLE IF NOT EXISTS lookout_heard (
     title  TEXT NOT NULL,
     body   TEXT NOT NULL
 );
--- mail that may tell of a purchase: unscreened, waiting, read or failed
+-- mail that may tell of a purchase: unscreened, waiting, read, unmatched or failed
 CREATE TABLE IF NOT EXISTS purchase_mails (
     id         INTEGER PRIMARY KEY,
     connection TEXT NOT NULL,
@@ -614,6 +614,25 @@ CREATE TABLE IF NOT EXISTS purchase_mails (
     title      TEXT NOT NULL DEFAULT '',
     body       TEXT NOT NULL DEFAULT '',
     UNIQUE (connection, message)
+);
+-- since when a mail waits for what is away
+CREATE TABLE IF NOT EXISTS purchase_away (
+    mail  INTEGER PRIMARY KEY,
+    since INTEGER NOT NULL
+);
+-- mailboxes gone back over: going, stopped or done
+CREATE TABLE IF NOT EXISTS purchase_past (
+    connection TEXT PRIMARY KEY,
+    since      TEXT NOT NULL,
+    month      TEXT NOT NULL,
+    until      TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    problem    TEXT NOT NULL DEFAULT '',
+    next_at    INTEGER NOT NULL DEFAULT 0
+);
+-- which of the mails were found going back
+CREATE TABLE IF NOT EXISTS purchase_past_mails (
+    mail INTEGER PRIMARY KEY
 );
 -- what was added from mail; it outlives the record
 CREATE TABLE IF NOT EXISTS purchases (
