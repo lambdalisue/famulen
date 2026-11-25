@@ -89,7 +89,7 @@ jobs:
           shared-key: workspace
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # The same gate as local development (justfile).
-      - run: just ci
+      - run: just ${{ runner.os == 'macOS' && 'ci-macos' || 'ci' }}
         env:
           CI: "1"
 
