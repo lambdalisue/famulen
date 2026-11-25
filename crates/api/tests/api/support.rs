@@ -1,5 +1,8 @@
 //! A Famulen of its own for a test, and calls to its API.
 
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
 use famulen_api::{Api, CALLER_HEADER};
 use famulen_core::config::{Config, Defaults};
 use famulen_core::gateway::{KEY_VAR, VaultKey};
@@ -48,7 +51,45 @@ pub fn open_with(dir: &DataDir, key: Option<String>) -> Api {
         },
     )
     .unwrap();
+    lay_notebook(&config.notebook_dir());
     Api::new(famulen_core::runtime::open_app(&config).unwrap())
+}
+
+/// Lay a notebook as Famulen makes it, copied from one made once: making one
+/// starts Git six times. One that is there already is left as it is.
+fn lay_notebook(root: &Path) {
+    static MADE: OnceLock<Vec<(PathBuf, Option<Vec<u8>>)>> = OnceLock::new();
+    if root.exists() {
+        return;
+    }
+    let made = MADE.get_or_init(|| {
+        let tmp = temp();
+        famulen_core::notebook::ensure(&famulen_core::notebook::open(&*tmp)).unwrap();
+        let mut found = Vec::new();
+        gather(&tmp, Path::new(""), &mut found);
+        found
+    });
+    for (rel, bytes) in made {
+        let path = root.join(rel);
+        match bytes {
+            Some(bytes) => std::fs::write(path, bytes).unwrap(),
+            None => std::fs::create_dir_all(path).unwrap(),
+        }
+    }
+}
+
+/// What lies in `root`, each directory before what is in it and with no content.
+fn gather(root: &Path, at: &Path, found: &mut Vec<(PathBuf, Option<Vec<u8>>)>) {
+    found.push((at.to_path_buf(), None));
+    for entry in std::fs::read_dir(root.join(at)).unwrap() {
+        let rel = at.join(entry.unwrap().file_name());
+        if root.join(&rel).is_dir() {
+            gather(root, &rel, found);
+        } else {
+            let bytes = std::fs::read(root.join(&rel)).unwrap();
+            found.push((rel, Some(bytes)));
+        }
+    }
 }
 
 /// Add a service definition of the owner's own.

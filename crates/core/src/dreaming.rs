@@ -1547,6 +1547,7 @@ mod tests {
     fn setup() -> (Memory, Store) {
         let tmp = TempDir::new("dreaming");
         let notebook = crate::notebook::open(tmp.path());
+        crate::notebook::testing::lay(notebook.root());
         crate::notebook::ensure(&notebook).unwrap();
         let store = Store::open_in_memory().unwrap();
         let memory = Memory {

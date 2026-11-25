@@ -757,6 +757,7 @@ pub(crate) mod testing {
     pub fn records(name: &str) -> (TempDir, Records) {
         let tmp = TempDir::new(name);
         let notebook = crate::notebook::open(tmp.path());
+        crate::notebook::testing::lay(notebook.root());
         crate::notebook::ensure(&notebook).unwrap();
         (tmp, Records::new(notebook))
     }
