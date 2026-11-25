@@ -125,11 +125,78 @@ test("a message is sent with one tap while typing, and the keyboard stays until 
   await expect(page.getByPlaceholder(/に頼む$/)).toHaveValue("");
   await expect(page.getByPlaceholder(/に頼む$/)).toBeFocused();
 
-  await page.getByRole("button", { name: "キーボードを閉じる" }).tap();
+  await page.locator("#messages").tap();
+  await expect(page.getByPlaceholder(/に頼む$/)).not.toBeFocused();
   await expect(page.locator("#m-tabbar")).toBeVisible();
-  await page.getByRole("button", { name: "閉じる" }).tap();
-  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
 });
+
+test("closing the chat while typing puts the keyboard away with it", async ({ page }) => {
+  await visit(page, "/", /^ホーム/);
+  const say = page.getByPlaceholder(/に頼む$/);
+  const peek = page.getByRole("button", { name: "会話を引き上げる" });
+  await peek.click();
+  await say.fill("書きかけ");
+  await expect(page.locator("#composer").getByRole("button")).toHaveText(["送る"]);
+  // On iOS a tapped button does not take the focus.
+  await page.getByRole("button", { name: "閉じる" }).evaluate((el: HTMLElement) => el.click());
+  await expect(say).not.toBeFocused();
+  await expect(peek).toBeVisible();
+  await expect(page.locator("#m-tabbar")).toBeVisible();
+  await expect(say).toHaveValue("書きかけ");
+
+  await say.focus();
+  await pull(page, ".m-sheetbar", 300);
+  await expect(peek).toBeVisible();
+  await expect(say).not.toBeFocused();
+});
+
+/** Lay an on-screen keyboard over all but this part of the screen, the way iOS does. */
+async function keyboard(page: Page, seen: { top: number; height: number }) {
+  await page.evaluate(({ top, height }) => {
+    if (!window.visualViewport) throw new Error("no visual viewport");
+    Object.defineProperty(window.visualViewport, "height", { value: height, configurable: true });
+    Object.defineProperty(window.visualViewport, "offsetTop", { value: top, configurable: true });
+    window.visualViewport.dispatchEvent(new Event("resize"));
+  }, seen);
+}
+
+for (const size of [
+  { name: "upright", viewport: { width: 390, height: 844 }, seen: { top: 0, height: 380 } },
+  { name: "upright, panned by the browser", viewport: { width: 390, height: 844 }, seen: { top: 180, height: 380 } },
+  { name: "under a tall keyboard", viewport: { width: 390, height: 664 }, seen: { top: 0, height: 250 } },
+]) {
+  test(`many lines being written stay over the keyboard, ${size.name}`, async ({ page, request }) => {
+    await page.setViewportSize(size.viewport);
+    await visit(page, "/", /^ホーム/);
+    await call(request, "ConsoleService", "Send", { text: "e2e-long-bash", workgroup: "all" });
+    await expect(page.locator(".m-peek")).toContainText("確認 1");
+    const say = page.getByPlaceholder(/に頼む$/);
+    await say.focus();
+    await keyboard(page, size.seen);
+    const lines = Array.from({ length: 5 }, (_, i) => `${i + 1} 行目`);
+    await say.fill(lines.join("\n"));
+    const bottom = size.seen.top + size.seen.height;
+    const within = async (selector: string) => {
+      const box = await page.locator(selector).boundingBox();
+      return !!box && box.y >= size.seen.top && box.y + box.height <= bottom;
+    };
+    await expect.poll(() => within("#say")).toBe(true);
+    expect(await within("#composer")).toBe(true);
+    expect(await within("#composer .send")).toBe(true);
+    if (size.seen.height >= 380) expect(await say.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
+
+    await say.fill([...lines, ...lines, ...lines].join("\n"));
+    expect(await within("#composer")).toBe(true);
+    expect(await say.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight >= 40)).toBe(true);
+
+    await say.fill("");
+    await page.locator("#messages").evaluate(() => (document.activeElement as HTMLElement).blur());
+    await keyboard(page, { top: 0, height: size.viewport.height });
+    const card = page.getByTestId("approval");
+    await card.getByRole("button", { name: "却下" }).click();
+    await expect(card).toHaveCount(0);
+  });
+}
 
 test("changing page closes the chat sheet", async ({ page }) => {
   await visit(page, "/", /^ホーム/);

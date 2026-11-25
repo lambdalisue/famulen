@@ -23,5 +23,5 @@ b, strong { font-weight: 600; }
 .push { margin-left: auto; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .warn-text { color: var(--warn); overflow-wrap: anywhere; }
-.m-head, .m-tabbar, .m-float, .m-sheetbar, .m-peek, .m-dismiss { display: none; }
+.m-head, .m-tabbar, .m-float, .m-sheetbar, .m-peek { display: none; }
 @media (prefers-reduced-motion: reduce) { *, ::before, ::after { transition: none !important; animation: none !important; } }
