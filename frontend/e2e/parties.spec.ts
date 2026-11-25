@@ -104,6 +104,9 @@ test("whoever rests is put away under 休み, and is found by words", async ({ p
 
 const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
 
+// What is still being read as a test ends would fail the next one.
+test.afterEach(({ page }) => page.unrouteAll({ behavior: "ignoreErrors" }));
+
 /** Parties read from here on have a picture, which Slack alone could give. */
 async function pictured(page: Page, id: string, picture: string) {
   await page.route(/RecordService\/(ListRecords|GetRecord)/, async (route) => {
