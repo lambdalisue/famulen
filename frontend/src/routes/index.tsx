@@ -1,5 +1,6 @@
 import { createAsync, query } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, Index, type JSX, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
+import AideIcon from "~/components/AideIcon";
 import { ProgressLine } from "~/components/records/RunProgress";
 import TaskRow from "~/components/records/TaskRow";
 import { Button, EmptyState, Icon, IconButton, Keyed, LinkButton, List, ListRow, Loading, PageHeader, Select, Tag } from "~/components/ui";
@@ -10,7 +11,7 @@ import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { openSheet } from "~/lib/ask";
 import { timeOn } from "~/lib/calendar";
-import { addDays, dateLabel, dateText, daysLeft, nearness } from "~/lib/dates";
+import { addDays, dateLabel, dateText, daysLeft, hm, nearness } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { useWaiting } from "~/lib/inbox";
 import { useOwner } from "~/lib/owner";
@@ -57,6 +58,11 @@ const ARRANGING = "famulen.editing";
 /** How many lines a tile shows before it leads to the page that has them all. */
 const IN_TILE = 10;
 
+const hasEnded = (e: CalendarEvent, now: number) => !e.allDay && now > 0 && Date.parse(e.end) < now;
+
+/** What goes on now or comes next, once the time is known. */
+const comingUp = (events: CalendarEvent[], now: number) => events.find((e) => !e.allDay && e.mode !== CalendarMode.FAINT && now > 0 && !hasEnded(e, now));
+
 function TodayTile() {
   const owner = useOwner();
   const day = owner.today;
@@ -68,8 +74,9 @@ function TodayTile() {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     onCleanup(() => clearInterval(timer));
   });
-  const past = (e: CalendarEvent) => !e.allDay && now() > 0 && Date.parse(e.end) < now();
-  const next = () => shown().find((e) => !e.allDay && now() > 0 && Date.parse(e.end) >= now());
+  const past = (e: CalendarEvent) => hasEnded(e, now());
+  const next = () => comingUp(shown(), now());
+  const joins = () => shown().find((e) => e.meeting && e.mode !== CalendarMode.FAINT && now() > 0 && !past(e));
   return (
     <Show when={events()} fallback={<Loading />}>
       <For each={shown()} fallback={<EmptyState>今日の予定はない</EmptyState>}>
@@ -94,7 +101,7 @@ function TodayTile() {
               </Show>
             </span>
             <Show when={e.meeting && !past(e)}>
-              <LinkButton small variant="primary" icon={icons.video} href={e.meeting} class="home-join">
+              <LinkButton small variant={e === joins() ? "primary" : undefined} icon={icons.video} href={e.meeting} class="home-join">
                 入る
               </LinkButton>
             </Show>
@@ -274,6 +281,44 @@ const PAGES: { [kind: string]: { href: string; label: string } } = {
   memos: { href: "/memos", label: "メモへ" },
 };
 
+/** The day in the secretary's words: what comes next, what waits for the owner, and how much there is. */
+function Brief(props: { aide: string; events: CalendarEvent[]; mine: number; going: number }) {
+  const waiting = useWaiting();
+  const [now, setNow] = createSignal(0);
+  onMount(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    onCleanup(() => clearInterval(timer));
+  });
+  const next = () => comingUp(props.events, now());
+  const going = () => Date.parse(next()?.start ?? "") <= now();
+  return (
+    <section class="brief" aria-label="今日の要約">
+      <AideIcon size={40} />
+      <div class="brief-words">
+        <Show when={next()}>
+          {(e) => (
+            <p>
+              {going() ? `いま ${hm(e().end)} まで` : `このあと ${hm(e().start)} に`}「{e().title || "（題名なし）"}」
+              {going() ? "の時間です。" : e().status === "hold" ? "を仮に押さえています。" : "があります。"}
+            </p>
+          )}
+        </Show>
+        <Show when={waiting.count() > 0}>
+          <p>確かめていただきたいことが {waiting.count()} 件あります。</p>
+        </Show>
+        <p class="brief-facts">
+          <span>予定 {props.events.length}</span>
+          <span>あなたの今日のタスク {props.mine}</span>
+          <span>
+            {props.aide} が {props.going} 件を進めている
+          </span>
+        </p>
+      </div>
+    </section>
+  );
+}
+
 /** What is left to set up, until it is done or put away. */
 function SetupGuide() {
   const home = createAsync(() => homeQuery());
@@ -445,12 +490,6 @@ export default function Home() {
     <>
       <PageHeader
         title={dateLabel(day())}
-        tags={
-          <span class="sub">
-            予定 {ofDay(events()?.events ?? []).length} · あなたの今日のタスク {mine()} · {owner.aide()} が {going()}{" "}
-            件を進めている
-          </span>
-        }
         actions={
           <Button variant={arranging() ? "primary" : "ghost"} small icon={icons.layoutGrid} aria-pressed={arranging()} onClick={toggleArranging}>
             配置を変える
@@ -479,6 +518,7 @@ export default function Home() {
           </Button>
         </form>
       </Show>
+      <Brief aide={owner.aide()} events={ofDay(events()?.events ?? [])} mine={mine()} going={going()} />
       <SetupGuide />
       <div
         class="tiles"

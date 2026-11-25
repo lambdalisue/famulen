@@ -6,15 +6,17 @@ import Icon from "./Icon";
 
 /**
  * What a tag says about what it stands on: `ok` stands well, `warn` wants a
- * look, `danger` went wrong, `aide` is the secretary's, `said` and `guess`
+ * look, `danger` went wrong, `info` is under way, `plan` has
+ * something before it, `aide` is the secretary's, `said` and `guess`
  * are how a memory came, `label` is the owner's own.
  */
-export type Tone = "ok" | "warn" | "danger" | "aide" | "said" | "guess" | "label";
+export type Tone = "ok" | "warn" | "danger" | "info" | "plan" | "aide" | "said" | "guess" | "label";
 
-export function Tag(props: ComponentProps<"span"> & { tone?: Tone }) {
-  const [own, rest] = splitProps(props, ["tone", "class", "children"]);
+export function Tag(props: ComponentProps<"span"> & { tone?: Tone; icon?: string }) {
+  const [own, rest] = splitProps(props, ["tone", "icon", "class", "children"]);
   return (
     <span {...rest} class={`tag ${own.tone ?? ""} ${own.class ?? ""}`}>
+      <Show when={own.icon}>{(svg) => <Icon svg={svg()} size={13} />}</Show>
       {own.children}
     </span>
   );

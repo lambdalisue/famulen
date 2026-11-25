@@ -43,14 +43,22 @@
   .btn.icon-btn { width: 44px; min-height: 44px; }
   .icon-plain { width: 44px; height: 44px; }
   .input { min-height: 44px; font-size: 1rem; }
-  .label-add.input, .chips-edit > .input { min-height: 36px; width: 140px; font-size: 1rem; }
+  .rec-tags .label-add.input, .chips-edit > .input { min-height: 44px; width: 140px; font-size: 1rem; }
   .rec-new > .input, .rec-detail-row > .input { min-height: 44px; }
   .segs-item { min-height: 44px; min-width: 44px; }
   .switch-row, .check { min-height: 44px; }
-  button.tag, .tag.link { min-height: 32px; padding-inline: 10px; }
-  .tag.removable > button { width: 32px; height: 32px; }
-  .rec-check { width: 32px; height: 32px; }
-  .rec-add { min-height: 40px; font-size: 1rem; }
+  button.tag, .tag.link { min-height: 32px; padding-inline: 10px; position: relative; }
+  /* What is seen stays small; the finger is given more room than that. */
+  :is(button.tag, .tag.link, .rec-check, .switch, .tag.removable > button, .chip > button)::after { content: ""; position: absolute; inset: -6px; }
+  .chip > button { position: relative; width: 32px; height: 32px; }
+  .tag.removable { overflow: visible; }
+  .tag.removable > button { position: relative; width: 32px; height: 32px; }
+  .rec-check { position: relative; width: 32px; height: 32px; }
+  .rec-add { min-height: 44px; font-size: 1rem; }
+  .disclosure-trigger, .asked-whole .disclosure-trigger, .quote, .nav-item, .home-line, .home-more, .asked-more, .in-thread, .choice, .radio-card, .folder-item, .wg-pick, .swatch, .model-pick, .vault-desc, .rec-group > summary, .attached-file { min-height: 44px; }
+  .home-more { display: flex; align-items: center; }
+  .tile-more { padding: 14px; margin: -6px -10px -6px 0; }
+  .chips-line[role=group], .records-choices { padding-block: 6px; }
   .records-filter > .search { flex: 1 1 100%; }
   .records-choices { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .records-choices .select { flex: none; max-width: 200px; }
@@ -93,17 +101,21 @@
   .peek-text { flex: 1; min-width: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .composer { margin: 4px 12px 8px; padding: 4px 4px 4px 8px; box-shadow: none; }
   /* Folded away, what is looked at stands right above. */
-  body:not(.chat-open) .composer .view { display: none; }
+  body:not(.chat-open) .composer .view { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   body.chat-open .composer .view { padding: 4px 4px 0; }
   .composer .send { font-size: 0; gap: 0; width: 44px; min-height: 44px; padding: 0; }
-  .composer textarea { font-size: 1rem; }
+  .composer textarea { min-height: 44px; font-size: 1rem; }
+  .zone-trigger { width: 44px; height: 44px; right: 0; }
+  .rec-name { min-height: 44px; }
+  .records-more { display: inline-flex; align-items: center; min-height: 44px; }
   body.chat-open .chat { --under: calc(56px + env(safe-area-inset-bottom)); top: var(--seen-top, 0px); bottom: auto; height: calc(var(--seen-height, 100dvh) - var(--under)); padding-top: var(--clear-top); background: var(--card); box-shadow: none; z-index: 28; }
   body.chat-open .chat .talk { display: flex; }
   .thread { position: absolute; inset: 0; z-index: 1; border-top: 0; }
   /* What is seen stays small; the finger is given more room than that. */
   .msg .meta .reply, .replying .btn { position: relative; }
-  :is(.msg .meta .reply, .replying .btn)::after { content: ""; position: absolute; inset: -12px -10px -4px; }
-  .in-thread { min-height: 36px; }
+  :is(.msg .meta .reply, .replying .btn)::after { content: ""; position: absolute; inset: -14px -10px -6px; }
+  /* The owner's stands under the words, which are pressed themselves. */
+  .msg.owner .meta .reply::after { inset: -4px -10px -16px; }
   /* At the right, where the thumb is, and out of the way of a tap that only puts the keyboard away. */
   .msg.aide { width: 100%; }
   .msg.aide .meta { align-self: stretch; }

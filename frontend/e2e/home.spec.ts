@@ -67,6 +67,7 @@ test("a tile dragged by its head stays where it is let go, and what it lies over
   ]);
 
   // Nothing is pulled up: the room it leaves stays.
+  await tile(page, "今日").evaluate((el) => el.scrollIntoView({ block: "start" }));
   const moved = await tile(page, "今日").getByRole("heading").boundingBox();
   if (!moved) throw new Error("no tile");
   await drag(page, { x: moved.x + 10, y: moved.y + 10 }, { x: -8 * column, y: 6 * 56 });
