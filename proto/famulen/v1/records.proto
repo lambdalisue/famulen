@@ -103,7 +103,8 @@ message Record {
   string obsolete_reason = 23;
   // The record it was made into, while that one is there.
   RecordLink moved_to = 24;
-  // Where a person's picture is: /party-pictures/<picture>. Empty without one.
+  // Where its picture is: a person's at /party-pictures/<picture>, a thing's
+  // at /holding-pictures/<picture>. Empty without one.
   string picture = 25;
 }
 

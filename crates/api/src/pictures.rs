@@ -1,23 +1,34 @@
-//! The pictures of the parties.
+//! The pictures of the parties and of the things the owner has.
 
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use famulen_core::pictures::Picture;
 
 use crate::Api;
 
 pub(crate) fn router() -> Router<Api> {
-    Router::new().route("/party-pictures/{id}", get(show))
+    Router::new()
+        .route("/party-pictures/{id}", get(party))
+        .route("/holding-pictures/{id}", get(holding))
 }
 
-async fn show(State(api): State<Api>, Path(id): Path<String>) -> Response {
-    match api.app.pictures.get(&id) {
+async fn party(State(api): State<Api>, Path(id): Path<String>) -> Response {
+    show(api.app.pictures.get(&id))
+}
+
+async fn holding(State(api): State<Api>, Path(id): Path<String>) -> Response {
+    show(api.app.holding_pictures.get(&id))
+}
+
+fn show(kept: anyhow::Result<Option<Picture>>) -> Response {
+    match kept {
         Ok(Some(p)) => picture(&p.mime, p.bytes),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
-            tracing::warn!(%error, "could not read a party's picture");
+            tracing::warn!(%error, "could not read a picture");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

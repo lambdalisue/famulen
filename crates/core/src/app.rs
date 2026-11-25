@@ -42,6 +42,7 @@ pub struct App {
     pub attachments: crate::attachments::Attachments,
     pub link_previews: crate::link_previews::LinkPreviews,
     pub pictures: crate::pictures::Pictures,
+    pub holding_pictures: crate::purchases::pictures::HoldingPictures,
     pub permissions: Permissions,
     pub models: Models,
     pub workers: crate::workers::Workers,

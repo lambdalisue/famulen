@@ -686,6 +686,24 @@ CREATE TABLE IF NOT EXISTS account_pictures (
     mime    TEXT NOT NULL DEFAULT '',
     bytes   BLOB NOT NULL DEFAULT x''
 );
+-- the picture of each thing; one that stood for other things too is kept as
+-- its id alone, with no bytes
+CREATE TABLE IF NOT EXISTS holding_pictures (
+    holding TEXT PRIMARY KEY,
+    id      TEXT NOT NULL,
+    mime    TEXT NOT NULL,
+    bytes   BLOB NOT NULL
+);
+-- which mail was looked through for the picture of which thing: waiting (to
+-- be tried again), kept, none or failed
+CREATE TABLE IF NOT EXISTS holding_looks (
+    mail    INTEGER NOT NULL,
+    holding TEXT NOT NULL,
+    state   TEXT NOT NULL,
+    tries   INTEGER NOT NULL DEFAULT 0,
+    next_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (mail, holding)
+);
 CREATE TABLE IF NOT EXISTS slack_taken (
     workspace TEXT NOT NULL,
     channel   TEXT NOT NULL,

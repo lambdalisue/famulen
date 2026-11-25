@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use connectrpc::{ConnectError, RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
-use famulen_core::records::{self as core, Patch, ROUTINES, SECRETARY, TASKS};
+use famulen_core::records::{self as core, HOLDINGS, Patch, ROUTINES, SECRETARY, TASKS};
 use famulen_core::workgroups::ALL;
 
 use crate::pb::*;
@@ -141,7 +141,11 @@ impl Api {
             obsolete: obsolete.as_ref().map(|m| m.on.clone()).unwrap_or_default(),
             obsolete_reason: obsolete.map(|m| m.reason).unwrap_or_default(),
             moved_to: moved_to.into(),
-            picture: self.app.pictures.of(r).unwrap_or_default(),
+            picture: match r.kind.as_str() {
+                HOLDINGS => self.app.holding_pictures.of(&r.id),
+                _ => self.app.pictures.of(r),
+            }
+            .unwrap_or_default(),
             ..Default::default()
         }
     }

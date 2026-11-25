@@ -38,7 +38,7 @@ function Attached(props: { a: Attachment; at: bigint }) {
             aria-haspopup="dialog"
             // Writing goes on once the image is closed, so the box keeps the focus until it opens.
             onMouseDown={(e) => document.activeElement?.id === "say" && e.preventDefault()}
-            onClick={(e) => openImage(props.a, e.currentTarget)}
+            onClick={(e) => openImage({ name: props.a.name, url: attachmentUrl(props.a.id) }, e.currentTarget)}
           >
             <img src={attachmentUrl(props.a.id)} alt={props.a.name} loading="lazy" onError={() => setMissing(true)} />
           </button>

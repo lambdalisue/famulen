@@ -3,7 +3,9 @@
 //! model without tools, whose answer adds and settles holdings and nothing
 //! else.
 
+mod candidates;
 pub mod past;
+pub mod pictures;
 
 use base64::Engine;
 use chrono::Utc;

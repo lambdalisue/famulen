@@ -4,7 +4,7 @@ import { allowedHosts, NOTEBOOK_GIT, refuse } from "./lib/guard";
 
 /** Paths the browser or Git calls that belong to the backend. */
 function relayed(path: string): boolean {
-  return path.startsWith("/famulen.v1.") || path.startsWith(NOTEBOOK_GIT) || /^\/(attachments|link-images|party-pictures)(\/|$)/.test(path) || path === "/health";
+  return path.startsWith("/famulen.v1.") || path.startsWith(NOTEBOOK_GIT) || /^\/(attachments|link-images|party-pictures|holding-pictures)(\/|$)/.test(path) || path === "/health";
 }
 
 const hosts = allowedHosts(process.env);

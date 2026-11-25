@@ -1,17 +1,17 @@
 import { createSignal, onCleanup, Show } from "solid-js";
 import { buttonClass, Icon, IconButton } from "~/components/ui";
-import type { Attachment } from "~/gen/famulen/v1/console_pb";
-import { attachmentUrl } from "~/lib/attachments";
 import * as icons from "~/lib/icons";
 import { freeLayout, holdLayout } from "~/lib/viewport";
 
-const [image, setImage] = createSignal<Attachment>();
+type Shown = { name: string; url: string };
+
+const [image, setImage] = createSignal<Shown>();
 let box: HTMLDialogElement | undefined;
 /** The box being written in as the image opened, and where its caret was. */
 let writing: { box: HTMLTextAreaElement; from: number; to: number } | undefined;
 
 /** Open an image, pressed at `opener`, over everything else. */
-export function openImage(opened: Attachment, opener: HTMLElement) {
+export function openImage(opened: Shown, opener: HTMLElement) {
   const at = document.activeElement;
   writing = at instanceof HTMLTextAreaElement ? { box: at, from: at.selectionStart, to: at.selectionEnd } : undefined;
   // What has the focus as it opens has it again once it closes. Safari leaves
@@ -64,14 +64,14 @@ export default function Lightbox() {
           <>
             <div class="lightbox-bar">
               <span class="grow">{shown().name}</span>
-              <a class={buttonClass({ small: true })} href={attachmentUrl(shown().id)} target="_blank" rel="noreferrer">
+              <a class={buttonClass({ small: true })} href={shown().url} target="_blank" rel="noreferrer">
                 <Icon svg={icons.externalLink} size={14} />
                 新しいタブで開く
               </a>
               <IconButton icon={icons.x} label="閉じる" autofocus onClick={closeImage} />
             </div>
             <div class="lightbox-room">
-              <img src={attachmentUrl(shown().id)} alt={shown().name} />
+              <img src={shown().url} alt={shown().name} />
             </div>
           </>
         )}

@@ -1,4 +1,5 @@
-import { Show, For } from "solid-js";
+import { createSignal, For, onMount, Show } from "solid-js";
+import { openImage } from "~/components/Lightbox";
 import { Tag } from "~/components/ui";
 import { dateText, daysLeft, nearness } from "~/lib/dates";
 import { useOwner } from "~/lib/owner";
@@ -75,12 +76,58 @@ function groups(records: Rec[]): Group[] {
     .map(([name, rs]) => ({ name, records: rs }));
 }
 
+/** Whether a thing's picture is to be shown: it is not when it could not be read. */
+function useShown(r: () => Rec) {
+  const [missing, setMissing] = createSignal("");
+  let img: HTMLImageElement | undefined;
+  onMount(() => {
+    // It may have failed before this code ran.
+    if (img?.complete && img.naturalWidth === 0) setMissing(r().picture);
+  });
+  return {
+    url: () => (r().picture && r().picture !== missing() ? `/holding-pictures/${encodeURIComponent(r().picture)}` : ""),
+    ref: (el: HTMLImageElement) => {
+      img = el;
+    },
+    onError: () => setMissing(r().picture),
+  };
+}
+
+function Thumbnail(props: { thing: Rec }) {
+  const shown = useShown(() => props.thing);
+  return (
+    <Show when={shown.url()}>
+      {(url) => <img ref={shown.ref} class="thing-thumb" src={url()} alt="" loading="lazy" onError={shown.onError} />}
+    </Show>
+  );
+}
+
+function Picture(props: { thing: Rec }) {
+  const shown = useShown(() => props.thing);
+  return (
+    <Show when={shown.url()}>
+      {(url) => (
+        <button
+          type="button"
+          class="thing-picture"
+          aria-label={`${props.thing.title}の画像を拡大する`}
+          aria-haspopup="dialog"
+          onClick={(e) => openImage({ name: props.thing.title, url: url() }, e.currentTarget)}
+        >
+          <img ref={shown.ref} src={url()} alt={props.thing.title} onError={shown.onError} />
+        </button>
+      )}
+    </Show>
+  );
+}
+
 /** Things, or contracts: the same page over a different kind. */
 export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) {
   const of = () => KINDS[props.kind];
   const owner = useOwner();
   usePicked({ kind: () => props.kind, section: () => of().title });
   const row = (r: () => Rec): RowParts => ({
+    lead: () => <Thumbnail thing={r()} />,
     sub: () => (
       <>
         <Show when={valueOf(r(), "Status") && !["owned", "active"].includes(valueOf(r(), "Status"))}>
@@ -115,7 +162,7 @@ export default function HoldingsPage(props: { kind: "holdings" | "contracts" }) 
       groups={groups}
       row={row}
       cards
-      detail={(id, back) => <RecordDetail kind={props.kind} id={id} back={back()} />}
+      detail={(id, back) => <RecordDetail kind={props.kind} id={id} back={back()} top={(r) => <Picture thing={r()} />} />}
       add={of().add}
       hint="期限の 2 週間前になると、タスクになる。"
       empty={of().empty}

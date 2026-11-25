@@ -27,7 +27,7 @@ const REMEMBERED: usize = 500;
 /// How many pages are read at once.
 const AT_ONCE: usize = 4;
 
-const PAGE: Wanted = Wanted {
+pub(crate) const PAGE: Wanted = Wanted {
     types: &["text/html", "application/xhtml+xml"],
     most: 1024 * 1024,
     cut: true,
@@ -64,11 +64,11 @@ pub struct Preview {
 
 /// What was read of a page.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Told {
+pub(crate) struct Told {
     site: String,
-    title: String,
+    pub(crate) title: String,
     description: String,
-    image: Option<Url>,
+    pub(crate) image: Option<Url>,
 }
 
 /// The name a picture is asked for by, so that only those a page named can be.
@@ -239,7 +239,7 @@ fn decoded(page: &PublicPage) -> String {
 
 /// What a page tells of itself; nothing when it does not name itself. Its
 /// `<title>` does not do: a page that asks to log in has one too.
-fn told(page: &PublicPage) -> Option<Told> {
+pub(crate) fn told(page: &PublicPage) -> Option<Told> {
     let html = decoded(page);
     let mut emitter = DefaultEmitter::default();
     emitter.naively_switch_states(true);
