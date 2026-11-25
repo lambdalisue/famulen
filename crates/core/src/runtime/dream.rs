@@ -1,5 +1,6 @@
 //! Dreaming, and recording how it went.
 
+use std::collections::BTreeSet;
 use std::time::SystemTime;
 
 use chrono::{NaiveDate, Utc};
@@ -89,9 +90,11 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
         }
         Err(error) => tracing::warn!(%error, "could not check the working memory"),
     }
+    let mut unkept = None;
     match keep_people_seen(app, today) {
-        Ok(None) => {}
-        Ok(Some(status)) => {
+        Ok((None, missed)) => unkept = Some(missed),
+        Ok((Some(status), missed)) => {
+            unkept = Some(missed);
             outcome.status = format!("{}。{status}", outcome.status);
             if let Err(error) =
                 dreaming::add_to_night(&app.store, outcome.night, Vec::new(), &status)
@@ -112,6 +115,11 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
             }
         }
         Err(error) => tracing::warn!(%error, "could not ask about people"),
+    }
+    // Whom the notes speak of was kept above; without that they are still
+    // needed.
+    if let Some(unkept) = unkept {
+        sweep(app, today, &unkept);
     }
     // Memory stands by now, whatever becomes of the records.
     let tidied = tidying::tidy(
@@ -134,6 +142,33 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
         tracing::warn!(%error, "what tidying did was not added to its night");
     }
     Ok((format!("{}。{status}", outcome.status), true))
+}
+
+/// Take away the notes the dream is done with, once whom they speak of is kept.
+pub(super) fn sweep_notes(app: &App) {
+    let today = Utc::now().with_timezone(&app.tz()).date_naive();
+    if notebook_place::moving(&app.store).is_ok_and(|to| to.is_some()) {
+        return;
+    }
+    match people::keep_seen(&app.records, &app.memory_dir, today, 0) {
+        Ok((_, _, unkept)) => sweep(app, today, &unkept),
+        Err(error) => tracing::warn!(%error, "could not keep when parties were last seen"),
+    }
+}
+
+fn sweep(app: &App, today: NaiveDate, unkept: &BTreeSet<String>) {
+    let swept = app
+        .notebook
+        .hold()
+        .and_then(|_hold| dreaming::sweep(&app.memory_dir, today, unkept));
+    match swept {
+        Ok(0) => {}
+        Ok(gone) => {
+            tracing::info!(gone, "took away the notes dealt with");
+            app.console.notify(Event::Records);
+        }
+        Err(error) => tracing::warn!(%error, "could not take away the notes dealt with"),
+    }
 }
 
 /// Ask the secretary of the working memory that may have outlived its work,
@@ -168,11 +203,16 @@ fn ask_about_working(app: &App, today: NaiveDate) -> anyhow::Result<Option<Strin
 }
 
 /// Keep when parties were last seen, before the notes of this night are
-/// handed over. What came of it, if anyone rests from now.
-fn keep_people_seen(app: &App, today: NaiveDate) -> anyhow::Result<Option<String>> {
+/// handed over. What came of it, if anyone rests from now, and the parties
+/// that could not be kept.
+fn keep_people_seen(
+    app: &App,
+    today: NaiveDate,
+) -> anyhow::Result<(Option<String>, BTreeSet<String>)> {
     let rest_after = DreamSettings::load(&app.store)?.rest_after;
-    let (_, rested) = people::keep_seen(&app.records, &app.memory_dir, today, rest_after)?;
-    Ok((rested > 0).then(|| format!("長く出てこない相手 {rested} 人を休みにした")))
+    let (_, rested, unkept) = people::keep_seen(&app.records, &app.memory_dir, today, rest_after)?;
+    let status = (rested > 0).then(|| format!("長く出てこない相手 {rested} 人を休みにした"));
+    Ok((status, unkept))
 }
 
 /// Have the secretary bring the parties up to date with the people noted, once
@@ -273,7 +313,7 @@ mod tests {
         let app = crate::runtime::testing::app(dir.path());
         ensure(&app.memory_dir).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
-        assert_eq!(keep_people_seen(&app, today).unwrap(), None);
+        assert_eq!(keep_people_seen(&app, today).unwrap().0, None);
         app.records
             .add(
                 crate::notebook::Writer::Secretary,
@@ -282,7 +322,7 @@ mod tests {
             )
             .unwrap();
 
-        let status = keep_people_seen(&app, today).unwrap().unwrap();
+        let status = keep_people_seen(&app, today).unwrap().0.unwrap();
 
         assert!(status.contains("1 人"), "{status}");
     }

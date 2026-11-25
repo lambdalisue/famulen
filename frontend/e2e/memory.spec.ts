@@ -8,7 +8,7 @@ type Dreams = { dreams?: { id: string }[] };
 
 const LAYERS: [string, string][] = [
   ["保留中の判断", "保留中の判断"],
-  ["エピソード記憶", "エピソード記憶"],
+  ["気づき", "気づき"],
   ["作業記憶", "作業記憶"],
   ["心得", "心得"],
   ["長期記憶", "長期記憶"],
@@ -74,9 +74,9 @@ test("long-term memory shows each memory, one per file, with where it came from"
   await expect(inferred).toContainText("根拠 2");
 });
 
-test("an episodic note shows the time it was written apart from its text", async ({ page, request }) => {
+test("a note shows the time it was written apart from its text", async ({ page, request }) => {
   await call(request, "MemoryService", "Remember", { text: "e2e: 朝の連絡はメールがいい", said: true });
-  await visit(page, "/memory/episodic", "記憶 · エピソード記憶");
+  await visit(page, "/memory/episodic", "記憶 · 気づき");
 
   const row = page.locator(".list .item").filter({ hasText: "e2e: 朝の連絡はメールがいい" });
   await expect(row.locator(".mono")).toHaveText(/^\d{2}:\d{2}$/);
@@ -84,37 +84,38 @@ test("an episodic note shows the time it was written apart from its text", async
   await expect(row.locator(".tag")).toHaveText("あなたが言った");
 });
 
-test("the count of episodic memory is the notes its days show as waiting for the dream", async ({ page, request }) => {
-  const item = page.getByRole("navigation", { name: "記憶の層" }).getByRole("link", { name: /^エピソード記憶/ });
-  const waiting = async () => Number(/^待ち (\d+)$/.exec((await item.locator(".mono").textContent()) ?? "")?.[1]);
+test("the inbox shows only the notes waiting for the dream, by day, and counts them", async ({ page, request }) => {
+  const item = page.getByRole("navigation", { name: "記憶の層" }).getByRole("link", { name: /^気づき/ });
+  const waiting = async () => Number(await item.locator(".mono").textContent());
 
-  await visit(page, "/memory/episodic", "記憶 · エピソード記憶");
-  await expect(item.locator(".mono")).toHaveText(/^待ち \d+$/);
+  await visit(page, "/memory/episodic", "記憶 · 気づき");
+  await expect(item.locator(".mono")).toHaveText(/^\d+$/);
   const before = await waiting();
 
   await call(request, "MemoryService", "WriteFile", {
     path: "episodic/2026-01-05.md",
     text: [
       "- 09:15 夢が読む前 {id: e2e-w1, src: said, state: waiting}",
-      "- 09:20 夢が読んだ {id: e2e-w2, src: said, workgroup: [work], state: waiting, dreamt: 2026-01-06}",
+      "- 09:17 仕事のこと {id: e2e-w4, src: said, workgroup: [work], state: waiting}",
+      "- 09:20 夢が読んだ {id: e2e-w2, src: said, state: waiting, dreamt: 2026-01-06}",
       "- 09:25 すぐに入れた {id: e2e-w3, src: said, state: applied}",
       "",
     ].join("\n"),
   });
   try {
-    await visit(page, "/memory/episodic?at=2026-01-05", "記憶 · エピソード記憶");
-    await expect(item.locator(".mono")).toHaveText(`待ち ${before + 1}`);
-    await expect(page.getByText("この日の 3 件のうち、夢を待つ 1 件")).toBeVisible();
-    await expect(page.locator(".list .item", { hasText: "夢が読む前" }).locator(".item-sub")).toContainText("夢を待つ");
-    const settled = page.locator(".list .item", { hasText: "夢が読んだ" }).locator(".item-sub");
-    await expect(settled).toContainText("夢が済んだ");
-    await expect(settled).not.toContainText("夢を待つ");
+    await visit(page, "/memory/episodic", "記憶 · 気づき");
+    await expect(item.locator(".mono")).toHaveText(String(before + 2));
+    const day = page.locator("section").filter({ has: page.getByRole("heading", { name: "2026-01-05" }) });
+    await expect(day.locator(".item-title")).toHaveText(["夢が読む前", "仕事のこと"]);
+    await expect(day.getByRole("link", { name: "読む・書く・経緯" })).toBeVisible();
+    await expect(page.getByText("夢が済んだ")).toHaveCount(0);
 
     await page.evaluate(() => {
       document.cookie = "famulen_workgroup=personal; path=/";
     });
     await page.reload();
-    await expect(page.getByText("この日の 3 件のうち、夢を待つ 1 件。ほかのワークグループの 1 件は出ていない")).toBeVisible();
+    await expect(day.locator(".item-title")).toHaveText(["夢が読む前"]);
+    await expect(page.getByText(/ほかのワークグループの \d+ 件は出ていない/)).toBeVisible();
   } finally {
     await call(request, "MemoryService", "WriteFile", { path: "episodic/2026-01-05.md", text: "" });
   }
@@ -291,7 +292,7 @@ test.describe("memory drawn as Markdown", () => {
     expect(heights[0]).toBe(heights[1]);
   });
 
-  test("pending, episodic, working and forgotten memories are drawn too", async ({ page, request }) => {
+  test("pending memories, notes, working and forgotten memories are drawn too", async ({ page, request }) => {
     const write = (path: string, text: string) => call(request, "MemoryService", "WriteFile", { path, text });
     await write("pending.md", "- 朝が **好き** らしい {id: e2e-md7, src: inferred, ev: 1}\n");
     await write("episodic/2026-01-02.md", "- 09:15 朝に **話した** {id: e2e-md8, src: said, state: waiting}\n");
@@ -303,8 +304,8 @@ test.describe("memory drawn as Markdown", () => {
 
     await visit(page, "/memory/pending", "記憶 · 保留中の判断");
     await expect(page.locator(".item strong")).toHaveText("好き");
-    await visit(page, "/memory/episodic?at=2026-01-02", "記憶 · エピソード記憶");
-    await expect(page.locator(".item strong")).toHaveText("話した");
+    await visit(page, "/memory/episodic", "記憶 · 気づき");
+    await expect(page.locator(".item strong", { hasText: "話した" })).toBeVisible();
     await visit(page, "/memory/forgotten?at=2026-01", "記憶 · 忘却");
     await expect(page.locator(".item strong")).toHaveText("癖");
     await expect(page.locator(".item .item-sub code")).toHaveText("新しい");
@@ -314,6 +315,7 @@ test.describe("memory drawn as Markdown", () => {
     await expect(card.getByRole("listitem")).toHaveText(["三つ 比べた", "一つ消した"]);
 
     await write("pending.md", "");
+    await write("episodic/2026-01-02.md", "");
     await write("core.md", "# 心得\n");
   });
 });

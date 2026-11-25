@@ -18,6 +18,8 @@ use crate::{Doc, Entry, EpisodeState, README, Src, slash};
 
 pub const CORE: &str = "core.md";
 pub const PENDING: &str = "pending.md";
+/// The inbox of notes. The directory's name is older than the layer's, and
+/// kept: other programs that keep the notebook know it.
 pub const EPISODIC: &str = "episodic";
 pub const WORKING: &str = "working";
 pub const LONG: &str = "long";
@@ -236,7 +238,7 @@ fn episode_path(date: NaiveDate) -> PathBuf {
     Path::new(EPISODIC).join(format!("{}.md", date.format("%Y-%m-%d")))
 }
 
-/// The days that have an episodic file, oldest first.
+/// The days that have a file of notes, oldest first.
 pub fn episodic_dates(dir: &Path) -> anyhow::Result<Vec<NaiveDate>> {
     Ok(markdown_files(dir, Path::new(EPISODIC))?
         .iter()
@@ -248,7 +250,7 @@ pub fn episodes(dir: &Path, date: NaiveDate) -> anyhow::Result<Vec<Entry>> {
     entries(dir, episode_path(date))
 }
 
-/// Write down a noticing in the day's episodic file, with a fresh id.
+/// Write down a noticing in the day's file of the inbox, with a fresh id.
 pub fn append_episode(
     dir: &Path,
     at: NaiveDateTime,
@@ -289,7 +291,7 @@ fn push_episode(dir: &Path, at: NaiveDateTime, entry: Entry) -> anyhow::Result<E
     Ok(entry)
 }
 
-/// Set one attribute on an episodic item.
+/// Set one attribute on a note.
 pub fn tag_episode(
     dir: &Path,
     date: NaiveDate,

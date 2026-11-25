@@ -1,5 +1,5 @@
 //! What the secretary keeps between conversations, in the notebook's
-//! `memory/` layers. The day writes episodic and working memory; the nightly
+//! `memory/` layers. The day writes notes and working memory; the nightly
 //! dream consolidates the rest. The layers themselves are the notebook
 //! library's; here is what Famulen does with them.
 
@@ -12,7 +12,7 @@ pub use leftover::*;
 pub use prompt::*;
 
 pub use famulen_notebook::memory::*;
-pub use famulen_notebook::{Entry, EpisodeState, Src};
+pub use famulen_notebook::{Doc, Entry, EpisodeState, Src};
 
 use std::path::{Path, PathBuf};
 

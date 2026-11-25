@@ -1,6 +1,6 @@
 //! What the secretary has learned, in layers of Markdown kept in Git.
 
-use chrono::{NaiveDate, Utc};
+use chrono::Utc;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::dream_settings::{self as ds, DreamSettings as Plan, Frequency};
 use famulen_core::dreaming;
@@ -14,11 +14,7 @@ use crate::{Api, OrFail, changed, fail, given, writer};
 const LAYERS: [(&str, &str, &str); 7] = [
     ("dream", "夢", "夜の整理と、その結果"),
     ("pending", "保留中の判断", "急がない。根拠を待っている"),
-    (
-        "episodic",
-        "エピソード記憶",
-        "その日の出来事と気づき。夢が整理する",
-    ),
+    ("episodic", "気づき", "雑に書く受信箱。夢が整理したら消える"),
     ("working", "作業記憶", "いま進めている仕事の途中経過"),
     ("core", "心得", "毎回の会話で必ず読む"),
     ("long", "長期記憶", "意味記憶・手続き記憶・展望記憶"),
@@ -111,21 +107,11 @@ impl Api {
         Ok(plan.next_in_words(ds::last(&self.app.store)?, now))
     }
 
-    fn waiting_notes(&self) -> usize {
-        let dir = &self.app.memory_dir;
-        m::episodic_dates(dir)
-            .unwrap_or_default()
-            .into_iter()
-            .flat_map(|d| m::episodes(dir, d).unwrap_or_default())
-            .filter(dreaming::waits)
-            .count()
-    }
-
     fn layer_count(&self, id: &str) -> anyhow::Result<String> {
         let dir = &self.app.memory_dir;
         Ok(match id {
             "pending" => m::pending_entries(dir)?.len().to_string(),
-            "episodic" => format!("待ち {}", self.waiting_notes()),
+            "episodic" => dreaming::waiting_notes(dir)?.len().to_string(),
             "working" => m::working_memories(dir)?.len().to_string(),
             "core" => format!(
                 "{} / {} 行",
@@ -201,19 +187,13 @@ impl MemoryService for Api {
                     .collect();
             }
             "episodic" => {
-                let dates = m::episodic_dates(dir).or_fail()?;
-                let date = NaiveDate::parse_from_str(&r.at, "%Y-%m-%d")
-                    .ok()
-                    .or(dates.last().copied());
-                if let Some(date) = date {
-                    let file = format!("{}/{date}.md", m::EPISODIC);
-                    out.items = m::episodes(dir, date)
-                        .or_fail()?
-                        .iter()
-                        .map(|e| item(e, &file))
-                        .collect();
-                }
-                out.periods = dates.iter().rev().take(30).map(|d| d.to_string()).collect();
+                let mut notes = dreaming::waiting_notes(dir).or_fail()?;
+                // The newest day first, each day in the order it was written.
+                notes.sort_by_key(|(date, _)| std::cmp::Reverse(*date));
+                out.items = notes
+                    .iter()
+                    .map(|(date, e)| item(e, &format!("{}/{date}.md", m::EPISODIC)))
+                    .collect();
             }
             "working" => {
                 out.working = m::working_memories(dir)
@@ -477,7 +457,9 @@ impl MemoryService for Api {
                 .or_fail()?
                 .is_some(),
             blocked,
-            waiting_notes: self.waiting_notes() as i32,
+            waiting_notes: dreaming::waiting_notes(&self.app.memory_dir)
+                .or_fail()?
+                .len() as i32,
             ..Default::default()
         })
     }

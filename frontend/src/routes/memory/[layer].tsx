@@ -6,7 +6,7 @@ import { EntryRow, SrcTag } from "~/components/MemoryEntry";
 import { EmptyState, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
 import type { Layer, MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import * as icons from "~/lib/icons";
-import { layerQuery, visible, waitsForDream } from "~/lib/memory";
+import { layerQuery, visible } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
@@ -19,14 +19,6 @@ const LONG_GROUPS: [string, string][] = [
 ];
 
 const LAYERS = ["pending", "episodic", "working", "core", "long", "forgotten"];
-
-const STATES: Record<string, string> = { applied: "すぐ入れた", record: "記録へ" };
-
-/** Where an episodic note has got to; a dream marks what it is done with, kept or not, and leaves the note in its file. */
-const stateText = (e: MemoryItem) => {
-  if (waitsForDream(e)) return "夢を待つ";
-  return e.attrs.dreamt === undefined ? (STATES[e.attrs.state ?? ""] ?? "") : "夢が済んだ";
-};
 
 /** Where a memory's file is read, written and its history seen. */
 function FileLink(props: { path: string }) {
@@ -92,52 +84,33 @@ function Pending(props: { data: Layer; aide: string }) {
   );
 }
 
-function Episodic(props: { data: Layer; at: string }) {
-  const date = () => props.at || props.data.periods[0] || "";
-  const all = () => props.data.items;
-  const notes = () => shown(all());
-  const hidden = () => all().length - notes().length;
+function Notes(props: { data: Layer }) {
+  const notes = () => shown(props.data.items);
+  const hidden = () => props.data.items.length - notes().length;
+  const files = () => [...new Set(notes().map((e) => e.file))];
   return (
     <>
-      <PageHeader
-        title="エピソード記憶"
-        note="昼の間はここに書き留めるだけ。整理は夢の中で行う。"
-        actions={
-          <Show when={date()}>
-            <FileLink path={`episodic/${date()}.md`} />
-          </Show>
-        }
-      />
-      <Periods
-        periods={props.data.periods}
-        at={date()}
-        layer="episodic"
-        label={(d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`}
-      />
-      <Show when={all().length}>
-        <p class="sub">
-          {`この日の ${all().length} 件のうち、夢を待つ ${all().filter(waitsForDream).length} 件`}
-          <Show when={hidden()}>{(n) => `。ほかのワークグループの ${n()} 件は出ていない`}</Show>
-        </p>
-      </Show>
-      <List>
-        <For each={notes()} fallback={<EmptyState>まだない</EmptyState>}>
-          {(e) => (
-            <ListRow
-              class="memory-row"
-              lead={<span class="mono sub memory-time">{e.time}</span>}
-              title={<Markdown inline text={e.text} />}
-              sub={
-                <>
-                  <SrcTag src={e.src} />
-                  <span>{stateText(e)}</span>
-                </>
-              }
-              end={<AskAbout what={`記憶：${e.text}`} />}
-            />
-          )}
-        </For>
-      </List>
+      <PageHeader title="気づき" note="雑に書く受信箱。ここにあるのは夢を待つものだけで、夢が整理したら消える。" />
+      <Show when={hidden()}>{(n) => <p class="sub">{`ほかのワークグループの ${n()} 件は出ていない`}</p>}</Show>
+      <For each={files()} fallback={<EmptyState>夢を待つ気づきはない</EmptyState>}>
+        {(file) => (
+          <Section title={file.replace(/^.*\/|\.md$/g, "")} action={<FileLink path={file} />}>
+            <List>
+              <For each={notes().filter((e) => e.file === file)}>
+                {(e) => (
+                  <ListRow
+                    class="memory-row"
+                    lead={<span class="mono sub memory-time">{e.time}</span>}
+                    title={<Markdown inline text={e.text} />}
+                    sub={<SrcTag src={e.src} />}
+                    end={<AskAbout what={`気づき：${e.text}`} />}
+                  />
+                )}
+              </For>
+            </List>
+          </Section>
+        )}
+      </For>
     </>
   );
 }
@@ -287,7 +260,7 @@ export default function MemoryLayer() {
                 <Pending data={d()} aide={owner.aide()} />
               </Match>
               <Match when={params.layer === "episodic"}>
-                <Episodic data={d()} at={at()} />
+                <Notes data={d()} />
               </Match>
               <Match when={params.layer === "working"}>
                 <Working data={d()} />

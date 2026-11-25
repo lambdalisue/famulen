@@ -224,7 +224,7 @@ fn tells_of_people(source: &LookoutSource) -> bool {
     source.tool == lookout::ARRIVED && matches!(source.feed, Feed::Chat | Feed::Mail)
 }
 
-/// Keep what the lookout noted of people as episodic memory. Being no concern
+/// Keep what the lookout noted of people in the inbox. Being no concern
 /// of the owner's does not matter here.
 async fn note_people(
     app: &App,

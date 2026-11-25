@@ -165,7 +165,7 @@ export default function Dreams() {
         title="夢"
         note={
           <>
-            次は {dreams()?.next}。<Show when={plan()?.earlyAt}>{(n) => `エピソード記憶の気づきが ${n()} 件たまれば早めに見る。`}</Show>
+            次は {dreams()?.next}。<Show when={plan()?.earlyAt}>{(n) => `気づきが ${n()} 件たまれば早めに見る。`}</Show>
             いま待っている気づき {dreams()?.waitingNotes ?? 0} 件。
           </>
         }

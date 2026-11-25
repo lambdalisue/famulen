@@ -16,7 +16,7 @@ pub struct Located {
 }
 
 /// Every item with an id in core, pending, long-term and forgotten memory,
-/// and how many items each of those files holds. Episodic and working
+/// and how many items each of those files holds. The inbox and working
 /// memory are the dream's input, not what it keeps, so they are left out.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Snapshot {
@@ -77,7 +77,7 @@ pub enum Op {
     TaskMade,
     /// A record marked as one that may no longer be true.
     Doubted,
-    /// An episodic note not kept. It stays where it was written.
+    /// A note nothing was kept of.
     Discarded,
 }
 
