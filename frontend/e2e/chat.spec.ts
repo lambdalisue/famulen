@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { call, visit } from "./support";
+import { call, sayImage, visit, whollyOnScreen } from "./support";
 
 test("what the secretary says is drawn, with its lines where they end", async ({ page, request }) => {
   await call(request, "ConsoleService", "PostMessage", {
@@ -96,6 +96,68 @@ test("files picked, pasted or dropped go along with what is said, and are shown 
 
   await page.reload();
   await expect(said.getByRole("img", { name: "選んだ.png" })).toBeVisible();
+});
+
+test("an image in the conversation opens over it, whole on the screen, and closes by its button, Escape or a click beside it", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await sayImage(page, request, "e2e-大きい画像", "大きい.png", { width: 3000, height: 1000 });
+  const list = page.locator("#messages");
+  const opener = page.getByRole("button", { name: "大きい.png を拡大する" });
+  const thumbnail = opener.locator("img");
+  await expect.poll(() => thumbnail.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(3000);
+  const box = page.getByRole("dialog", { name: "大きい.png" });
+  const image = box.getByRole("img", { name: "大きい.png" });
+  const pages = page.context().pages().length;
+
+  // Read back a little, so that following the newest would show. The image is
+  // wholly in sight, as a click would otherwise scroll to it.
+  await call(request, "ConsoleService", "PostMessage", { text: `e2e-大きい画像のあと\n\n${"続き。\n\n".repeat(30)}` });
+  await expect(page.getByTestId("message").filter({ hasText: "e2e-大きい画像のあと" }).locator(".markdown-body")).toBeVisible();
+  const end = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  await expect.poll(end).toBeLessThan(2);
+  await opener.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect.poll(end).toBeGreaterThan(100);
+  const top = await list.evaluate((el) => el.scrollTop);
+  const closings: [string, () => Promise<void>][] = [
+    ["button", () => box.getByRole("button", { name: "閉じる" }).click()],
+    ["Escape", () => page.keyboard.press("Escape")],
+    ["beside", () => page.mouse.click(230, 850)],
+  ];
+  for (const [how, close] of closings) {
+    await opener.click();
+    await expect(box, how).toBeVisible();
+    await expect(box).toHaveAttribute("aria-modal", "true");
+    await expect(box.getByRole("button", { name: "閉じる" })).toBeFocused();
+    await expect.poll(() => whollyOnScreen(page, image)).toBe(true);
+    const size = await image.boundingBox();
+    expect(size?.width ?? 0).toBeGreaterThan(1200);
+    expect((size?.width ?? 0) / (size?.height ?? 1)).toBeCloseTo(3, 1);
+    await image.click();
+    await expect(box, "a click on the image itself").toBeVisible();
+    await page.mouse.move(230, 850);
+    await page.mouse.wheel(0, -400);
+    await close();
+    await expect(box, how).toHaveCount(0);
+    await expect(opener, how).toBeFocused();
+    expect(await list.evaluate((el) => el.scrollTop), how).toBe(top);
+  }
+  expect(page.context().pages().length).toBe(pages);
+
+  await opener.click();
+  const link = box.getByRole("link", { name: "新しいタブで開く" });
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("href", (await image.getAttribute("src")) ?? "");
+});
+
+test("an image stays open when the conversation is read again", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await sayImage(page, request, "e2e-開いた画像", "開いた.png", { width: 400, height: 300 });
+  await page.getByRole("button", { name: "開いた.png を拡大する" }).click();
+  const box = page.getByRole("dialog", { name: "開いた.png" });
+  await expect(box).toBeVisible();
+  await call(request, "ConsoleService", "PostMessage", { text: "e2e-開いている間に来た" });
+  await expect(page.getByTestId("message").filter({ hasText: "e2e-開いている間に来た" })).toBeAttached();
+  await expect(box).toBeVisible();
 });
 
 test("a file that cannot be taken says why, and nothing goes without it until it is removed", async ({ page }) => {

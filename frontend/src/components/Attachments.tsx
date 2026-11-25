@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
+import { openImage } from "~/components/Lightbox";
 import { Icon } from "~/components/ui";
 import type { Attachment } from "~/gen/famulen/v1/console_pb";
 import { attachmentUrl, type Draft, sizeOf } from "~/lib/attachments";
@@ -30,9 +31,17 @@ function Attached(props: { a: Attachment; at: bigint }) {
     >
       <Show when={props.a.id} fallback={<div class="attached-file">{props.a.name}（届くのを待っている…）</div>}>
         <Show when={props.a.mime.startsWith("image/") && !gone()} fallback={file()}>
-          <a class="attached-image" href={attachmentUrl(props.a.id)} aria-label={props.a.name} target="_blank" rel="noreferrer">
+          <button
+            type="button"
+            class="attached-image"
+            aria-label={`${props.a.name} を拡大する`}
+            aria-haspopup="dialog"
+            // Writing goes on once the image is closed, so the box keeps the focus until it opens.
+            onMouseDown={(e) => document.activeElement?.id === "say" && e.preventDefault()}
+            onClick={(e) => openImage(props.a, e.currentTarget)}
+          >
             <img src={attachmentUrl(props.a.id)} alt={props.a.name} loading="lazy" onError={() => setMissing(true)} />
-          </a>
+          </button>
         </Show>
       </Show>
     </Show>

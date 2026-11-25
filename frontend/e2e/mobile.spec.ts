@@ -1,5 +1,5 @@
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
-import { call, detail, expectView, record, row, visit } from "./support";
+import { call, detail, expectView, record, row, sayImage, visit, whollyOnScreen } from "./support";
 
 function tabbar(page: Page) {
   return page.locator("#m-tabbar");
@@ -412,6 +412,65 @@ test("the conversation stays where it is read, whatever comes, and follows again
   await call(request, "ConsoleService", "PostMessage", { text: `末尾で来た発言\n\n${"続き。".repeat(60)}` });
   await expect(page.getByTestId("message").filter({ hasText: "末尾で来た発言" }).last().locator(".markdown-body")).toBeVisible();
   await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+});
+
+test("an image opens while writing, and closing it goes back to what is written", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await sayImage(page, request, "縦長の画像", "縦長.png", { width: 800, height: 4000 });
+  await call(request, "ConsoleService", "PostMessage", { text: `縦長の画像のあと\n\n${"続き。".repeat(40)}` });
+  const say = page.getByPlaceholder(/に頼む$/);
+  await say.focus();
+  await say.fill("打ちかけの文字");
+  await say.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(3, 3));
+  const opener = page.getByRole("button", { name: "縦長.png を拡大する" });
+  await expect.poll(() => opener.locator("img").evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(800);
+  const whole = page.viewportSize()?.height ?? 0;
+  const up = () => keyboard(page, { top: 0, height: 500 });
+  await up();
+  const list = page.locator("#messages");
+  await settled(page);
+  // Read back less than the keyboard takes, where the list would reach its end without it.
+  await opener.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await settled(page);
+  const below = await list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  expect(below).toBeGreaterThan(40);
+  expect(below).toBeLessThan(whole - 500);
+  const top = await list.evaluate((el) => el.scrollTop);
+  const box = page.getByRole("dialog", { name: "縦長.png" });
+  const image = box.getByRole("img", { name: "縦長.png" });
+  for (const close of [() => page.touchscreen.tap(10, 400), () => box.getByRole("button", { name: "閉じる" }).tap()]) {
+    await opener.tap();
+    await expect(box).toBeVisible();
+    await expect.poll(() => whollyOnScreen(page, image)).toBe(true);
+    await keyboard(page, { top: 0, height: whole });
+    await settled(page);
+    const size = await image.boundingBox();
+    expect((size?.height ?? 0) / (size?.width ?? 1)).toBeCloseTo(5, 1);
+    await close();
+    await expect(box).toHaveCount(0);
+    await expect(say).toBeFocused();
+    await expect(say).toHaveValue("打ちかけの文字");
+    await expect.poll(() => say.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([3, 3]);
+    await settled(page);
+    await up();
+    await settled(page);
+    expect(Math.abs((await list.evaluate((el) => el.scrollTop)) - top)).toBeLessThanOrEqual(1);
+  }
+});
+
+test("going to another page closes the image, and leaves the conversation folded", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await tabbar(page).getByRole("link", { name: "タスク" }).click();
+  await expectView(page, /^タスク/);
+  await sayImage(page, request, "移る前の画像", "移る前.png", { width: 400, height: 300 });
+  await page.getByPlaceholder(/に頼む$/).focus();
+  await page.getByRole("button", { name: "移る前.png を拡大する" }).tap();
+  const box = page.getByRole("dialog", { name: "移る前.png" });
+  await expect(box).toBeVisible();
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(box).toHaveCount(0);
+  await expect(page.locator("body")).not.toHaveClass(/chat-open|typing/);
 });
 
 test("what is being written keeps the keyboard, its text and its caret, whatever comes", async ({ page, request }) => {
