@@ -81,6 +81,14 @@ pub(super) struct Candidate {
 pub(super) struct Candidates {
     pub images: Vec<Candidate>,
     pub pages: Vec<Candidate>,
+    /// How many there were before those that are none were left out.
+    pub seen: Seen,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Seen {
+    pub images: usize,
+    pub links: usize,
 }
 
 impl Candidates {
@@ -88,9 +96,21 @@ impl Candidates {
         self.images.is_empty() && self.pages.is_empty()
     }
 
+    pub fn only(mut self, keep: impl Fn(&Candidate) -> bool) -> Self {
+        self.images.retain(&keep);
+        self.pages.retain(&keep);
+        self
+    }
+
     pub fn of_html(html: &str) -> Self {
         let read = Read::of(&html[..html.floor_char_boundary(MOST_HTML)]);
-        let mut all = Self::default();
+        let mut all = Self {
+            seen: Seen {
+                images: read.seen_images,
+                links: read.links.len(),
+            },
+            ..Self::default()
+        };
         for image in read.images.iter().take(MOST_SEEN) {
             let linked: Vec<&str> = read
                 .links
@@ -125,6 +145,7 @@ impl Candidates {
         let lines: Vec<&str> = text.lines().take(MOST_SEEN * 10).collect();
         for (i, said) in lines.iter().enumerate() {
             for url in link_previews::links(said).into_iter().take(MOST) {
+                all.seen.links += 1;
                 if let Some(url) = page_url(url.as_str()) {
                     let words = line(&lines[i.saturating_sub(3)..=i].join(" "));
                     push(&mut all.pages, url, words);
@@ -169,6 +190,7 @@ struct Read {
     text: String,
     images: Vec<Image>,
     links: Vec<Link>,
+    seen_images: usize,
 }
 
 impl Read {
@@ -195,6 +217,7 @@ impl Read {
                         });
                     }
                     b"img" => {
+                        read.seen_images += 1;
                         if let Some(url) = shown_picture(&tag) {
                             read.images.push(Image {
                                 url,

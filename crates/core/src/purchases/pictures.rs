@@ -25,6 +25,10 @@ use crate::pictures::{Picture, id_of};
 use crate::records::HOLDINGS;
 use crate::store::Store;
 
+/// Told anew when looking finds what it did not find before, so that what was
+/// looked for in vain is looked for again.
+const WAY: &str = "2";
+const WAY_KEY: &str = "holding_pictures.way";
 /// How many mails are looked through at once, so that a whole notebook of
 /// things without pictures is spread over hours.
 const AT_ONCE: usize = 3;
@@ -225,6 +229,17 @@ impl HoldingPictures {
         Ok(())
     }
 
+    /// Forget what was looked for in vain by another way of looking.
+    fn look_anew(&self) -> anyhow::Result<()> {
+        if self.store.state(WAY_KEY)?.as_deref() == Some(WAY) {
+            return Ok(());
+        }
+        self.store
+            .conn()
+            .execute("DELETE FROM holding_looks WHERE state <> 'kept'", [])?;
+        self.store.set_state(WAY_KEY, WAY)
+    }
+
     /// Throw away what is kept of things that are not there any more.
     fn forget_others(&self, titles: &BTreeMap<String, String>) -> anyhow::Result<()> {
         let kept: Vec<String> = {
@@ -422,6 +437,7 @@ pub async fn look(app: &App, at: i64) -> anyhow::Result<()> {
         .collect();
     let pictures = &app.holding_pictures;
     pictures.forget_others(&titles)?;
+    pictures.look_anew()?;
     for (mail, mut things) in pictures.waiting(&titles, at)? {
         // A mail before this one may have shown it.
         things.retain(|thing| pictures.of(&thing.id).is_none());
@@ -455,6 +471,9 @@ async fn look_through(
             return Ok(());
         }
     };
+    let before = (candidates.images.len(), candidates.pages.len());
+    // What agrees with none is not kept whatever the model says.
+    let candidates = candidates.only(|c| things.iter().any(|t| t.agrees(&c.words)));
     let picks = if candidates.are_none() {
         Vec::new()
     } else {
@@ -482,6 +501,20 @@ async fn look_through(
             }
         }
     };
+    let picked = |of: fn(&Pick) -> i64| picks.iter().filter(|p| of(p) >= 0).count();
+    tracing::info!(
+        mail = mail.id,
+        things = things.len(),
+        seen_images = candidates.seen.images,
+        seen_links = candidates.seen.links,
+        images = before.0,
+        pages = before.1,
+        agreed_images = candidates.images.len(),
+        agreed_pages = candidates.pages.len(),
+        picked_images = picked(|p| p.image),
+        picked_pages = picked(|p| p.page),
+        "looked through a mail for pictures"
+    );
     let mut read = HashMap::new();
     for (i, thing) in things.iter().enumerate() {
         let pick = picks.iter().find(|p| p.thing == i as i64);
@@ -712,6 +745,11 @@ mod tests {
             (s.of(&id), s.state(&id).as_str(), s.asked()),
             (None, "none", 0)
         );
+        let asked = s
+            .app
+            .models
+            .used_today(Role::Lookout, s.app.tz(), chrono::Utc::now());
+        assert_eq!(asked.unwrap().1, 0);
     }
 
     #[tokio::test]
@@ -830,5 +868,21 @@ mod tests {
             s.look(AGAIN_AFTER << (i * 2)).await;
         }
         assert_eq!((s.state(&id).as_str(), s.asked()), ("failed", 0));
+    }
+
+    #[tokio::test]
+    async fn what_was_looked_for_in_vain_by_another_way_is_looked_for_again() {
+        let dir = TempDir::new("holding-pictures-anew");
+        let s = Stand::new(&dir, IMG, json!([{ "thing": 0, "image": 0, "page": -1 }])).await;
+        s.serve("https://i.example/1.png", "image/png", picture(100, 100, 0));
+        let id = s.bought("暗号の本 1");
+        let sql = "INSERT INTO holding_looks (mail, holding, state) VALUES (1, ?1, 'none')";
+        s.app.store.conn().execute(sql, [&id]).unwrap();
+        s.app.store.set_state(WAY_KEY, WAY).unwrap();
+        s.look(0).await;
+        assert_eq!(s.of(&id), None);
+        s.app.store.set_state(WAY_KEY, "before").unwrap();
+        s.look(0).await;
+        assert!(s.of(&id).is_some());
     }
 }
