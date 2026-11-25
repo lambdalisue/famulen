@@ -46,10 +46,11 @@ dev: console-setup
     trap 'kill %1' EXIT
     cd frontend && FAMULEN_API_URL=http://127.0.0.1:7790 pnpm exec vite dev --port 3000 --host 127.0.0.1
 
-# Drive the console in a browser against a fresh backend.
-e2e: console-setup
+# Drive the console in a browser against a fresh backend. Arguments go to
+# Playwright.
+e2e *args: console-setup
     cargo build -p famulen
-    cd frontend && pnpm exec playwright install --with-deps chromium && pnpm e2e
+    cd frontend && pnpm exec playwright install --with-deps chromium && pnpm e2e {{args}}
 
 # Everything CI runs on every OS.
 ci: fmt-check lint test stamp-check console-check
