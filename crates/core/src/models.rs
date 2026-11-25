@@ -59,6 +59,24 @@ pub async fn complete(
     }
 }
 
+/// [`complete`] with `system` in place of an agent CLI's own prompt, which is
+/// most of a short call; other kinds are asked as usual.
+pub async fn complete_alone(
+    spec: &ModelSpec,
+    effort: Option<&str>,
+    system: &str,
+    prompt: &str,
+    schema: Option<&Value>,
+    via: Option<Via<'_>>,
+) -> Result<Completion> {
+    match spec.kind {
+        ModelKind::AgentCli => {
+            agent_cli::complete_alone(spec, effort, system, prompt, schema).await
+        }
+        _ => complete(spec, effort, system, prompt, schema, via).await,
+    }
+}
+
 /// [`complete`] for a short judgement. An agent CLI is asked with `system`
 /// in place of its own prompt and without thinking, at low effort unless
 /// `effort` says otherwise; other kinds are asked as usual.

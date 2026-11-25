@@ -1,5 +1,7 @@
 //! Reading the lookout's sources when they come due, with its model.
 
+use std::cmp::Reverse;
+
 use chrono::Utc;
 
 use super::keep;
@@ -10,7 +12,9 @@ use crate::mail_line::{Line, leave, mark};
 use crate::memory;
 use crate::models::Role;
 use crate::people;
+use crate::purchases;
 use crate::records;
+use crate::words::Said;
 use crate::workgroups::MemberKind;
 
 /// What the lookout's model is told to pick what to read in full. What the
@@ -37,6 +41,8 @@ or digest (worth a line in tomorrow morning's summary). \
 Give each group a short title and say why in one short sentence, both in Japanese. \
 Every item that concerns the owner belongs to one group.
 ";
+/// How many of the things mail told were bought a batch is judged by.
+const BOUGHT: usize = 30;
 const CARES: &str = "What the owner cares about, and what they said does not concern them:
 ";
 
@@ -60,6 +66,16 @@ fn screen(profile: &str) -> String {
 /// holdings) and semantic memory, where the owner's word that something does
 /// not concern them lands too. Nothing in it is written by hand.
 pub fn relevance_profile(app: &App) -> String {
+    profile(app, None)
+}
+
+/// [`relevance_profile`] for judging `items`: of what mail told was bought,
+/// which grows without end, only what they may speak of.
+fn relevance_profile_for(app: &App, items: &[Item]) -> String {
+    profile(app, Some(&Said::new(&lookout::numbered(items))))
+}
+
+fn profile(app: &App, said: Option<&Said>) -> String {
     let mut profile = String::new();
     let tasks: Vec<String> = app
         .records
@@ -111,15 +127,24 @@ pub fn relevance_profile(app: &App) -> String {
             parties.join(", ")
         ));
     }
-    let mut holdings: Vec<String> = Vec::new();
-    for kind in [records::HOLDINGS, records::CONTRACTS] {
-        holdings.extend(app.records.list(kind).unwrap_or_default().iter().map(
-            |h| match h.obsolete() {
-                Some(_) => format!("{} (may be out of date)", h.title()),
-                None => h.title(),
-            },
-        ));
+    let mut held = app.records.list(records::HOLDINGS).unwrap_or_default();
+    if let Some(said) = said {
+        let (mut mailed, others): (Vec<_>, Vec<_>) =
+            held.into_iter().partition(purchases::is_from_mail);
+        mailed.retain(|h| said.words_of(&h.title()) > 0);
+        mailed.sort_by_cached_key(|h| Reverse((said.words_of(&h.title()), h.id.clone())));
+        mailed.truncate(BOUGHT);
+        held = others;
+        held.extend(mailed);
     }
+    held.extend(app.records.list(records::CONTRACTS).unwrap_or_default());
+    let holdings: Vec<String> = held
+        .iter()
+        .map(|h| match h.obsolete() {
+            Some(_) => format!("{} (may be out of date)", h.title()),
+            None => h.title(),
+        })
+        .collect();
     if !holdings.is_empty() {
         profile.push_str(&format!("\nOwned and subscribed: {}", holdings.join(", ")));
     }
@@ -221,7 +246,7 @@ async fn ask_lookout(
     }
     let completion = app
         .models
-        .complete(
+        .complete_alone(
             Role::Lookout,
             tz,
             system,
@@ -296,7 +321,6 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
         return Ok(());
     }
     let tz = app.tz();
-    let profile = relevance_profile(app);
     for source in due {
         app.lookout.mark_run(source.id, at)?;
         let Some(batch) = read_source(app, &source).await? else {
@@ -306,7 +330,7 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
             continue;
         }
         let skim = async |items: Vec<Item>| {
-            let system = format!("{SKIM}{profile}");
+            let system = format!("{SKIM}{}", relevance_profile_for(app, &items));
             let schema = lookout::skim_schema();
             let answer = ask_lookout(app, tz, &system, &items, &schema).await?;
             answer.as_ref().map(lookout::picked_from).transpose()
@@ -314,7 +338,7 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
         let source_ref = &source;
         let open = move |url: String| async move { open_page(app, source_ref, &url).await };
         let model = async |items: Vec<Item>| {
-            let mut system = screen(&profile);
+            let mut system = screen(&relevance_profile_for(app, &items));
             let mut schema = lookout::verdict_schema();
             if tells_of_people(source_ref) {
                 system.insert_str(0, people::ASK);
@@ -512,6 +536,33 @@ mod tests {
             ["Sato（メール、Sato@example.com）：n"; people::MOST_NOTES],
             "those left out take no room"
         );
+    }
+
+    #[test]
+    fn of_what_mail_told_was_bought_the_lookout_judges_by_what_the_items_speak_of() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-profile-bought");
+        let app = testing::app(dir.path());
+        let add = |title: &str, source: &str| {
+            let mut patch = records::Patch::titled(title);
+            patch.source = source.into();
+            app.records
+                .add(crate::notebook::Writer::Secretary, records::HOLDINGS, patch)
+                .unwrap();
+        };
+        add("自分で書いた鍵盤", "");
+        add("TP-Link Archer AX73", purchases::SOURCE);
+        add("暗号の本", purchases::SOURCE);
+
+        let item = Item {
+            title: "TP-Link 製ルーターに脆弱性".into(),
+            body: String::new(),
+        };
+        let judged_by = relevance_profile_for(&app, &[item]);
+
+        assert!(judged_by.contains("Archer"), "{judged_by}");
+        assert!(judged_by.contains("自分で書いた鍵盤"), "{judged_by}");
+        assert!(!judged_by.contains("暗号の本"), "{judged_by}");
+        assert!(relevance_profile(&app).contains("暗号の本"));
     }
 
     #[test]

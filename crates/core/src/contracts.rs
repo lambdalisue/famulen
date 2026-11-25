@@ -20,13 +20,16 @@ use crate::records::{
     CONTRACTS, Entry, Field, HOLDINGS, Held, Patch, Record, Records, SectionContent, sections,
 };
 use crate::store::Store;
+use crate::words::Said;
 
 /// The most one mail may tell of.
 const TOLD: usize = 10;
 /// How many of the known contracts, and of the things a mail may be about,
 /// the model is shown.
-const KNOWN: usize = 80;
-const COVERED: usize = 40;
+const KNOWN: usize = 40;
+const COVERED: usize = 15;
+/// How many of the plans and numbers a contract had before the model is shown.
+const LAST: usize = 3;
 /// How long a contract is taken to go on after a mail that says it does: two
 /// months where it is paid by the month, or where that is not known, and a
 /// year and some where it is paid by the year.
@@ -53,7 +56,7 @@ You read a mail sent to the owner of a personal secretary, and say which contrac
 A contract goes on over time: a subscription, a licence, a cloud, AI or developer service, a domain or server, a phone or internet line, electricity or gas, \
 insurance, a gym, a newspaper, a card or membership with a fee, an extended warranty, instalments.
 Only what the owner, or the company they act for, holds or pays for. Not a thing bought once, a free account, leave given to take payments (such as a PayPal billing agreement, 請求処理規約), points or coupons, an offer or advertisement, what others pay for, \
-or an invoice the owner sends to a customer. Answer none when it tells of none. For each:
+or an invoice the owner sends to a customer. Answer none when it tells of none. For each, leaving out what is empty or unknown:
 - event: signed (it was made, or will start), billed (a bill, a receipt or a renewal that was charged), notice (it goes on and something of it is told, such as a renewal or price to come), \
 cancelled (it was cancelled, though it may run on to a day) or ended (it ran out, was closed or suspended). A payment that failed is neither billed nor ended unless the service stopped.
 - on: the day it happened; starts: the day it starts; ends: its last day; renews: the day it is next renewed. Each YYYY-MM-DD, empty when the mail does not say.
@@ -268,7 +271,7 @@ fn schema() -> Value {
     json!({
         "type": "object",
         "properties": { "contracts": { "type": "array", "items": {
-            "type": "object", "properties": properties, "required": names, "additionalProperties": false
+            "type": "object", "properties": properties, "required": ["event", "on", "name", "provider"], "additionalProperties": false
         } } },
         "required": ["contracts"],
         "additionalProperties": false
@@ -451,7 +454,7 @@ pub(crate) async fn read(
     let prompt = prompt(&into, text, &covered).map_err(Stopped::Mail)?;
     let answer = app
         .models
-        .complete(Role::Lookout, app.tz(), SYSTEM, &prompt, Some(&schema()))
+        .complete_alone(Role::Lookout, app.tz(), SYSTEM, &prompt, Some(&schema()))
         .await
         .map_err(Stopped::Away)?
         .json
@@ -462,22 +465,20 @@ pub(crate) async fn read(
 
 /// The owner's things a mail names, by id and title.
 fn covered(records: &Records, text: &str) -> anyhow::Result<Vec<(String, String)>> {
-    let text = text.to_lowercase();
-    let mut things: Vec<(String, String)> = records
+    let said = Said::new(text);
+    let mut things: Vec<(usize, String, String)> = records
         .list(HOLDINGS)?
         .iter()
-        .map(|h| (h.id.clone(), h.title()))
-        .filter(|(_, title)| {
-            title
-                .to_lowercase()
-                .split(|c: char| !c.is_alphanumeric())
-                .any(|word| word.chars().count() >= 3 && text.contains(word))
-        })
+        .map(|h| (said.words_of(&h.title()), h.id.clone(), h.title()))
+        .filter(|(shared, _, _)| *shared > 0)
         .collect();
-    // The newest first.
-    things.sort_by(|a, b| b.0.cmp(&a.0));
+    // The most named first, then the newest.
+    things.sort_by(|a, b| (b.0, &b.1).cmp(&(a.0, &a.1)));
     things.truncate(COVERED);
-    Ok(things)
+    Ok(things
+        .into_iter()
+        .map(|(_, id, title)| (id, title))
+        .collect())
 }
 
 fn prompt(into: &Target<'_>, text: &str, covered: &[(String, String)]) -> anyhow::Result<String> {
@@ -496,6 +497,12 @@ fn prompt(into: &Target<'_>, text: &str, covered: &[(String, String)]) -> anyhow
         !(named(&k.names) || named(&k.providers))
     });
     known.truncate(KNOWN);
+    // What it has now stands first. One told of for years has had many more.
+    let last = |of: &[String]| {
+        let (now, had) = of.split_at(of.len().min(1));
+        let had = &had[had.len().saturating_sub(LAST)..];
+        [now, had].concat().join(" / ")
+    };
     let contracts: Vec<String> = known
         .iter()
         .map(|k| {
@@ -504,8 +511,8 @@ fn prompt(into: &Target<'_>, text: &str, covered: &[(String, String)]) -> anyhow
                 k.id,
                 k.names.join(" / "),
                 k.providers.join(" / "),
-                k.plans.join(" / "),
-                k.numbers.join(" / ")
+                last(&k.plans),
+                last(&k.numbers)
             )
         })
         .collect();

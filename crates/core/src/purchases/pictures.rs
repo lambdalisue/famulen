@@ -480,7 +480,7 @@ async fn look_through(
         let prompt = prompt(things, &candidates);
         let told = app
             .models
-            .complete(Role::Lookout, app.tz(), SYSTEM, &prompt, Some(&schema()))
+            .complete_alone(Role::Lookout, app.tz(), SYSTEM, &prompt, Some(&schema()))
             .await;
         let told = match told {
             Ok(told) => told.json.unwrap_or_default(),

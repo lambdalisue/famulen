@@ -31,7 +31,7 @@ pub(super) async fn complete(
     if let Some(schema) = schema {
         body["response_format"] = json!({
             "type": "json_schema",
-            "json_schema": { "name": "output", "strict": true, "schema": schema },
+            "json_schema": { "name": "output", "strict": true, "schema": strict(schema) },
         });
     }
 
@@ -86,6 +86,27 @@ pub(super) async fn complete(
         text,
         json,
     })
+}
+
+/// A schema as strict servers take it, which leave no property out.
+fn strict(schema: &Value) -> Value {
+    match schema {
+        Value::Array(list) => list.iter().map(strict).collect(),
+        Value::Object(map) => {
+            let mut map: serde_json::Map<String, Value> = map
+                .iter()
+                .map(|(key, value)| (key.clone(), strict(value)))
+                .collect();
+            if map.get("type").is_some_and(|t| t == "object")
+                && let Some(Value::Object(properties)) = map.get("properties")
+            {
+                let names = properties.keys().cloned().collect::<Vec<_>>();
+                map.insert("required".into(), names.into());
+            }
+            Value::Object(map)
+        }
+        other => other.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -271,6 +292,17 @@ mod tests {
                 "json_schema": { "name": "output", "strict": true, "schema": schema },
             })
         );
+    }
+
+    #[test]
+    fn every_property_is_required_of_a_strict_schema() {
+        let item = json!({ "type": "object", "properties": { "a": {}, "required": {} }, "required": ["a"] });
+        let schema = json!({ "type": "object", "properties": { "items": { "type": "array", "items": item } } });
+        let told = strict(&schema);
+        assert_eq!(told["required"], json!(["items"]));
+        let item = &told["properties"]["items"]["items"];
+        assert_eq!(item["required"], json!(["a", "required"]));
+        assert_eq!(item["properties"], json!({ "a": {}, "required": {} }));
     }
 
     #[tokio::test]

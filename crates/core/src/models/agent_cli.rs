@@ -7,6 +7,17 @@ use tokio::{io::AsyncWriteExt, process::Command};
 use super::{Cli, Completion, ModelSpec, codex, json_in_text};
 use crate::claude::protocol::turn_usage;
 
+/// How the agent CLI is asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Manner {
+    /// With its own prompt before what it is told.
+    Agent,
+    /// With what it is told in place of its own prompt.
+    Alone,
+    /// Alone, and without thinking.
+    Brief,
+}
+
 /// The arguments for one turn of Claude Code in print mode.
 ///
 /// No tools, no MCP servers and no setting sources: the call is a plain
@@ -16,8 +27,9 @@ fn args(
     effort: Option<&str>,
     system: &str,
     schema: Option<&Value>,
-    brief: bool,
+    manner: Manner,
 ) -> Vec<String> {
+    let brief = manner == Manner::Brief;
     let mut args: Vec<String> = [
         "--print",
         "--output-format",
@@ -40,9 +52,9 @@ fn args(
         args.push("--effort".into());
         args.push(effort.into());
     }
-    if brief {
-        // Claude Code's own prompt is most of a call's tokens and time; a
-        // one-question judgement needs none of it.
+    if manner != Manner::Agent {
+        // Claude Code's own prompt is most of a short call's tokens and time,
+        // and nothing it says is of use without tools.
         args.extend(
             [
                 "--system-prompt",
@@ -71,7 +83,18 @@ pub(super) async fn complete(
     prompt: &str,
     schema: Option<&Value>,
 ) -> Result<Completion> {
-    run(spec, effort, system, prompt, schema, false).await
+    run(spec, effort, system, prompt, schema, Manner::Agent).await
+}
+
+/// [`complete`] with `system` in place of Claude Code's own prompt.
+pub(super) async fn complete_alone(
+    spec: &ModelSpec,
+    effort: Option<&str>,
+    system: &str,
+    prompt: &str,
+    schema: Option<&Value>,
+) -> Result<Completion> {
+    run(spec, effort, system, prompt, schema, Manner::Alone).await
 }
 
 /// [`complete`] for a short judgement: `system` replaces Claude Code's own
@@ -84,7 +107,7 @@ pub(super) async fn complete_brief(
     prompt: &str,
     schema: Option<&Value>,
 ) -> Result<Completion> {
-    run(spec, effort, system, prompt, schema, true).await
+    run(spec, effort, system, prompt, schema, Manner::Brief).await
 }
 
 /// Runs `command` to its end with `input` on its stdin, without Famulen's own
@@ -112,14 +135,15 @@ async fn run(
     system: &str,
     prompt: &str,
     schema: Option<&Value>,
-    brief: bool,
+    manner: Manner,
 ) -> Result<Completion> {
+    let brief = manner == Manner::Brief;
     if spec.cli == Cli::Codex {
         return codex::complete(spec, effort, system, prompt, schema, brief).await;
     }
     let executable = spec.executable();
     let mut command = Command::new(executable);
-    command.args(args(spec, effort, system, schema, brief));
+    command.args(args(spec, effort, system, schema, manner));
     if brief {
         command.env("MAX_THINKING_TOKENS", "0");
     }
@@ -250,6 +274,23 @@ mod tests {
         assert_eq!(after("--tools").as_deref(), Some(""));
         assert!(cli.args().contains(&"--strict-mcp-config".into()));
         assert_eq!(cli.thinking(), "0");
+    }
+
+    #[tokio::test]
+    async fn a_call_alone_replaces_the_system_prompt_and_thinks_as_the_role_does() {
+        let cli = answering("alone");
+
+        complete_alone(&spec(&cli), Some("medium"), "read it", "hello", None)
+            .await
+            .unwrap();
+
+        let after = |flag| cli.value_after(flag);
+        assert_eq!(after("--system-prompt").as_deref(), Some("read it"));
+        assert_eq!(after("--append-system-prompt"), None);
+        assert_eq!(after("--effort").as_deref(), Some("medium"));
+        assert_eq!(after("--tools").as_deref(), Some(""));
+        assert!(cli.args().contains(&"--strict-mcp-config".into()));
+        assert_eq!(cli.thinking(), "");
     }
 
     #[tokio::test]
