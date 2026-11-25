@@ -891,15 +891,12 @@ async fn processes_in(ground: &dyn Ground, path: &Path) -> anyhow::Result<Vec<St
         of.is_ascii() && !of.contains(|c: char| c.is_control() || c == '\\'),
         "its path cannot be looked for"
     );
-    let own = std::process::id().to_string();
-    let listed = ground
-        .run(Path::new("/"), "ps", &["-axo", "pid=,uid="])
-        .await?;
-    anyhow::ensure!(listed.ok, "ps: {}", listed.why());
+    let before = running(ground).await?;
     let ran = ground
         .run(Path::new("/"), "lsof", &["-nPw", "-F", "pn"])
         .await?;
     anyhow::ensure!(ran.ok, "lsof: {}", ran.why());
+    let after = running(ground).await?;
     let mut pid = "";
     let mut all = BTreeSet::new();
     let mut using = Vec::new();
@@ -915,27 +912,49 @@ async fn processes_in(ground: &dyn Ground, path: &Path) -> anyhow::Result<Vec<St
         }
     }
     // In a sandbox lsof passes over the processes of others without a word.
-    let running: HashMap<&str, &str> = listed
-        .out
-        .lines()
-        .filter_map(|l| l.trim().split_once(char::is_whitespace))
-        .map(|(pid, uid)| (pid, uid.trim()))
+    // One that ran all the while is one it had to see.
+    let unseen: Vec<&str> = before
+        .intersection(&after)
+        .map(String::as_str)
+        .filter(|pid| !all.contains(pid))
         .collect();
-    let uid = running
-        .get(own.as_str())
-        .context("ps does not see the processes of this machine")?;
     anyhow::ensure!(
-        running.contains_key("1"),
-        "ps does not see the processes of this machine"
-    );
-    let mine: Vec<_> = running.iter().filter(|(_, u)| *u == uid).collect();
-    let seen = mine.iter().filter(|(pid, _)| all.contains(*pid)).count();
-    // Some end between the one listing and the other.
-    anyhow::ensure!(
-        all.contains(own.as_str()) && seen * 10 >= mine.len() * 8,
-        "lsof does not see the processes of this machine"
+        unseen.is_empty(),
+        "lsof does not see the processes of this machine ({})",
+        unseen.into_iter().take(5).collect::<Vec<_>>().join(", ")
     );
     Ok(using)
+}
+
+/// The processes of whoever runs Famulen.
+async fn running(ground: &dyn Ground) -> anyhow::Result<BTreeSet<String>> {
+    let listed = ground
+        .run(Path::new("/"), "ps", &["-axo", "pid=,uid=,stat="])
+        .await?;
+    anyhow::ensure!(listed.ok, "ps: {}", listed.why());
+    let all: Vec<(&str, &str, &str)> = listed
+        .out
+        .lines()
+        .filter_map(|l| {
+            let mut words = l.split_whitespace();
+            Some((words.next()?, words.next()?, words.next()?))
+        })
+        .collect();
+    let own = std::process::id().to_string();
+    let uid = all
+        .iter()
+        .find(|(pid, ..)| *pid == own)
+        .map(|(_, uid, _)| *uid);
+    anyhow::ensure!(
+        uid.is_some() && all.iter().any(|(pid, ..)| *pid == "1"),
+        "ps does not see the processes of this machine"
+    );
+    Ok(all
+        .into_iter()
+        // One that is over, or stuck on its way out, holds no file.
+        .filter(|(_, of, stat)| Some(*of) == uid && !stat.contains(['Z', 'E']))
+        .map(|(pid, ..)| pid.to_owned())
+        .collect())
 }
 
 fn vm_names(listed: &str) -> anyhow::Result<Vec<String>> {
