@@ -1,0 +1,69 @@
+/* Threads: a head that says which, what is said, and where the next words go. */
+.conv { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chead { flex: none; display: flex; align-items: center; gap: var(--s2); min-height: 56px; padding: 6px var(--s3) 6px var(--s4); border-bottom: 1px solid var(--line); background: var(--surface); }
+.chead > .grow > b { display: block; font-size: var(--t-base); font-weight: 600; line-height: 1.4; }
+.chead > .btn { flex: none; }
+.back-list { padding: 0 6px; gap: 4px; margin-left: -8px; }
+.about > summary { min-height: 22px; gap: 8px; }
+.about[open] > .kv { position: absolute; z-index: 6; left: 12px; right: 12px; margin-top: 6px; padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow-3); }
+.tlist { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s4); display: flex; flex-direction: column; gap: var(--s4); }
+.tlist > * { flex-shrink: 0; }
+.th .row { gap: var(--s2); }
+.th.unread .t { font-weight: 700; }
+.th.unread [data-last] { color: var(--text-2); }
+.count.new { background: var(--accent); color: var(--on-accent); }
+.item.th .sub:empty { display: none; }
+.fresh { display: flex; align-items: center; gap: var(--s3); font-size: var(--t-xs); font-weight: 600; color: var(--accent-text); }
+.fresh::before, .fresh::after { content: ""; flex: 1; border-top: 1px solid var(--accent-line); }
+.result > header { display: flex; align-items: center; gap: var(--s2); padding: 10px 14px; border-bottom: 1px solid var(--line-soft); color: var(--ok); font-size: var(--t-xs); }
+.result > header:has([href="#i-alert-triangle"]) { color: var(--danger); }
+.result > .in { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: var(--s2); }
+.who > .gap { flex: 1; }
+.quote-it { min-height: 26px; align-self: center; opacity: .75; }
+.newtalk { margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: var(--s3); text-align: center; }
+.newtalk .list { width: 100%; text-align: left; }
+.dest { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.dest .segs { flex: none; padding: 2px; }
+.dest .seg { min-height: 28px; padding: 0 10px; font-size: var(--t-xs); }
+.dest-name { font-size: var(--t-sm); font-weight: 500; }
+.dest-chip { flex: 0 1 auto; min-width: 0; background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text); font-weight: 600; }
+.arrival { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 var(--s4) var(--s2); padding: 8px 8px 8px 12px; border: 1px solid var(--ok-line); border-radius: var(--r); background: var(--ok-soft); color: var(--ok); }
+.arrival .grow { color: var(--text); }
+.two { flex: 1; min-height: 0; display: grid; grid-template: minmax(0, 1fr) / 264px minmax(0, 1fr); }
+.two > div { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.side-list { border-right: 1px solid var(--line); background: var(--bg); }
+.side-list .tlist { padding: var(--s3); }
+.side-list .th .sub { gap: 2px 6px; }
+:root[data-conv="side"] .shell { grid-template-columns: var(--chat, clamp(580px, 46%, 780px)) minmax(0, 1fr); }
+.talk.stream { gap: var(--s3); }
+.talk { position: relative; }
+.tcard { position: relative; }
+.tcard.on { border-color: var(--accent); }
+.tc-head { position: relative; display: flex; align-items: center; gap: var(--s2); padding: 10px 14px; }
+.tc-body { padding: var(--s3) 14px 14px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: var(--s4); }
+.tc-foot { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: var(--s4); align-items: start; }
+.tryframe { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; }
+.tryframe.wide { grid-column: 1 / -1; }
+.tryframe > .fr { display: flex; flex-direction: column; height: 520px; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--chat-bg); }
+.shell .tryframe .talk { display: flex; padding: var(--s4); }
+/* Not room for three columns: the list gives way, as on a phone. */
+@container app (max-width: 1160px) {
+  :root[data-conv="side"] .shell { grid-template-columns: clamp(340px, 34%, 460px) minmax(0, 1fr); }
+  .conv .two { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+  .conv .two:not(.at-list) > .side-list, .conv .two.at-list > .side-talk { display: none; }
+  .conv .two .back-list { display: inline-flex !important; }
+}
+@container app (max-width: 700px) {
+  .shell:not(.chat-open) .conv, .shell:not(.chat-open) .arrival { display: none; }
+  .chat-open .conv { display: flex; }
+  .chead { padding-inline: var(--s2); }
+  .peek { min-height: 48px; }
+  .peek b { font-weight: 600; }
+  .chat-open .composer .ctx { display: flex; flex: 0 0 100%; order: 0; padding: 2px 6px 0; }
+  .composer .destbox { order: -1; flex: 0 0 100%; min-width: 0; padding: 2px 4px 0; }
+  .dest .seg { min-height: 44px; }
+  .shell:not(.chat-open) .composer .destbox { display: none; }
+  .tryframe .two { grid-template-columns: minmax(0, 1fr); } .tryframe .two > .side-list { display: none; }
+  :root[data-conv="side"] .shell { grid-template-columns: minmax(0, 1fr); }
+}

@@ -52,7 +52,7 @@ holds one intent, with its spec and tests, and is merged once CI is green.
 | `frontend/` | the console: a SolidStart app, its Playwright tests in `e2e/` |
 | `Dockerfile`, `compose.yaml` | the containers the owner runs |
 | `contrib/` | files the owner copies when setting Famulen up: the Slack app manifest, an example config, a systemd unit |
-| `docs/` | concept, ADRs, specs, and how to register the apps (`setup/`) |
+| `docs/` | concept, ADRs, specs, how to register the apps (`setup/`), and the proposed look of the console (`design-poc/`) |
 | `brand/` | the logo: the art of both secretaries, the files derived from it and how to use them |
 | `scripts/` | scripts the release and `just ci` run |
 
@@ -98,7 +98,7 @@ Scoped Commits:
 | `concept` | `docs/concept.md` |
 | `adr` | `docs/adr/` |
 | `spec` | `docs/spec/` |
-| `docs` | `README.md`, `AGENTS.md`, `docs/setup/` |
+| `docs` | `README.md`, `AGENTS.md`, `docs/setup/`, `docs/design-poc/` |
 | `ci` | `.github/` |
 | `nix` | `flake.nix`, `flake.lock` |
 | `build` | `justfile`, `Cargo.toml`, `rust-toolchain.toml`, `scripts/` |

@@ -1,0 +1,137 @@
+/*
+ * Every color, size and shadow the console is drawn with. A color names both
+ * themes at once (light, dark); `color-scheme` picks which one, so the system's
+ * choice needs no script and a manual choice only sets data-theme.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Ground and surfaces, from the back to the front. */
+  --bg: light-dark(#F3F4F7, #0D0F16);
+  --chat-bg: light-dark(#FAFAFC, #10131B);
+  --surface: light-dark(#FFFFFF, #171A24);
+  --sunken: light-dark(#F0F1F5, #11141C);
+  --raised: light-dark(#FFFFFF, #1F2330);
+  --hover: light-dark(#F5F6F9, #1D212D);
+  --pressed: light-dark(#E7E9EF, #282D3B);
+
+  /* Text. Night ink on light, the brand's cream on dark. */
+  --text: light-dark(#171A25, #ECE7DC);
+  --text-2: light-dark(#434958, #C6C4BF);
+  --muted: light-dark(#5B6172, #A0A2AC);
+
+  /* Lines: between rows, around a card, around a control. */
+  --line-soft: light-dark(#ECEEF2, #222634);
+  --line: light-dark(#DFE2E9, #2B3040);
+  --control: light-dark(#7C8292, #767D90);
+
+  /* Cream is the secretary's: what they wrote up, and what they ask. */
+  --aide: light-dark(#FFFAF0, #201E1B);
+  --aide-line: light-dark(#EADFC8, #3D382F);
+  --aide-ink: light-dark(#665433, #D9C8A4);
+
+  /* What a state means, never only by color. */
+  --info: light-dark(#1B5BA7, #8DBBF2);
+  --info-soft: light-dark(#E9F1FB, #16263B);
+  --info-line: light-dark(#BFD6F1, #2A4568);
+  --ok: light-dark(#23703C, #86CF9B);
+  --ok-soft: light-dark(#E8F4EB, #152B1E);
+  --ok-line: light-dark(#BDDDC6, #28503A);
+  --warn: light-dark(#85500A, #EBB868);
+  --warn-soft: light-dark(#FDF3E0, #30240F);
+  --warn-line: light-dark(#EBCF9D, #5A431C);
+  --danger: light-dark(#AC2B26, #F2998F);
+  --danger-soft: light-dark(#FCEDEB, #381B1B);
+  --danger-line: light-dark(#F0C6C1, #683130);
+  --danger-solid: light-dark(#B3312B, #F2998F);
+  --on-danger: light-dark(#FFFFFF, #2E0B09);
+
+  /* Chart series. */
+  --c1: light-dark(#2E6FC0, #6EA5E8);
+  --c2: light-dark(#C8622B, #E2915E);
+  --c3: light-dark(#2B8A63, #62BD95);
+  --c4: light-dark(#A68416, #CDAF4C);
+
+  --shade: light-dark(rgb(13 15 22 / .38), rgb(0 0 0 / .6));
+  --shadow-1: 0 1px 2px light-dark(rgb(16 20 36 / .07), rgb(0 0 0 / .4));
+  --shadow-2: 0 2px 4px light-dark(rgb(16 20 36 / .05), rgb(0 0 0 / .3)), 0 8px 20px light-dark(rgb(16 20 36 / .09), rgb(0 0 0 / .4));
+  --shadow-3: 0 4px 8px light-dark(rgb(16 20 36 / .06), rgb(0 0 0 / .3)), 0 20px 48px light-dark(rgb(16 20 36 / .18), rgb(0 0 0 / .55));
+
+  /* Type. The system's own Japanese face; nothing is downloaded. */
+  --sans: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP", sans-serif;
+  --mincho: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono", monospace;
+  --heading: var(--sans);
+  --heading-weight: 650;
+  --t-xs: .75rem;
+  --t-sm: .8125rem;
+  --t-base: .875rem;
+  --t-md: .9375rem;
+  --t-lg: 1.0625rem;
+  --t-xl: 1.375rem;
+  --t-2xl: 1.625rem;
+  --lh-ui: 1.5;
+  --lh-prose: 1.8;
+  --measure: 40em;
+
+  /* Room, in steps of four. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* Corners, all from one size: a control's. */
+  --r: 8px;
+  --r-sm: calc(var(--r) * .75);
+  --r-lg: calc(var(--r) * 1.5);
+  --r-full: 999px;
+
+  /* Density. */
+  --ctl: 36px;
+  --ctl-sm: 32px;
+  --row: 12px;
+  --hit: 44px;
+  --fast: 120ms ease-out;
+  --slow: 200ms cubic-bezier(.2, .8, .2, 1);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* The accent: what can be pressed, what is picked. Bottle green unless chosen. */
+:root, :root[data-accent="green"] {
+  --accent: light-dark(#14665C, #63C2B1);
+  --accent-hover: light-dark(#0E5249, #7BD0C1);
+  --on-accent: light-dark(#FFFFFF, #06231E);
+  --accent-text: light-dark(#0F5F55, #7BD0C1);
+  --accent-soft: light-dark(#E6F2EF, #12302C);
+  --accent-line: light-dark(#B4D5CE, #265049);
+}
+:root[data-accent="indigo"] {
+  --accent: light-dark(#35499A, #98A9F2);
+  --accent-hover: light-dark(#293A80, #ACBAF6);
+  --on-accent: light-dark(#FFFFFF, #0E1533);
+  --accent-text: light-dark(#31438F, #ACBAF6);
+  --accent-soft: light-dark(#ECEFFA, #1C2442);
+  --accent-line: light-dark(#C3CBEB, #36406F);
+}
+:root[data-accent="plum"] {
+  --accent: light-dark(#7A3560, #DB9DC2);
+  --accent-hover: light-dark(#632A4E, #E4B0CF);
+  --on-accent: light-dark(#FFFFFF, #2B0F20);
+  --accent-text: light-dark(#712F58, #E4B0CF);
+  --accent-soft: light-dark(#F8EDF4, #35202C);
+  --accent-line: light-dark(#E2C4D6, #5C384C);
+}
+
+/* The workgroup's own color marks where one is, and presses nothing. */
+:root { --wg: var(--accent); --wg-work: light-dark(#2766B8, #7FB2F0); --wg-home: light-dark(#B8511C, #EB9A68); }
+:root[data-wg="work"] { --wg: var(--wg-work); }
+:root[data-wg="home"] { --wg: var(--wg-home); }
+
+:root[data-radius="small"] { --r: 4px; }
+:root[data-radius="large"] { --r: 12px; }
+:root[data-density="compact"] { --ctl: 32px; --ctl-sm: 28px; --row: 8px; --t-base: .8125rem; --t-md: .875rem; --lh-prose: 1.7; }
+:root[data-density="roomy"] { --ctl: 40px; --ctl-sm: 36px; --row: 16px; --t-base: .9375rem; --t-md: 1rem; }
+:root[data-heading="mincho"] { --heading: var(--mincho); --heading-weight: 600; }
