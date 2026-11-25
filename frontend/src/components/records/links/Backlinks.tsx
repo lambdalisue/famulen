@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 import { memoryHref } from "~/lib/memory";
 import { hrefOf, KIND_NAMES, nameOf, plainText, type Rec, RELATED } from "~/lib/records";
-import { Tag } from "~/components/ui";
+import { List, ListRow } from "~/components/ui";
 
 /** What a link to the record from a field says the other is to it. */
 const FROM: { [from: string]: string } = {
@@ -45,34 +45,20 @@ export default function Backlinks(props: { record: Rec }) {
           {([name, links]) => (
             <div class="rec-links">
               <span class="sub">{name}</span>
-              <span class="chips-line">
-                <For each={links}>
-                  {(l) => (
-                    <Show when={hrefOf(l.kind, l.id)} fallback={<Tag>{l.title}</Tag>}>
-                      {(href) => (
-                        <a class="tag link" href={href()}>
-                          {l.title}
-                        </a>
-                      )}
-                    </Show>
-                  )}
-                </For>
-              </span>
+              <List label={name}>
+                <For each={links}>{(l) => <ListRow href={hrefOf(l.kind, l.id)} title={l.title} />}</For>
+              </List>
             </div>
           )}
         </For>
         <Show when={memories().length > 0}>
           <div class="rec-links">
             <span class="sub">触れている記憶</span>
-            <span class="chips-line">
+            <List label="触れている記憶">
               <For each={memories()}>
-                {(m) => (
-                  <a class="tag link" href={memoryHref(`memory/${m.file}`) ?? "/memory"}>
-                    {plainText(m.title)}
-                  </a>
-                )}
+                {(m) => <ListRow href={memoryHref(`memory/${m.file}`) ?? "/memory"} title={plainText(m.title)} />}
               </For>
-            </span>
+            </List>
           </div>
         </Show>
       </section>
