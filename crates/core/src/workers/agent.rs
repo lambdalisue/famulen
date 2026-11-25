@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
@@ -18,14 +18,17 @@ use tokio::task::JoinSet;
 use super::WORKER;
 use super::bounds::Bounds;
 use super::runs::Run;
+use crate::agents::claude::Claude;
+use crate::agents::{
+    Adapter, Answer, Ask, Body, By, Capabilities, Capability, Counted, Fence, Question, Sandbox,
+    Work,
+};
 use crate::app::App;
-use crate::claude::protocol::{self, ControlRequest, Inbound};
-use crate::claude::session::sandbox_settings;
 use crate::disclosure;
 use crate::gateway::NEEDS_OWNER;
 use crate::hub::failed;
 use crate::models::{ModelSpec, Models, Role, Usage};
-use crate::permissions::{Caller, DELEGATE_INSTEAD, Decision, LAUNCHERS};
+use crate::permissions::{DELEGATE_INSTEAD, Decision, LAUNCHERS};
 
 /// How long one run may take.
 const TIME_LIMIT: Duration = Duration::from_secs(2 * 60 * 60);
@@ -33,6 +36,22 @@ const TIME_LIMIT: Duration = Duration::from_secs(2 * 60 * 60);
 const RESULT_CHARS: usize = 20_000;
 /// Where in its directory a worker finds the files it was handed.
 const HANDED: &str = "handed";
+
+static ADAPTER: Claude = Claude;
+
+/// What an agent must be able to do to be a worker: be asked of every call,
+/// and kept in its shell from what is sealed.
+fn needs() -> Capabilities {
+    Capabilities {
+        can: [
+            Capability::AsksPermission,
+            Capability::Servers,
+            Capability::Usage,
+        ]
+        .into(),
+        sandbox: Sandbox::Shell,
+    }
+}
 
 const WORKER_PROMPT: &str = "\
 You are a worker of Famulen. You were started for one piece of work, described in the one message you are given, and you are gone once it is done. \
@@ -67,60 +86,6 @@ fn model(app: &App) -> anyhow::Result<(String, Option<String>, Option<String>, M
         .unwrap_or(effective.claude.bin);
     let model = Some(m.spec.model.clone()).filter(|m| !m.is_empty());
     Ok((bin, model, assigned.effort, m.spec))
-}
-
-/// The arguments a worker's Claude Code is started with. The directory of the
-/// work is not given as one of its own, where it would read without asking
-/// Famulen.
-fn args(
-    bounds: &Bounds,
-    sealed: &[PathBuf],
-    runs: &Path,
-    workdir: &Path,
-    model: Option<&str>,
-    effort: Option<&str>,
-) -> Vec<String> {
-    let mut servers = serde_json::Map::new();
-    for id in bounds.connections() {
-        servers.insert(id.clone(), json!({ "type": "sdk", "name": id }));
-    }
-    let mut args: Vec<String> = [
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--input-format",
-        "stream-json",
-        "--permission-prompt-tool",
-        "stdio",
-        "--permission-mode",
-        "manual",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--disable-slash-commands",
-    ]
-    .map(String::from)
-    .into();
-    let mut put = |flag: &str, value: String| args.extend([flag.to_owned(), value]);
-    put("--mcp-config", json!({ "mcpServers": servers }).to_string());
-    put("--tools", bounds.builtins().join(","));
-    // The directories of other runs are kept from this one's shell.
-    let mut settings = sandbox_settings(sealed, &[]);
-    let files = &mut settings["sandbox"]["filesystem"];
-    if let Some(denied) = files["denyRead"].as_array_mut() {
-        denied.push(runs.display().to_string().into());
-    }
-    files["allowRead"] = json!([workdir]);
-    put("--settings", settings.to_string());
-    put("--append-system-prompt", WORKER_PROMPT.to_owned());
-    put("--disallowedTools", LAUNCHERS.join(","));
-    if let Some(model) = model {
-        put("--model", model.to_owned());
-    }
-    if let Some(effort) = effort {
-        put("--effort", effort.to_owned());
-    }
-    args
 }
 
 /// Copy the notebook files an order names into `workdir`, so that they can
@@ -213,7 +178,9 @@ pub(super) struct Job {
 /// The process that does a job, and what it used.
 struct Started {
     process: Process,
-    counted: Counted,
+    /// The lines its stdin begins with.
+    input: Vec<String>,
+    tally: Tally,
 }
 
 impl Job {
@@ -252,7 +219,8 @@ impl Job {
     /// Start its process, so that one that cannot be started is tried again.
     fn start(&self) -> anyhow::Result<Started> {
         let (bin, model, effort, spec) = model(&self.app)?;
-        let mut command = Command::new(&bin);
+        let launch = ADAPTER.launch(&self.as_work(Some(bin), model, effort), None)?;
+        let mut command = Command::new(&launch.program);
         crate::config::hide_secrets(&mut command);
         // Credentials of a session Famulen itself was started inside are not the
         // worker's.
@@ -262,24 +230,52 @@ impl Job {
             }
         }
         command
-            .args(args(
-                &self.bounds,
-                &self.sealed,
-                &self.app.workers.dir,
-                &self.workdir.0,
-                model.as_deref(),
-                effort.as_deref(),
-            ))
+            .args(&launch.args)
+            .envs(&launch.env)
             .current_dir(&self.workdir.0)
-            // The connectors of the account it is logged in with would otherwise
-            // join the tools, outside the gateway.
-            .env("ENABLE_CLAUDEAI_MCP_SERVERS", "false")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        let process = Process::start(command).with_context(|| format!("could not start {bin}"))?;
-        let counted = Counted::begin(self.app.models.clone(), spec)?;
-        Ok(Started { process, counted })
+        let process = Process::start(command)
+            .with_context(|| format!("could not start {}", launch.program))?;
+        let tally = Tally::begin(self.app.models.clone(), spec)?;
+        Ok(Started {
+            process,
+            input: launch.input,
+            tally,
+        })
+    }
+
+    fn as_work(
+        &self,
+        program: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Work {
+        Work {
+            program,
+            model,
+            effort,
+            instructions: WORKER_PROMPT.to_owned(),
+            message: self.message.clone(),
+            tools: self
+                .bounds
+                .builtins()
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            withheld: LAUNCHERS.iter().map(|t| (*t).to_owned()).collect(),
+            servers: self.bounds.connections(),
+            workdir: self.workdir.0.clone(),
+            fence: Fence {
+                sealed: self.sealed.clone(),
+                // The directories of other runs are kept from this one's shell.
+                unread: vec![self.app.workers.dir.clone()],
+                readable: vec![self.workdir.0.clone()],
+            },
+            needs: needs(),
+            parts: false,
+        }
     }
 
     /// Do the work. Dropping the future ends the process.
@@ -307,7 +303,7 @@ impl Job {
         finish
     }
 
-    async fn permit(&self, request_id: &str, tool: &str, input: &Value) -> Value {
+    async fn permit(&self, tool: &str, input: &Value) -> Answer {
         let refuse = self.bounds.refusal(tool, input);
         match self
             .app
@@ -315,18 +311,19 @@ impl Job {
             .decide_worker(tool, input, refuse)
             .await
         {
-            Ok(Decision::Allow) => protocol::allow_tool(request_id, input),
+            Ok(Decision::Allow) => Answer::Allow,
             Ok(Decision::Forbid(why)) => {
                 self.unasked_if(tool, &why);
-                protocol::deny_tool(request_id, &why)
+                Answer::Refuse { why }
             }
-            Ok(Decision::Held(_)) => protocol::deny_tool(request_id, NEEDS_OWNER),
+            Ok(Decision::Held(_)) => Answer::Refuse {
+                why: NEEDS_OWNER.to_owned(),
+            },
             Err(error) => {
                 tracing::warn!(%error, %tool, "could not decide a worker's call; refusing");
-                protocol::deny_tool(
-                    request_id,
-                    "famulen could not check this tool's permission.",
-                )
+                Answer::Refuse {
+                    why: "famulen could not check this tool's permission.".into(),
+                }
             }
         }
     }
@@ -439,14 +436,14 @@ impl Drop for Process {
 }
 
 /// What a worker used, counted as it goes: one cut off has used it too.
-struct Counted {
+struct Tally {
     models: Models,
     spec: ModelSpec,
     /// Input and output tokens of each of the model's messages.
     messages: HashMap<String, (u64, u64)>,
 }
 
-impl Counted {
+impl Tally {
     /// Count the run itself, before it has used anything.
     fn begin(models: Models, spec: ModelSpec) -> anyhow::Result<Self> {
         models.record(
@@ -478,33 +475,35 @@ impl Counted {
         }
     }
 
+    /// What one of the model's messages used so far, or the whole run.
+    fn used(&mut self, of: &Counted, input: u64, output: u64) {
+        match of {
+            Counted::Message(id) => self.message(id, input, output),
+            Counted::Turn => self.end(input, output),
+        }
+    }
+
     /// One of the model's messages, told of again as it grows.
-    fn message(&mut self, event: &Value) {
-        let message = &event["message"];
-        let Some(id) = message["id"].as_str() else {
-            return;
-        };
-        let usage = protocol::turn_usage(message);
-        let now = (
-            usage.input_tokens.unwrap_or(0),
-            usage.output_tokens.unwrap_or(0),
-        );
-        let before = self.messages.insert(id.to_owned(), now).unwrap_or_default();
+    fn message(&mut self, id: &str, input: u64, output: u64) {
+        let before = self
+            .messages
+            .insert(id.to_owned(), (input, output))
+            .unwrap_or_default();
         self.add(
-            now.0.saturating_sub(before.0),
-            now.1.saturating_sub(before.1),
+            input.saturating_sub(before.0),
+            output.saturating_sub(before.1),
         );
     }
 
     /// The whole run: what was not counted message by message.
-    fn end(&self, usage: &Usage) {
-        let (input, output) = self
+    fn end(&self, input: u64, output: u64) {
+        let counted = self
             .messages
             .values()
             .fold((0, 0), |(i, o), m| (i + m.0, o + m.1));
         self.add(
-            usage.input_tokens.unwrap_or(0).saturating_sub(input),
-            usage.output_tokens.unwrap_or(0).saturating_sub(output),
+            input.saturating_sub(counted.0),
+            output.saturating_sub(counted.1),
         );
     }
 }
@@ -513,17 +512,19 @@ async fn converse(job: Arc<Job>) -> anyhow::Result<Finish> {
     let started = job.started.lock().unwrap_or_else(|p| p.into_inner()).take();
     let Started {
         mut process,
-        mut counted,
+        input,
+        mut tally,
     } = started.context("it was started already")?;
     let child = process.0.as_mut().context("no process")?;
     let mut stdin = child.stdin.take().context("no stdin")?;
     let stdout = child.stdout.take().context("no stdout")?;
-    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
-    tx.send(protocol::initialize_request("famulen-init"))?;
-    tx.send(protocol::user_message(&job.message))?;
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    for line in input {
+        tx.send(line)?;
+    }
     let write = async {
-        while let Some(message) = rx.recv().await {
-            let line = format!("{message}\n");
+        while let Some(line) = rx.recv().await {
+            let line = format!("{line}\n");
             let written = async {
                 stdin.write_all(line.as_bytes()).await?;
                 stdin.flush().await
@@ -536,43 +537,45 @@ async fn converse(job: Arc<Job>) -> anyhow::Result<Finish> {
         std::future::pending::<()>().await
     };
     let read = async {
+        let mut codec = ADAPTER.codec();
+        let (answered_tx, mut answered) = mpsc::unbounded_channel::<(Question, Answer)>();
         let mut lines = BufReader::new(stdout).lines();
         // The calls being answered end with the run.
         let mut calls = JoinSet::new();
-        while let Some(line) = lines.next_line().await? {
+        loop {
             while calls.try_join_next().is_some() {}
-            match protocol::parse_line(&line) {
-                Ok(Inbound::Control {
-                    request_id,
-                    request,
-                }) => {
-                    calls.spawn(answer(job.clone(), tx.clone(), request_id, request));
+            let line = tokio::select! {
+                line = lines.next_line() => line?,
+                Some((question, answer)) = answered.recv() => {
+                    tx.send(ADAPTER.answer(&question, &answer)?)?;
+                    continue;
                 }
-                Ok(Inbound::Result {
-                    is_error,
-                    text,
-                    usage,
-                    ..
-                }) => {
-                    counted.end(&usage);
-                    return Ok(Finish {
-                        ok: !is_error,
-                        text: text.chars().take(RESULT_CHARS).collect(),
-                    });
+            };
+            let Some(line) = line else {
+                anyhow::bail!("its process ended without a result");
+            };
+            for body in codec.read(&line) {
+                if job.app.workers.sights.event(job.run, &body) {
+                    job.app.workers.poke();
                 }
-                Ok(Inbound::Other(event)) => {
-                    if job.app.workers.sights.event(job.run, &event) {
-                        job.app.workers.poke();
+                match body {
+                    Body::Asked { question } => {
+                        calls.spawn(answer(job.clone(), answered_tx.clone(), question));
                     }
-                    if event["type"] == "assistant" {
-                        counted.message(&event);
+                    Body::Used {
+                        of, input, output, ..
+                    } => tally.used(&of, input, output),
+                    Body::Warned { what } => tracing::debug!(run = job.run, %what, "a worker"),
+                    Body::TurnEnded { ok, text } => {
+                        return Ok(Finish {
+                            ok,
+                            text: text.chars().take(RESULT_CHARS).collect(),
+                        });
                     }
+                    _ => {}
                 }
-                Ok(_) => {}
-                Err(error) => tracing::debug!(%error, %line, "unreadable line from a worker"),
             }
         }
-        anyhow::bail!("its process ended without a result")
     };
     tokio::select! {
         finish = read => finish,
@@ -582,68 +585,28 @@ async fn converse(job: Arc<Job>) -> anyhow::Result<Finish> {
 
 async fn answer(
     job: Arc<Job>,
-    tx: mpsc::UnboundedSender<Value>,
-    request_id: String,
-    request: ControlRequest,
+    answered: mpsc::UnboundedSender<(Question, Answer)>,
+    question: Question,
 ) {
-    let response = match request {
-        ControlRequest::CanUseTool {
-            caller: Caller::Subagent,
-            ..
-        } => protocol::deny_tool(&request_id, DELEGATE_INSTEAD),
-        ControlRequest::CanUseTool {
-            tool_name, input, ..
-        } => job.permit(&request_id, &tool_name, &input).await,
-        ControlRequest::McpMessage {
-            server_name,
-            message,
-        } => protocol::mcp_response(&request_id, job.serve(&server_name, &message).await),
-        ControlRequest::Unknown { subtype } => {
-            protocol::control_error(&request_id, &format!("unsupported: {subtype}"))
-        }
+    let answer = match &question.ask {
+        Ask::Tool {
+            by: By::Subagent, ..
+        } => Answer::Refuse {
+            why: DELEGATE_INSTEAD.to_owned(),
+        },
+        Ask::Tool { tool, input, .. } => job.permit(tool, input).await,
+        Ask::Server { server, message } => Answer::Served {
+            response: job.serve(server, message).await,
+        },
+        Ask::Unknown { .. } => Answer::Unsupported,
     };
-    let _ = tx.send(response);
+    let _ = answered.send((question, answer));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::notebook::testing::TempDir;
-
-    #[test]
-    fn a_worker_is_started_with_nothing_but_what_it_was_handed() {
-        let tools = ["Read".to_owned(), "mcp__mail__search".to_owned()];
-        let sealed = [PathBuf::from("/data/notebook")];
-        let bounds = Bounds::new(&tools, Path::new("/w"), None, &sealed);
-        let args = args(
-            &bounds,
-            &sealed,
-            Path::new("/runs"),
-            Path::new("/w"),
-            Some("opus"),
-            None,
-        );
-        let after = |flag: &str| {
-            let at = args.iter().position(|a| a == flag).unwrap();
-            args[at + 1].clone()
-        };
-        assert_eq!(after("--tools"), "Read");
-        assert_eq!(after("--setting-sources"), "");
-        assert_eq!(after("--permission-mode"), "manual");
-        assert_eq!(after("--model"), "opus");
-        assert!(args.contains(&"--strict-mcp-config".to_owned()));
-        let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
-        assert_eq!(
-            servers["mcpServers"],
-            json!({ "mail": { "type": "sdk", "name": "mail" } })
-        );
-        let settings: Value = serde_json::from_str(&after("--settings")).unwrap();
-        let files = &settings["sandbox"]["filesystem"];
-        assert_eq!(files["denyRead"], json!(["/data/notebook", "/runs"]));
-        assert_eq!(files["allowRead"], json!(["/w"]));
-        assert!(after("--disallowedTools").contains("Task"));
-        assert_eq!(files["allowWrite"], json!([]));
-    }
 
     #[test]
     fn named_files_of_the_notebook_are_handed_over_and_nothing_else() {

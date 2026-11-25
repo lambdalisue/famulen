@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::agents::{Body, PlanStep};
+
 /// How many runs are kept, the newest.
 const MOST_RUNS: usize = 50;
 /// How many lines of one run are kept, the newest.
@@ -340,20 +342,6 @@ fn lines_of(session: &Value) -> Vec<Line> {
         .collect()
 }
 
-/// The plan an agent keeps with the tool for it.
-fn steps_of_todos(input: &Value) -> Vec<Step> {
-    each(input, "todos")
-        .enumerate()
-        .map(|(at, t)| Step {
-            id: at.to_string(),
-            title: text(t, "content"),
-            status: text(t, "status"),
-            weight: 1.0,
-            ..Step::default()
-        })
-        .collect()
-}
-
 /// The fields of a tool's input that say most of what a call does.
 const TELLING: &[&str] = &[
     "command",
@@ -377,42 +365,45 @@ fn called(name: &str, input: &Value) -> String {
 }
 
 impl Sights {
-    /// One event of an agent's stream. Whether it changed the plan: that alone
-    /// is worth telling at once, as what an agent writes changes all the time
+    /// One event of an agent. Whether it changed the plan: that alone is
+    /// worth telling at once, as what an agent writes changes all the time
     /// and every telling has each open console read everything again.
-    pub(super) fn event(&self, run: i64, event: &Value) -> bool {
-        let before = self.of(run).steps;
-        let content = &event["message"]["content"];
-        for block in content.as_array().into_iter().flatten() {
-            match block["type"].as_str().unwrap_or_default() {
-                "text" if event["type"] == "assistant" => {
-                    self.line(run, LineKind::Said, &text(block, "text"));
-                }
-                "tool_use" => {
-                    let (name, input) = (text(block, "name"), &block["input"]);
-                    if name == "TodoWrite" {
-                        self.plan(run, steps_of_todos(input));
-                    } else {
-                        self.line(run, LineKind::Called, &called(&name, input));
-                    }
-                }
-                "tool_result" => {
-                    let answer = match &block["content"] {
-                        Value::String(answer) => answer.clone(),
-                        parts => parts
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|p| p["text"].as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    };
-                    self.line(run, LineKind::Answered, &answer);
-                }
-                _ => {}
+    pub(super) fn event(&self, run: i64, event: &Body) -> bool {
+        match event {
+            Body::Said { text, .. } => self.line(run, LineKind::Said, text),
+            Body::ToolCalled { tool, input, .. } => {
+                self.line(run, LineKind::Called, &called(tool, input));
             }
+            Body::ToolAnswered { output, .. } => self.line(run, LineKind::Answered, output),
+            Body::Planned { steps } => {
+                let before = self.of(run).steps;
+                self.plan(run, steps.iter().cloned().map(Step::from).collect());
+                return self.of(run).steps != before;
+            }
+            _ => {}
         }
-        self.of(run).steps != before
+        false
+    }
+}
+
+impl From<PlanStep> for Step {
+    fn from(step: PlanStep) -> Self {
+        let PlanStep {
+            id,
+            parent,
+            title,
+            status,
+            weight,
+            note,
+        } = step;
+        Self {
+            id,
+            parent,
+            title,
+            status,
+            weight,
+            note,
+        }
     }
 }
 
@@ -421,6 +412,8 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::agents::Adapter as _;
+    use crate::agents::claude::Claude;
 
     fn session(reply: &str, steps: &[(&str, &str, &str, f64)]) -> Value {
         json!({
@@ -528,10 +521,12 @@ mod tests {
             ),
         ] {
             let plans = block["name"] == "TodoWrite";
-            let changed = sights.event(
-                1,
-                &json!({ "type": kind, "message": { "content": [block] } }),
-            );
+            let line = json!({ "type": kind, "message": { "content": [block] } }).to_string();
+            let changed = Claude
+                .codec()
+                .read(&line)
+                .iter()
+                .any(|event| sights.event(1, event));
             assert_eq!(changed, plans, "only a plan is told at once");
         }
         let sight = sights.of(1);
