@@ -40,6 +40,7 @@ pub struct App {
     pub console: ConsoleLog,
     pub working: crate::working::Working,
     pub attachments: crate::attachments::Attachments,
+    pub link_previews: crate::link_previews::LinkPreviews,
     pub permissions: Permissions,
     pub models: Models,
     pub workers: crate::workers::Workers,
