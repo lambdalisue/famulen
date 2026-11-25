@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { call, sayImage, visit, whollyOnScreen } from "./support";
+import { call, letOn, sayImage, visit, whollyOnScreen } from "./support";
 
 test("what the secretary says is drawn, with its lines where they end", async ({ page, request }) => {
   await call(request, "ConsoleService", "PostMessage", {
@@ -182,6 +182,7 @@ test("what the secretary is doing is shown in the conversation from the moment i
   await page.getByPlaceholder(/に頼む$/).fill("e2e-work で調べて");
   await page.getByRole("button", { name: "送る" }).click();
   await expect(working).toHaveText("考えています…", { timeout: 1000 });
+  letOn("search");
   await expect(working).toHaveText("ウェブを調べています…");
 
   const other = await browser.newPage();
@@ -189,18 +190,22 @@ test("what the secretary is doing is shown in the conversation from the moment i
   await expect(other.getByTestId("working")).toHaveText("ウェブを調べています…");
   await other.close();
 
+  letOn("found");
   await expect(working).toHaveText("考えています…");
+  letOn("end");
   await expect(working).toHaveCount(0);
 });
 
 test("an answer takes away what the secretary is doing before it is done", async ({ page, request }) => {
   await visit(page, "/", /^ホーム/);
   const working = page.getByTestId("working");
+  letOn("search");
   await page.getByPlaceholder(/に頼む$/).fill("e2e-work に答えて");
   await page.getByRole("button", { name: "送る" }).click();
   await expect(working).toHaveText("ウェブを調べています…");
   await call(request, "ConsoleService", "PostMessage", { text: "e2e-答えた" });
   await expect(page.getByTestId("message").last()).toContainText("e2e-答えた");
   await expect(working).toHaveCount(0, { timeout: 1000 });
+  letOn("found", "end");
   await expect.poll(async () => (await call(request, "ConsoleService", "GetStatus")).state, { timeout: 15_000 }).toBe("waiting");
 });
