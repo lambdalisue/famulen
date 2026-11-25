@@ -225,6 +225,7 @@ mod tests {
                     view: String::new(),
                     selection: None,
                     attached: Vec::new(),
+                    reply_to: None,
                 },
             )
         }

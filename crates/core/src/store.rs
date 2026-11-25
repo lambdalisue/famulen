@@ -583,6 +583,7 @@ CREATE TABLE IF NOT EXISTS console_messages (
     text  TEXT NOT NULL,
     meta  TEXT NOT NULL DEFAULT '{}'
 );
+CREATE INDEX IF NOT EXISTS console_messages_thread ON console_messages (json_extract(meta, '$.thread'));
 CREATE TABLE IF NOT EXISTS lookout_sources (
     id         INTEGER PRIMARY KEY,
     name       TEXT NOT NULL,

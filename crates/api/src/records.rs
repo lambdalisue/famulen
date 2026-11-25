@@ -65,6 +65,7 @@ impl Api {
                 view: "タスク".to_owned(),
                 selection: Some(format!("タスク {code}：{title}")),
                 attached: Vec::new(),
+                reply_to: None,
             },
             text: format!(
                 "タスク {code}「{title}」をあなたに任せます。進めて、状態と経過を save_record で書いてください。"

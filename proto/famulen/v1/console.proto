@@ -23,6 +23,14 @@ message Attachment {
   string problem = 5;
 }
 
+// The message another one replies to.
+message RepliedTo {
+  int64 id = 1;
+  Speaker who = 2;
+  // Its beginning.
+  string text = 3;
+}
+
 // One message in the conversation on the console.
 message ConsoleMessage {
   int64 id = 1;
@@ -39,6 +47,11 @@ message ConsoleMessage {
   // A section the reply suggests opening: calendar, task, memos, …
   string open = 8;
   repeated Attachment attachments = 9;
+  // The message it replies to; unset when that one is not shown in the
+  // workgroup that is read.
+  RepliedTo reply_to = 10;
+  // The message its thread begins with; 0 when it replies to none.
+  int64 thread = 11;
 }
 
 message ListMessagesRequest {
@@ -46,6 +59,9 @@ message ListMessagesRequest {
   // Only messages older than this id; 0 is the newest.
   int64 before = 2;
   int32 limit = 3;
+  // Only the thread of this message, from the message the
+  // thread begins with, and not a page of it. 0 is the conversation.
+  int64 thread = 4;
 }
 
 message ListMessagesResponse {
@@ -85,6 +101,8 @@ message SendRequest {
   // The files attached, by the ids POST /attachments gave. With one, text may
   // be empty.
   repeated string attachments = 5;
+  // The message it replies to; 0 is none.
+  int64 reply_to = 6;
 }
 
 message PostMessageRequest {
@@ -92,6 +110,9 @@ message PostMessageRequest {
   // A section to suggest opening alongside: calendar, task, memos, parties,
   // things, contracts, memory.
   string open = 2;
+  // The message it replies to, to say it in that message's thread. 0 replies
+  // to the owner's message being answered, when that one is itself a reply.
+  int64 reply_to = 3;
 }
 
 // A tool call waiting for the owner's yes or no.

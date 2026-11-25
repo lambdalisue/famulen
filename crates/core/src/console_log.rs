@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
+use crate::attachments::{self, Attached};
 use crate::store::{Store, now};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +33,40 @@ pub struct Message {
     pub text: String,
     /// Where it came from, which tab to open, and similar.
     pub meta: Value,
+}
+
+impl Message {
+    /// The message it replies to.
+    pub fn reply_to(&self) -> Option<i64> {
+        self.meta.get("reply_to").and_then(Value::as_i64)
+    }
+
+    /// The message its thread begins with, when it replies to one.
+    pub fn thread(&self) -> Option<i64> {
+        self.meta.get("thread").and_then(Value::as_i64)
+    }
+
+    /// The files that came with it.
+    pub fn attached(&self) -> Vec<Attached> {
+        self.meta
+            .get("attached")
+            .and_then(|v| Vec::deserialize(v).ok())
+            .unwrap_or_default()
+    }
+
+    /// What was said, with the names of the files that came with it.
+    pub fn gist(&self) -> String {
+        attachments::with_names(&self.text, &self.attached())
+    }
+
+    /// The first `limit` characters of it, marked when cut.
+    pub fn excerpt(&self, limit: usize) -> String {
+        let gist = self.gist();
+        match gist.char_indices().nth(limit) {
+            Some((end, _)) => format!("{}…", &gist[..end]),
+            None => gist,
+        }
+    }
 }
 
 /// Something every open console should show.
@@ -92,6 +127,32 @@ impl ConsoleLog {
         };
         self.notify(Event::Message(message.clone()));
         Ok(message)
+    }
+
+    /// Say something in reply to `to`, in its thread.
+    pub fn reply(
+        &self,
+        who: Who,
+        text: impl AsRef<str>,
+        mut meta: Value,
+        to: &Message,
+    ) -> anyhow::Result<Message> {
+        let thread = to.thread().unwrap_or(to.id);
+        meta["reply_to"] = to.id.into();
+        meta["thread"] = thread.into();
+        self.add(who, text, meta)
+    }
+
+    /// Every reply in the thread that begins with the message `root`, oldest
+    /// first.
+    pub fn replies(&self, root: i64) -> anyhow::Result<Vec<Message>> {
+        let conn = self.store.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, at, who, text, meta FROM console_messages
+             WHERE json_extract(meta, '$.thread') = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![root], row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Show what came of the files of the message kept as the input `input`.
@@ -159,19 +220,21 @@ impl ConsoleLog {
             "SELECT id, at, who, text, meta FROM console_messages
              WHERE id < ?1 ORDER BY id DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![before, limit as i64], |r| {
-            let who: String = r.get(2)?;
-            let meta: String = r.get(4)?;
-            Ok(Message {
-                id: r.get(0)?,
-                at: r.get(1)?,
-                who: if who == "aide" { Who::Aide } else { Who::Owner },
-                text: r.get(3)?,
-                meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
-            })
-        })?;
+        let rows = stmt.query_map(params![before, limit as i64], row)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
+}
+
+fn row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
+    let who: String = r.get(2)?;
+    let meta: String = r.get(4)?;
+    Ok(Message {
+        id: r.get(0)?,
+        at: r.get(1)?,
+        who: if who == "aide" { Who::Aide } else { Who::Owner },
+        text: r.get(3)?,
+        meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
+    })
 }
 
 #[cfg(test)]
@@ -200,6 +263,21 @@ mod tests {
         log.add(Who::Owner, "b", Value::Null).unwrap();
         assert_eq!(log.get(m.id).unwrap(), Some(m));
         assert_eq!(log.get(9).unwrap(), None);
+    }
+
+    #[test]
+    fn a_reply_to_a_reply_is_in_the_same_thread() {
+        let log = ConsoleLog::new(Store::open_in_memory().unwrap());
+        let root = log.add(Who::Aide, "a", json!({})).unwrap();
+        log.add(Who::Aide, "other", Value::Null).unwrap();
+        let first = log.reply(Who::Owner, "b", json!({}), &root).unwrap();
+        let second = log.reply(Who::Aide, "c", json!({}), &first).unwrap();
+
+        assert_eq!(
+            (second.reply_to(), second.thread()),
+            (Some(first.id), Some(root.id))
+        );
+        assert_eq!(log.replies(root.id).unwrap(), vec![first, second]);
     }
 
     #[test]

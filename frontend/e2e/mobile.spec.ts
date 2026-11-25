@@ -571,3 +571,33 @@ test("what the secretary is doing fits the narrow layout, open and folded", asyn
   await expect.poll(async () => (await call(request, "ConsoleService", "GetStatus")).state, { timeout: 15_000 }).toBe("waiting");
   await expect(page.getByRole("button", { name: "会話を引き上げる" })).not.toContainText("調べています");
 });
+
+test("on a phone a message is replied to, and its thread is laid over the conversation with the box still at hand", async ({ page, request }) => {
+  const root = await call<{ id: string }>(request, "ConsoleService", "PostMessage", { text: "e2e 携帯 元" });
+  await call(request, "ConsoleService", "PostMessage", { text: "e2e 携帯 返信", replyTo: root.id });
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const said = page.locator("#messages").getByTestId("message").filter({ hasText: "e2e 携帯 返信" });
+  await said.getByRole("button", { name: "返信", exact: true }).tap();
+  await expect(page.getByTestId("replying")).toContainText("e2e 携帯 返信");
+  await expect(page.locator("#say")).toBeFocused();
+  await page.getByRole("button", { name: "返信をやめる" }).tap();
+
+  await page.getByRole("button", { name: "返信 1 件" }).tap();
+  const thread = page.getByRole("region", { name: "スレッド" });
+  const over = await page.locator("#messages").boundingBox();
+  expect(await thread.boundingBox()).toEqual(over);
+  await page.locator("#say").fill("e2e 携帯 スレッドで");
+  await page.getByRole("button", { name: "送る", exact: true }).tap();
+  await expect(thread.getByTestId("message")).toHaveCount(3);
+  await expect.poll(() => whollyOnScreen(page, page.locator("#composer"))).toBe(true);
+  // Folded, what is written goes into the conversation again.
+  await page.locator(".m-sheetbar").getByRole("button", { name: "閉じる" }).tap();
+  await expect(thread).toHaveCount(0);
+  await expect(page.getByTestId("replying")).toHaveCount(0);
+  await page.getByRole("button", { name: "会話を引き上げる" }).tap();
+  await page.getByRole("button", { name: "返信 2 件" }).tap();
+  await thread.getByRole("button", { name: "スレッドを閉じる" }).tap();
+  await expect(thread).toHaveCount(0);
+  await expect.poll(() => said.isVisible()).toBe(true);
+});

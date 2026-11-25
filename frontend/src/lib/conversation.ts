@@ -33,7 +33,7 @@ const newestQuery = query(async (workgroup: string): Promise<Read> => {
 }, "messages");
 
 /** Both by id, oldest first. One in `later` is how it stands now. */
-function merged(before: ConsoleMessage[], later: ConsoleMessage[]): ConsoleMessage[] {
+export function merged(before: ConsoleMessage[], later: ConsoleMessage[]): ConsoleMessage[] {
   const by = new Map<bigint, ConsoleMessage>();
   for (const m of [...before, ...later]) by.set(m.id, m);
   return [...by.values()].sort((a, b) => Number(a.id - b.id));
@@ -130,15 +130,21 @@ export function createConversation(workgroup: () => string, follows: () => boole
     ),
   );
 
+  let underway: Promise<void> | undefined;
   /** Read the page before the oldest message; one that failed is only tried again by `retry`. */
-  const older = async () => {
+  const older = (limit = PAGE): Promise<void> => {
+    if (reading() && underway) return underway;
+    underway = readOlder(limit);
+    return underway;
+  };
+  const readOlder = async (limit: number) => {
     const here = of();
     const before = oldest();
     if (here === undefined || before === undefined || !more() || reading() || failed()) return;
     const mine = start();
     setReading(true);
     try {
-      const page = await api.console.listMessages({ workgroup: here, before, limit: PAGE });
+      const page = await api.console.listMessages({ workgroup: here, before, limit });
       if (mine !== start()) return;
       batch(() => {
         setOthers((o) => {
@@ -152,6 +158,18 @@ export function createConversation(workgroup: () => string, follows: () => boole
     } finally {
       if (mine === start()) setReading(false);
     }
+  };
+  /** Read back until the message `id` is there, and say whether it is. */
+  const reach = async (id: bigint): Promise<boolean> => {
+    const here = of();
+    const there = () => messages().some((m) => m.id === id);
+    while (!there()) {
+      const from = oldest();
+      if (from === undefined || from < id || !more() || failed()) return false;
+      await older(CATCH_UP);
+      if (of() !== here) return false;
+    }
+    return true;
   };
   const retry = async () => {
     if (kept()?.error) await revalidate("messages");
@@ -171,7 +189,8 @@ export function createConversation(workgroup: () => string, follows: () => boole
     more,
     reading,
     failed,
-    older,
+    older: () => older(),
+    reach,
     retry,
   };
 }

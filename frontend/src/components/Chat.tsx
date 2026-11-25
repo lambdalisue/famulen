@@ -1,66 +1,30 @@
-import { shortTime } from "~/lib/dates";
-import { A, revalidate } from "@solidjs/router";
+import { revalidate } from "@solidjs/router";
 import AideIcon from "~/components/AideIcon";
 import ApprovalCard from "~/components/ApprovalCard";
-import { AttachedList, DraftList } from "~/components/Attachments";
-import LinkCards from "~/components/LinkCards";
-import Markdown from "~/components/Markdown";
+import { DraftList } from "~/components/Attachments";
+import Message, { Quote } from "~/components/Message";
 import { createPull } from "~/components/pull";
+import Thread from "~/components/Thread";
 import * as icons from "~/lib/icons";
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
 import { api } from "~/lib/api";
 import { ACCEPTED, createDrafts } from "~/lib/attachments";
-import { chatMarkdown } from "~/lib/chat";
 import { workgroup } from "~/lib/workgroup";
 import { createConversation } from "~/lib/conversation";
 import { inboxQuery } from "~/lib/data";
 import { useWaiting } from "~/lib/inbox";
 import { working } from "~/lib/events";
 import { createKept, createSame } from "~/lib/kept";
-import { hasLinks } from "~/lib/links";
 import { excerptOf } from "~/lib/records";
-import { tabNamed } from "~/lib/tabs";
+import { offsetIn, pointOut } from "~/lib/scroll";
+import { createThread } from "~/lib/thread";
 import { useOwner } from "~/lib/owner";
+import { isNarrow } from "~/lib/viewport";
 import { selection, setSelection, view } from "~/lib/view";
-import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, LinkButton, Tag } from "~/components/ui";
+import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Tag } from "~/components/ui";
 import { createResizer } from "~/components/ui/resize";
-
-function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
-  const owner = () => props.m.who === Speaker.OWNER;
-  const open = () => tabNamed(props.m.open);
-  return (
-    <div class={owner() ? "msg owner" : "msg aide"} data-testid="message" data-id={props.m.id.toString()}>
-      <span class="meta">
-        <Show when={!owner()}>
-          <AideIcon size={20} />
-        </Show>
-        <span>
-          {owner() ? "あなた" : props.aide} · {shortTime(props.m.at, props.tz)}
-          {props.m.origin ? ` · ${props.m.origin}` : ""}
-          {props.m.about ? ` · ${props.m.about}` : ""}
-        </span>
-      </span>
-      <Show when={props.m.text}>
-        <div class="text">
-          <Markdown text={chatMarkdown(props.m.text)} plain={props.m.text} />
-        </div>
-      </Show>
-      <Show when={hasLinks(props.m.text)}>
-        <LinkCards message={props.m.id} />
-      </Show>
-      <AttachedList files={props.m.attachments} at={props.m.at} />
-      <Show when={open()}>
-        {(tab) => (
-          <LinkButton small icon={tab().icon} href={tab().path}>
-            {tab().label}で見る
-          </LinkButton>
-        )}
-      </Show>
-    </div>
-  );
-}
 
 function Inbox(props: { aide: string }) {
   const inbox = createKept(() => inboxQuery());
@@ -125,8 +89,22 @@ const MAIN_LEAST = 560;
 export default function Chat(props: { open: boolean; setOpen: (open: boolean) => void }) {
   const owner = useOwner();
   let follows = true;
-  const talk = createConversation(workgroup, () => follows);
+  /** An older message is read back to: nothing is followed until it is there. */
+  let seeking = false;
+  const talk = createConversation(workgroup, () => follows && !seeking);
   const messages = talk.messages;
+  /** The message the open thread begins with. */
+  const [root, setRoot] = createSignal<bigint>();
+  const thread = createThread(workgroup, root, messages);
+  /** How many replies each thread has. All of them are read once the message it begins with is. */
+  const replies = createMemo(() => {
+    const by = new Map<bigint, number>();
+    for (const m of messages()) if (m.thread) by.set(m.thread, (by.get(m.thread) ?? 0) + 1);
+    return by;
+  });
+  /** The message the owner picked to reply to. */
+  const [picked, setPicked] = createSignal<ConsoleMessage>();
+  const replyTo = () => picked() ?? thread.messages()[0];
   const [text, setText] = createSignal("");
   const [error, setError] = createSignal("");
   const attached = createDrafts();
@@ -174,7 +152,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     const seen = e.currentTarget;
     const { scrollTop: top, scrollHeight: height, clientHeight: room } = seen;
     if (room === 0) return;
-    if (height - top - room < 40) follows = true;
+    if (height - top - room < 40) follows = !seeking;
     else if (top < was.top && height === was.height && room === was.room) follows = false;
     if (!follows && height !== was.height) hold(seen);
     mark(seen);
@@ -205,6 +183,8 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
         // A tap on a button leaves the focus where it was on iOS, and with it the keyboard.
         if (open) toBottom();
         else say?.blur();
+        // Folded, nothing would show that what is written goes into the thread.
+        if (!open && isNarrow()) setRoot();
       },
       { defer: true },
     ),
@@ -237,7 +217,47 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     open: () => props.open,
     setOpen: (open) => props.setOpen(open),
   });
-  createEffect(on(talk.workgroup, toBottom, { defer: true }));
+  /** Counts the times a message was gone to, so that only the latest is followed through. */
+  let gone = 0;
+  createEffect(
+    on(
+      talk.workgroup,
+      () => {
+        gone += 1;
+        seeking = false;
+        toBottom();
+      },
+      { defer: true },
+    ),
+  );
+
+  const reply = (m: ConsoleMessage) => {
+    if ((m.thread || m.id) !== root()) setRoot();
+    setPicked(m);
+    say?.focus();
+  };
+  const openThread = (id: bigint | undefined) => {
+    setPicked();
+    setRoot(id);
+  };
+  createEffect(on(workgroup, () => openThread(undefined), { defer: true }));
+  /** Go to a message, reading back to it when it is older than what is read. */
+  const goTo = async (id: bigint) => {
+    const mine = ++gone;
+    follows = false;
+    seeking = true;
+    const found = await talk.reach(id);
+    if (mine !== gone || !list) return;
+    seeking = false;
+    const to = list.querySelector<HTMLElement>(`[data-id="${id}"]`);
+    if (found && to) {
+      list.scrollTop += offsetIn(list, to);
+      pointOut(to);
+    } else setError("元の発言を読み込めなかった");
+    // Near the end nothing may have scrolled to tell.
+    follows = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    mark(list);
+  };
 
   const send = async (e?: Event) => {
     e?.preventDefault();
@@ -254,6 +274,9 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     }
     setError("");
     const of = workgroup();
+    const target = picked();
+    const to = replyTo()?.id ?? root();
+    const within = root();
     try {
       const m = await api.console.send({
         text: body,
@@ -261,12 +284,15 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
         view: view(),
         selection: selection(),
         attachments: files.flatMap((f) => f.id ?? []),
+        replyTo: to ?? 0n,
       });
       setText("");
       attached.remove(files);
       setSelection("");
+      if (picked() === target) setPicked();
       talk.sent(of, m);
-      toBottom();
+      // Within a thread, what is read beside it stays.
+      if (within === undefined) toBottom();
     } catch (err) {
       setError(message(err));
     }
@@ -310,22 +336,27 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.setOpen(false)} />
           </div>
         </div>
-        <div id="messages" class="messages" ref={list} role="log" aria-label="会話" aria-busy={talk.reading()} tabindex="0" onScroll={onScroll}>
-          <div class="said" ref={said}>
-            <Show when={messages().length === 0 && !talk.more()}>
-              <EmptyState>{aide()} に頼みごとを書く。右の画面で見ているものも一緒に渡る。</EmptyState>
-            </Show>
-            <Show when={messages().length > 0 || talk.more()}>
-              <Before talk={talk} />
-            </Show>
-            <For each={messages()}>{(m) => <Message m={m} aide={aide()} tz={tz()} />}</For>
-            <Show when={working()}>
-              <div class="working" data-testid="working">
-                <span class="working-dot" aria-hidden="true" />
-                <span class="working-text">{working()}</span>
-              </div>
-            </Show>
+        <div class="talk">
+          <div id="messages" class="messages" ref={list} role="log" aria-label="会話" aria-busy={talk.reading()} tabindex="0" onScroll={onScroll}>
+            <div class="said" ref={said}>
+              <Show when={messages().length === 0 && !talk.more()}>
+                <EmptyState>{aide()} に頼みごとを書く。右の画面で見ているものも一緒に渡る。</EmptyState>
+              </Show>
+              <Show when={messages().length > 0 || talk.more()}>
+                <Before talk={talk} />
+              </Show>
+              <For each={messages()}>{(m) => <Message m={m} aide={aide()} tz={tz()} quote={m.replyTo} onReply={reply} replies={replies().get(m.id)} onQuote={(id) => void goTo(id)} onThread={openThread} />}</For>
+              <Show when={working()}>
+                <div class="working" data-testid="working">
+                  <span class="working-dot" aria-hidden="true" />
+                  <span class="working-text">{working()}</span>
+                </div>
+              </Show>
+            </div>
           </div>
+          <Show when={root()} keyed>
+            {(id) => <Thread thread={thread} root={id} aide={aide()} tz={tz()} onReply={reply} onClose={() => openThread(undefined)} />}
+          </Show>
         </div>
         <Inbox aide={aide()} />
         <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.setOpen(true)}>
@@ -349,6 +380,17 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
                 <Icon svg={icons.x} size={12} />
               </button>
             </div>
+          </Show>
+          <Show when={replyTo()}>
+            {(m) => (
+              <div class="replying" data-testid="replying">
+                <Icon svg={icons.arrowBackUp} size={14} />
+                <Quote of={{ who: m().who, text: m().text || m().attachments.map((f) => f.name).join("、") }} aide={aide()} />
+                <Show when={picked()}>
+                  <IconButton icon={icons.x} label="返信をやめる" variant="ghost" onMouseDown={(e) => e.preventDefault()} onClick={() => setPicked()} />
+                </Show>
+              </div>
+            )}
           </Show>
           <DraftList
             drafts={attached.drafts()}
