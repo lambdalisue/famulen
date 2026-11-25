@@ -835,6 +835,7 @@ mod tests {
     fn book() -> Book {
         let tmp = TempDir::new("people");
         let notebook = crate::notebook::open(tmp.path());
+        crate::notebook::testing::lay(notebook.root());
         crate::notebook::ensure(&notebook).unwrap();
         Book {
             dir: notebook.memory_dir(),

@@ -213,6 +213,7 @@ pub(crate) mod testing {
             },
         )
         .unwrap();
+        crate::notebook::testing::lay(&config.notebook_dir());
         open_app(&config).unwrap()
     }
 }
