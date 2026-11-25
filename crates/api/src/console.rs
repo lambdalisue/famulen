@@ -5,10 +5,10 @@ use famulen_core::approvals::{self, Answer};
 use famulen_core::attachments::{Attached, MAX_FILES, TOO_MANY};
 use famulen_core::connections::Connection;
 use famulen_core::console_log::{self, Event, Who};
+use famulen_core::conversations::{self, message_key};
 use famulen_core::input::{Input, ReplyTo, Sender, Source};
 use famulen_core::store::StoredInput;
 use famulen_core::wording;
-use famulen_core::workgroups::ALL;
 use famulen_core::working;
 use futures::StreamExt;
 use serde_json::json;
@@ -56,12 +56,13 @@ const QUOTED: usize = 200;
 /// shown there is told with it.
 fn message(
     log: &console_log::ConsoleLog,
+    conversations: &conversations::Conversations,
     m: &console_log::Message,
     workgroup: &str,
 ) -> anyhow::Result<ConsoleMessage> {
     let meta = |key| meta_text(m, key).unwrap_or_default().to_owned();
     let reply_to = match m.reply_to() {
-        Some(id) => log.get(id)?.filter(|to| shown_in(to, workgroup)),
+        Some(id) => log.get(id)?.filter(|to| to.shown_in(workgroup)),
         None => None,
     };
     Ok(ConsoleMessage {
@@ -77,6 +78,7 @@ fn message(
             })
             .into(),
         thread: m.thread().unwrap_or_default(),
+        conversation: conversations.of_message(m)?.unwrap_or_default(),
         text: m.text.clone(),
         workgroup: meta("workgroup"),
         origin: meta("origin"),
@@ -121,6 +123,29 @@ pub(crate) fn answer_of(
     .ok_or_else(|| fail("say allow, deny or always"))
 }
 
+pub(crate) fn spent(of: conversations::Spent) -> pb::ConversationSpent {
+    pb::ConversationSpent {
+        turns: of.turns,
+        input_tokens: of.input_tokens,
+        cached_tokens: of.cached_tokens,
+        cache_write_tokens: of.cache_write_tokens,
+        output_tokens: of.output_tokens,
+        ..Default::default()
+    }
+}
+
+/// How much of what a conversation began with names it.
+const TITLE: usize = 60;
+
+/// The first line of `text`, as far as `limit` characters of it.
+fn excerpt(text: &str, limit: usize) -> String {
+    let line = text.trim().lines().next().unwrap_or_default();
+    match line.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &line[..end]),
+        None => line.to_owned(),
+    }
+}
+
 /// Where an input came from, as a kind and the one thing that tells it apart.
 fn source_of(source: &Source) -> (&'static str, String) {
     match source {
@@ -153,14 +178,6 @@ fn input_item(stored: StoredInput, at: i64) -> InputItem {
 /// The most messages one answer holds, whatever is asked.
 const MOST_MESSAGES: usize = 1000;
 
-/// Whether a message shows while `workgroup` is chosen: one said in another
-/// workgroup is left out, one said in すべて is kept.
-fn shown_in(m: &console_log::Message, workgroup: &str) -> bool {
-    workgroup.is_empty()
-        || workgroup == ALL
-        || meta_text(m, "workgroup").is_none_or(|c| c == workgroup || c == ALL)
-}
-
 impl From<working::Shown> for pb::Working {
     fn from(shown: working::Shown) -> Self {
         Self {
@@ -183,10 +200,11 @@ impl Api {
         found: &[console_log::Message],
         workgroup: &str,
     ) -> anyhow::Result<Vec<ConsoleMessage>> {
-        found
-            .iter()
-            .map(|m| message(&self.app.console, m, workgroup))
-            .collect()
+        found.iter().map(|m| self.message(m, workgroup)).collect()
+    }
+
+    fn message(&self, m: &console_log::Message, workgroup: &str) -> anyhow::Result<ConsoleMessage> {
+        message(&self.app.console, &self.app.conversations, m, workgroup)
     }
 
     /// The thread the message `id` is in, as far as `workgroup` shows it.
@@ -195,7 +213,7 @@ impl Api {
         let root = log.get(id)?.and_then(|m| m.thread()).unwrap_or(id);
         let mut found: Vec<_> = log.get(root)?.into_iter().collect();
         found.extend(log.replies(root)?);
-        found.retain(|m| shown_in(m, workgroup));
+        found.retain(|m| m.shown_in(workgroup));
         Ok(found)
     }
 
@@ -211,27 +229,79 @@ impl Api {
         }
         match self.app.console.get(id).or_fail()? {
             None => Err(fail("返信先の発言が見つからない")),
-            Some(m) if !shown_in(&m, workgroup) => {
+            Some(m) if !m.shown_in(workgroup) => {
                 Err(fail("返信先の発言は、ほかのワークグループのもの"))
             }
             found => Ok(found),
         }
     }
 
-    /// The owner's message being answered, when it is itself a reply: what
-    /// answers it belongs in its thread.
+    /// The message what is said now belongs in the thread of: the owner's that
+    /// is being answered, when it is itself a reply, and the one the owner
+    /// asked with, when something comes back to it later.
     fn being_answered(&self) -> anyhow::Result<Option<console_log::Message>> {
         let Some(running) = self.app.store.running_input()? else {
             return Ok(None);
         };
-        match running.input.source {
+        let message = match &running.input.source {
             Source::Console {
                 message,
                 reply_to: Some(_),
                 ..
-            } => self.app.console.get(message),
-            _ => Ok(None),
-        }
+            } => Some(*message),
+            Source::Approval { .. } | Source::Wake { .. } | Source::Worker { .. } => {
+                let asked = self
+                    .app
+                    .conversations
+                    .asked_with(&running, |request| self.app.request_made_in(request))?;
+                match asked.map(|input| input.source) {
+                    Some(Source::Console { message, .. }) => Some(message),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        message.map_or(Ok(None), |id| self.app.console.get(id))
+    }
+
+    pub(crate) fn conversation(
+        &self,
+        c: conversations::Conversation,
+        workgroup: &str,
+        used: conversations::Spent,
+    ) -> anyhow::Result<pb::Conversation> {
+        let all = &self.app.conversations;
+        let first = all.first_input(c.id)?;
+        let (source, detail) = first
+            .as_ref()
+            .map(|row| source_of(&row.input.source))
+            .unwrap_or_default();
+        let title = first
+            .map(|row| excerpt(&row.input.gist(), TITLE))
+            .unwrap_or_default();
+        Ok(pb::Conversation {
+            running: all.running()? == Some(c.id),
+            id: c.id,
+            title,
+            source: source.into(),
+            detail,
+            workgroup: c.workgroup,
+            opened_at: c.opened_at,
+            used_at: c.used_at,
+            context_tokens: c.context,
+            spent: spent(used).into(),
+            waiting: all.waiting(c.id)?,
+            last: match all
+                .messages(&self.app.console, c.id)?
+                .iter()
+                .rfind(|m| m.shown_in(workgroup))
+            {
+                Some(m) => Some(self.message(m, workgroup)?),
+                None => None,
+            }
+            .into(),
+            ..Default::default()
+        })
     }
 
     fn say(
@@ -393,6 +463,21 @@ impl ConsoleService for Api {
                 ..Default::default()
             });
         }
+        if r.conversation != 0 {
+            let mut found = self
+                .app
+                .conversations
+                .messages(&self.app.console, r.conversation)
+                .or_fail()?;
+            found.retain(|m| m.shown_in(&r.workgroup));
+            let older = found.len().saturating_sub(MOST_MESSAGES);
+            found.drain(..older);
+            return Response::ok(ListMessagesResponse {
+                messages: self.messages(&found, &r.workgroup).or_fail()?,
+                more: older > 0,
+                ..Default::default()
+            });
+        }
         let limit = match r.limit {
             n if n > 0 => (n as usize).min(MOST_MESSAGES),
             _ => 120,
@@ -401,7 +486,7 @@ impl ConsoleService for Api {
         let mut found = self
             .app
             .console
-            .before(r.before, limit + 1, |m| shown_in(m, &r.workgroup))
+            .before(r.before, limit + 1, |m| m.shown_in(&r.workgroup))
             .or_fail()?;
         let more = found.len() > limit;
         if more {
@@ -440,6 +525,16 @@ impl ConsoleService for Api {
             .or_fail()?;
         let workgroup = self.app.workgroups.resolve(Some(&r.workgroup)).or_fail()?;
         let to = self.replied_to(r.reply_to, &workgroup.id)?;
+        if r.conversation != 0
+            && self
+                .app
+                .conversations
+                .get(r.conversation)
+                .or_fail()?
+                .is_none_or(|c| !c.shown_in(&workgroup.id))
+        {
+            return Err(fail("続ける会話が見つからない"));
+        }
         let selection = given(&r.selection).map(str::to_owned);
         let about = [
             (!r.view.is_empty()).then(|| format!("{} · {}", workgroup.name, r.view)),
@@ -463,10 +558,63 @@ impl ConsoleService for Api {
             },
             text: text.to_owned(),
         };
-        self.app.store.enqueue(&input).or_fail()?;
+        // Before it is queued, as its turn may begin at once.
+        let conversations = &self.app.conversations;
+        if to.is_none() {
+            let chosen = match r.conversation {
+                0 if r.new_conversation => Some(conversations.begin_anew(&input).or_fail()?),
+                0 => None,
+                id => Some(id),
+            };
+            if let Some(id) = chosen {
+                conversations.choose(id, &input, m.id).or_fail()?;
+            }
+        }
+        if let Some(id) = self.app.store.enqueue(&input).or_fail()?
+            && let Some(row) = self.app.store.get(id).or_fail()?
+            && let Err(error) = conversations.settle(&row, |_| None)
+        {
+            // It is queued; failing here would have it said twice.
+            tracing::warn!(%error, "could not settle which conversation it is of; its turn will");
+        }
         self.app.inputs.notify_one();
         self.app.working.tell();
-        Response::ok(message(&self.app.console, &m, &workgroup.id).or_fail()?)
+        Response::ok(self.message(&m, &workgroup.id).or_fail()?)
+    }
+
+    async fn list_conversations(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ListConversationsRequest>,
+    ) -> ServiceResult<ListConversationsResponse> {
+        let r = request.to_owned_message();
+        let limit = page_limit(r.limit, 30);
+        let all = &self.app.conversations;
+        let before = match r.before {
+            0 => None,
+            id => Some(
+                all.get(id)
+                    .or_fail()?
+                    .ok_or_else(|| fail(format!("no conversation {id}")))?,
+            ),
+        };
+        let found = all
+            .recent(&r.workgroup, before.as_ref(), limit + 1)
+            .or_fail()?;
+        let (found, more) = page(found, limit);
+        let conversations = found
+            .into_iter()
+            .map(|c| {
+                let spent = all.spent_by(c.id)?;
+                self.conversation(c, &r.workgroup, spent)
+            })
+            .collect::<anyhow::Result<_>>()
+            .or_fail()?;
+        Response::ok(ListConversationsResponse {
+            conversations,
+            more,
+            ..Default::default()
+        })
     }
 
     async fn list_link_previews(
@@ -504,8 +652,14 @@ impl ConsoleService for Api {
             meta["open"] = json!(r.open);
         }
         let m = self.say(Who::Aide, &r.text, meta, to.as_ref()).or_fail()?;
+        let mut keys = vec![message_key(m.id)];
+        keys.extend(m.thread().map(message_key));
+        // It is said; failing here would have it said twice.
+        if let Err(error) = self.app.conversations.link_to_running(keys) {
+            tracing::warn!(%error, "could not keep which conversation it was said in");
+        }
         self.app.working.answered();
-        Response::ok(message(&self.app.console, &m, &workgroup).or_fail()?)
+        Response::ok(self.message(&m, &workgroup).or_fail()?)
     }
 
     async fn get_inbox(
@@ -595,12 +749,14 @@ impl ConsoleService for Api {
         let workgroup = request.workgroup.to_owned();
         let receiver = self.app.console.subscribe();
         let (working, log) = (self.app.working.clone(), self.app.console.clone());
+        let conversations = self.app.conversations.clone();
         let stream = as_stream(receiver).filter_map(move |event| {
             let (workgroup, working, log) = (workgroup.clone(), working.clone(), log.clone());
+            let conversations = conversations.clone();
             async move {
                 let event = match event {
-                    Event::Message(m) if shown_in(&m, &workgroup) => {
-                        match message(&log, &m, &workgroup) {
+                    Event::Message(m) if m.shown_in(&workgroup) => {
+                        match message(&log, &conversations, &m, &workgroup) {
                             Ok(m) => E::Message(Box::new(m)),
                             Err(error) => {
                                 tracing::warn!(%error, "could not tell of a message");

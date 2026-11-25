@@ -135,20 +135,22 @@ pub(super) fn start_engine(
         }
     });
 
-    let today = Utc::now().with_timezone(&tz).date_naive();
+    let prompt = {
+        let (name, gender) = (app.aide_name(), Gender::load(store)?);
+        let tone = store.state("persona.tone")?.unwrap_or_default();
+        let memory_dir = config.memory_dir();
+        let core_lines = DreamSettings::load(store)?.core_lines as usize;
+        move || {
+            let today = Utc::now().with_timezone(&tz).date_naive();
+            system_prompt(&name, gender, &tone, &memory_dir, today, core_lines)
+        }
+    };
     let options = Options {
         bin,
         model,
         effort,
         workdir: config.workdir(),
-        system_prompt: system_prompt(
-            &app.aide_name(),
-            Gender::load(store)?,
-            &store.state("persona.tone")?.unwrap_or_default(),
-            &config.memory_dir(),
-            today,
-            DreamSettings::load(store)?.core_lines as usize,
-        ),
+        system_prompt: String::new(),
         add_dirs: vec![config.memory_dir()],
         resume: None,
         connections: app.gateway.served()?,
@@ -169,16 +171,16 @@ pub(super) fn start_engine(
         ..options.clone()
     };
     engine.spawn({
-        let (store, workgroups, links) = (store.clone(), app.workgroups.clone(), links.clone());
+        let (store, links) = (store.clone(), links.clone());
         async move {
             if let Err(error) = run_session(
                 OfSessions {
-                    resident: options,
+                    owners: options,
+                    prompt: Box::new(prompt),
                     guests,
                 },
                 services,
                 store,
-                workgroups,
                 arrived,
                 links,
                 tz,

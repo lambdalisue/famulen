@@ -6,6 +6,7 @@
 
 use serde_json::{Value, json};
 
+use crate::conversations::Cached;
 use crate::permissions::Caller;
 
 /// A line Claude Code wrote to stdout.
@@ -28,6 +29,9 @@ pub enum Inbound {
         /// What the model wrote last.
         text: String,
         usage: crate::models::Usage,
+        cached: Cached,
+        /// The conversation to be continued is not there, so no turn ran.
+        lost: bool,
     },
     /// Anything else (assistant messages, tool results, rate limits, ...).
     Other(Value),
@@ -91,10 +95,44 @@ pub fn parse_line(line: &str) -> anyhow::Result<Inbound> {
                 .unwrap_or(false),
             text: str_field(&value, "result").unwrap_or_default().to_owned(),
             usage: turn_usage(&value),
+            cached: cached(&value),
+            lost: value
+                .get("errors")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|e| e.starts_with("No conversation found")),
         },
         _ => Inbound::Other(value),
     };
     Ok(inbound)
+}
+
+fn cached(value: &Value) -> Cached {
+    let tokens = |key: &str| {
+        value
+            .pointer(&format!("/usage/{key}"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+    };
+    Cached {
+        read: tokens("cache_read_input_tokens"),
+        written: tokens("cache_creation_input_tokens"),
+    }
+}
+
+/// How much the model read when it wrote an assistant message of the
+/// conversation itself.
+pub(crate) fn context_of(message: &Value) -> Option<i64> {
+    let of_another = message
+        .get("parent_tool_use_id")
+        .is_some_and(|id| !id.is_null());
+    if of_another {
+        return None;
+    }
+    let usage = json!({ "usage": message.pointer("/message/usage")? });
+    turn_usage(&usage).input_tokens.map(|t| t as i64)
 }
 
 /// What a turn used. Cached input counts as input: it is what the turn read.
@@ -311,6 +349,8 @@ mod tests {
                     output_tokens: None,
                     calls: 1
                 },
+                cached: Cached::default(),
+                lost: false,
             }
         );
     }

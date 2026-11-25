@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -15,6 +16,7 @@ use tokio::task::JoinHandle;
 use super::guest::{self, Guest};
 use super::protocol::{self, ControlRequest, Inbound};
 use crate::approvals::Approvals;
+use crate::conversations::Conversations;
 use crate::disclosure::{self, Asking, Gate, Reader, Taint};
 use crate::hub::{self, Hub};
 use crate::input::{Place, Reach};
@@ -24,7 +26,11 @@ use crate::slack::clients::SlackClients;
 use crate::slack::web::Slack;
 use crate::store::Store;
 
-const SESSION_ID_KEY: &str = "claude.session_id";
+/// From where on Claude Code compacts a conversation: it does so some way below
+/// this many tokens, instead of close to the model's own window.
+const COMPACT_WINDOW: &str = "120000";
+/// How long a process told that nothing more comes may take to end.
+const END_LIMIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
@@ -55,8 +61,8 @@ pub struct Options {
 /// Who a process answers.
 #[derive(Debug, Clone)]
 pub enum Audience {
-    /// The owner, in the one resident conversation.
-    Owner,
+    /// The owner, in the conversation with this id.
+    Owner(i64),
     /// Someone else, for one input; the process knows nothing of the owner's.
     Guest(Guest),
 }
@@ -64,7 +70,7 @@ pub enum Audience {
 impl Audience {
     fn guest(&self) -> Option<&Guest> {
         match self {
-            Self::Owner => None,
+            Self::Owner(_) => None,
             Self::Guest(guest) => Some(guest),
         }
     }
@@ -166,9 +172,13 @@ impl Options {
 
     /// The environment Claude Code is started with, on top of Famulen's.
     /// The connectors of the claude.ai account it is logged in with would
-    /// otherwise join the tools, outside the gateway.
+    /// otherwise join the tools, outside the gateway, and a long conversation
+    /// would be read whole at every step.
     pub fn env(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("ENABLE_CLAUDEAI_MCP_SERVERS", "false")]
+        vec![
+            ("ENABLE_CLAUDEAI_MCP_SERVERS", "false"),
+            ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", COMPACT_WINDOW),
+        ]
     }
 }
 
@@ -179,6 +189,7 @@ pub struct Services<S> {
     pub approvals: Approvals<S>,
     pub journal: Journal,
     pub store: Store,
+    pub conversations: Conversations,
     pub memory_dir: PathBuf,
     /// Where each turn's usage is counted, and as which model.
     pub usage: Option<(crate::models::Models, crate::models::ModelSpec)>,
@@ -219,6 +230,7 @@ impl<S: Slack + Clone> Services<S> {
             permissions: permissions.with_memory_dir(&memory_dir),
             approvals,
             journal: Journal::new(store.clone()),
+            conversations: Conversations::new(store.clone()),
             store,
             memory_dir,
             usage: None,
@@ -295,15 +307,11 @@ impl Drop for InFlightGuard {
     }
 }
 
-/// The saved conversation to resume, if any.
-pub fn saved_session(store: &Store) -> anyhow::Result<Option<String>> {
-    store.state(SESSION_ID_KEY)
-}
-
 /// A running session's input side.
 #[derive(Clone)]
 pub struct Handle {
     tx: mpsc::UnboundedSender<Value>,
+    over: Arc<tokio::sync::Notify>,
 }
 
 impl Handle {
@@ -312,6 +320,17 @@ impl Handle {
         self.tx
             .send(protocol::user_message(text.as_ref()))
             .map_err(|_| anyhow::anyhow!("the claude session has ended"))
+    }
+
+    /// Have the process end by itself, as it keeps the conversation then, and
+    /// wait until it did. One that takes too long is stopped.
+    pub async fn end(&self, task: &mut JoinHandle<anyhow::Result<()>>) {
+        self.over.notify_one();
+        if tokio::time::timeout(END_LIMIT, &mut *task).await.is_err() {
+            tracing::warn!("claude did not end by itself; stopping it");
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
 
@@ -346,8 +365,12 @@ pub fn spawn<S: Slack + Clone + 'static>(
 
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(protocol::initialize_request("famulen-init"))?;
-    let writer = tokio::spawn(write_lines(stdin, rx));
-    let handle = Handle { tx: tx.clone() };
+    let over = Arc::new(tokio::sync::Notify::new());
+    let writer = tokio::spawn(write_lines(stdin, rx, over.clone()));
+    let handle = Handle {
+        tx: tx.clone(),
+        over,
+    };
 
     let task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
@@ -373,8 +396,12 @@ pub fn spawn<S: Slack + Clone + 'static>(
 async fn write_lines(
     mut stdin: ChildStdin,
     mut rx: mpsc::UnboundedReceiver<Value>,
+    over: Arc<tokio::sync::Notify>,
 ) -> anyhow::Result<()> {
-    while let Some(message) = rx.recv().await {
+    while let Some(message) = tokio::select! {
+        message = rx.recv() => message,
+        () = over.notified() => None,
+    } {
         let mut line = message.to_string();
         line.push('\n');
         stdin.write_all(line.as_bytes()).await?;
@@ -390,6 +417,7 @@ fn on_inbound<S: Slack + Clone + 'static>(
     audience: &Audience,
 ) {
     let store = &services.store;
+    let conversations = &services.conversations;
     match inbound {
         // Its conversation and its tools are gone after the one turn.
         Inbound::Init { .. } if audience.guest().is_some() => {}
@@ -399,15 +427,40 @@ fn on_inbound<S: Slack + Clone + 'static>(
                 "session",
                 format!("ready: {session_id} ({} tools)", tools.len()),
             );
-            remember_session(store, &session_id);
+            remember_session(conversations, audience, &session_id);
             if let Err(error) = services.permissions.record_tools(&tools) {
                 tracing::warn!(%error, "could not record the tools");
+            }
+        }
+        // No turn ran, so the input waits as if it had not been given.
+        Inbound::Result { lost: true, .. } => {
+            let Audience::Owner(id) = audience else {
+                return;
+            };
+            tracing::warn!(
+                conversation = id,
+                "its claude session is gone; beginning a new one"
+            );
+            services.journal.record(
+                "session",
+                format!("the session of conversation #{id} is gone; beginning a new one"),
+            );
+            if let Err(error) = conversations.forget_session(*id) {
+                tracing::warn!(%error, "could not forget the session");
+            }
+            let undone = store.running_input().and_then(|row| match row {
+                Some(row) if answers(services, audience) => store.undo_start(row.id),
+                _ => Ok(()),
+            });
+            if let Err(error) = undone {
+                tracing::warn!(%error, "could not have the input wait again");
             }
         }
         Inbound::Result {
             session_id,
             is_error,
             usage,
+            cached,
             ..
         } => {
             if let Some((models, spec)) = &services.usage
@@ -424,12 +477,15 @@ fn on_inbound<S: Slack + Clone + 'static>(
                     "ended"
                 },
             );
-            if audience.guest().is_none() {
-                remember_session(store, &session_id);
+            remember_session(conversations, audience, &session_id);
+            if let Audience::Owner(id) = audience
+                && let Err(error) = conversations.spent(*id, &usage, cached)
+            {
+                tracing::warn!(%error, "could not keep what the turn used");
             }
             // A turn another process runs is not ended by this one's.
-            if answers(store, audience)
-                && let Err(error) = store.end_turn()
+            if answers(services, audience)
+                && let Err(error) = end_turn(services, audience)
             {
                 tracing::warn!(%error, "could not mark the turn ended");
             }
@@ -467,18 +523,39 @@ fn on_inbound<S: Slack + Clone + 'static>(
                     services.mark(read_by_builtins(services, &value));
                 }
                 record_assistant(&services.journal, &value);
+                if let (Audience::Owner(id), Some(tokens)) =
+                    (audience, protocol::context_of(&value))
+                    && let Err(error) = conversations.set_context(*id, tokens)
+                {
+                    tracing::warn!(%error, "could not keep how long the conversation is");
+                }
+            }
+            if value["subtype"] == "compact_boundary" {
+                services.journal.record(
+                    "session",
+                    format!("compacted: {}", value["compact_metadata"]),
+                );
             }
         }
     }
 }
 
-fn remember_session(store: &Store, session_id: &str) {
-    if session_id.is_empty() {
-        return;
-    }
-    if let Err(error) = store.set_state(SESSION_ID_KEY, session_id) {
+fn remember_session(conversations: &Conversations, audience: &Audience, session_id: &str) {
+    if let Audience::Owner(id) = audience
+        && let Err(error) = conversations.set_session(*id, session_id)
+    {
         tracing::warn!(%error, "could not save the session id");
     }
+}
+
+fn end_turn<S>(services: &Services<S>, audience: &Audience) -> anyhow::Result<()> {
+    if let Audience::Owner(id) = audience
+        && let Some(row) = services.store.running_input()?
+    {
+        services.conversations.ended(*id, &row)?;
+    }
+    services.store.end_turn()?;
+    Ok(())
 }
 
 fn answer<S: Slack + Clone + 'static>(
@@ -490,7 +567,7 @@ fn answer<S: Slack + Clone + 'static>(
 ) {
     match request {
         ControlRequest::McpMessage { message, .. }
-            if message["method"] == "tools/call" && !answers(&services.store, audience) =>
+            if message["method"] == "tools/call" && !answers(services, audience) =>
         {
             let refused = hub::failed(&message, guest::NOT_ITS_TURN);
             let _ = tx.send(protocol::mcp_response(&request_id, Some(refused)));
@@ -812,13 +889,13 @@ async fn permit<S: Slack + Clone>(
     services: &Services<S>,
     audience: &Audience,
 ) -> Value {
-    if answers(&services.store, audience)
+    if answers(services, audience)
         && let Some(guest) = audience.guest()
         && tool_name == crate::approvals::asked::TOOL
     {
         return ask_owner(request_id, guest, input, services);
     }
-    let refused = if !answers(&services.store, audience) {
+    let refused = if !answers(services, audience) {
         Some(guest::NOT_ITS_TURN.to_owned())
     } else {
         audience
@@ -910,13 +987,22 @@ async fn says<S: Slack + Clone>(
 
 /// Whether the running turn is for the process that serves `audience`. When
 /// that cannot be read, it is not.
-fn answers(store: &Store, audience: &Audience) -> bool {
-    store.running_input().is_ok_and(|row| {
+fn answers<S>(services: &Services<S>, audience: &Audience) -> bool {
+    services.store.running_input().is_ok_and(|row| {
         let guests = row
             .as_ref()
             .is_some_and(|r| r.input.reach() == Reach::Guest);
         match audience {
-            Audience::Owner => !guests,
+            // A process of another conversation may linger; a call made between
+            // turns is of none.
+            Audience::Owner(id) => {
+                !guests
+                    && (row.is_none()
+                        || services
+                            .conversations
+                            .running()
+                            .is_ok_and(|running| running == Some(*id)))
+            }
             Audience::Guest(guest) => row.is_some_and(|r| guests && r.id == guest.input),
         }
     })
@@ -1234,7 +1320,8 @@ mod tests {
             Arc::new(Tools),
             None,
         );
-        let audience = Guest::of(&row).map_or(Audience::Owner, Audience::Guest);
+        let conversation = services.conversations.settle(&row, |_| None).unwrap().id;
+        let audience = Guest::of(&row).map_or(Audience::Owner(conversation), Audience::Guest);
         (services, audience)
     }
 
@@ -1330,14 +1417,90 @@ mod tests {
             is_error: false,
             text: String::new(),
             usage: Default::default(),
+            cached: Default::default(),
+            lost: false,
         };
-        on_inbound(ended(), &tx, &services, &Audience::Owner);
+        on_inbound(ended(), &tx, &services, &Audience::Owner(1));
         assert!(services.store.running().unwrap().is_some());
         on_inbound(ended(), &tx, &services, &guest);
         assert!(services.store.running().unwrap().is_none());
+        assert_eq!(services.store.running().unwrap(), None);
+    }
+
+    #[test]
+    fn a_turn_is_kept_to_the_conversation_it_is_of() {
+        let (services, audience) = in_turn(crate::input::Sender::Owner, slack(false));
+        let services = Arc::new(services);
+        let Audience::Owner(id) = audience else {
+            panic!("not the owner's")
+        };
+        assert!(answers(&services, &Audience::Owner(id)));
+        assert!(
+            !answers(&services, &Audience::Owner(id + 1)),
+            "a process of another conversation"
+        );
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let result = Inbound::Result {
+            session_id: "s".into(),
+            is_error: false,
+            text: String::new(),
+            usage: crate::models::Usage {
+                input_tokens: Some(100),
+                output_tokens: Some(7),
+                calls: 1,
+            },
+            cached: crate::conversations::Cached {
+                read: 90,
+                written: 8,
+            },
+            lost: false,
+        };
+        on_inbound(result, &tx, &services, &Audience::Owner(id));
+        let kept = services.conversations.get(id).unwrap().unwrap();
+        assert_eq!(kept.session.as_deref(), Some("s"));
         assert_eq!(
-            saved_session(&services.store).unwrap().as_deref(),
-            Some("s")
+            services.conversations.spent_by(id).unwrap(),
+            crate::conversations::Spent {
+                turns: 1,
+                input_tokens: 100,
+                cached_tokens: 90,
+                cache_write_tokens: 8,
+                output_tokens: 7,
+            }
+        );
+        assert!(services.store.running().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_session_that_is_gone_is_forgotten_and_its_input_waits_again() {
+        let (services, audience) = in_turn(crate::input::Sender::Owner, slack(false));
+        let services = Arc::new(services);
+        let Audience::Owner(id) = audience else {
+            panic!("not the owner's")
+        };
+        services.conversations.set_session(id, "gone").unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"gone","errors":["No conversation found with session ID: gone"]}"#;
+        on_inbound(
+            protocol::parse_line(line).unwrap(),
+            &tx,
+            &services,
+            &Audience::Owner(id),
+        );
+        assert_eq!(
+            services.conversations.get(id).unwrap().unwrap().session,
+            None
+        );
+        let again = services.store.next_pending().unwrap().unwrap();
+        assert!(!again.interrupted, "no turn was cut off");
+    }
+
+    #[test]
+    fn a_long_conversation_is_compacted_early() {
+        assert!(
+            options(None)
+                .env()
+                .contains(&("CLAUDE_CODE_AUTO_COMPACT_WINDOW", COMPACT_WINDOW))
         );
     }
 
@@ -1435,7 +1598,7 @@ mod tests {
     #[tokio::test]
     async fn the_resident_session_may_use_nothing_while_a_guest_is_answered() {
         let (services, _) = in_turn(crate::input::Sender::Other, slack(false));
-        let turn = (services, Audience::Owner);
+        let turn = (services, Audience::Owner(1));
         for tool in [SEARCH, "Read", SEND] {
             assert!(!allowed(&turn, tool, to("C1")).await, "{tool}");
         }

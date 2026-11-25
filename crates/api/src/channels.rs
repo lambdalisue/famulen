@@ -1,6 +1,7 @@
 //! The channels other than the console, and the Slack workspaces the bot is in.
 
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use famulen_core::conversations::{message_key, slack_key};
 use famulen_core::slack::{attention, names};
 
 use crate::connections::{state_of, status_label};
@@ -208,7 +209,7 @@ impl ChannelService for Api {
         let workspace = given(&r.workspace).unwrap_or(clients.main_id());
         // The secretary answering in a channel it attends keeps attending it.
         attention::extend(&self.app.store, workspace, &r.channel, chrono::Utc::now()).or_fail()?;
-        let Posted { ts, text } = reply::send(
+        let Posted { ts, text, thread } = reply::send(
             client,
             &self.app.store,
             workspace,
@@ -223,11 +224,21 @@ impl ChannelService for Api {
             "origin": format!("Slack · {}", self.app.workspace_label(workspace)),
             "workgroup": self.app.workgroups.working().or_fail()?,
         });
-        self.app
+        let shown = self
+            .app
             .console
             .add(famulen_core::console_log::Who::Aide, &r.text, meta)
             .or_fail()?;
         // The message is out; failing here would have it said twice.
+        let begins = given(&thread).unwrap_or(&ts);
+        let linked = self.app.conversations.link_to_running([
+            message_key(shown.id),
+            slack_key(workspace, &r.channel, &ts),
+            slack_key(workspace, &r.channel, begins),
+        ]);
+        if let Err(error) = linked {
+            tracing::warn!(%error, "could not keep which conversation it was said in");
+        }
         if let Err(error) = self.app.working.said_on_slack() {
             tracing::warn!(%error, "could not note that the secretary answered");
         }

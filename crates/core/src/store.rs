@@ -592,6 +592,41 @@ CREATE TABLE IF NOT EXISTS usage (
     calls         INTEGER NOT NULL,
     cost_yen      REAL NOT NULL
 );
+-- The secretary's conversations, each a session of the model CLI.
+CREATE TABLE IF NOT EXISTS conversations (
+    id        INTEGER PRIMARY KEY,
+    session   TEXT NOT NULL DEFAULT '',
+    -- where the owner talks in it outside any thread, and when anything was
+    -- last said there, and which was last of those said in the same second
+    place     TEXT NOT NULL DEFAULT '',
+    said_at   INTEGER NOT NULL DEFAULT 0,
+    said_no   INTEGER NOT NULL DEFAULT 0,
+    opened_at INTEGER NOT NULL,
+    used_at   INTEGER NOT NULL,
+    -- the workgroup it began in
+    workgroup TEXT NOT NULL DEFAULT '',
+    context   INTEGER NOT NULL DEFAULT 0,
+    seen      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS conversations_place ON conversations (place, said_at);
+-- Which conversation an input, a message, a wake-up or a delegated task is of.
+CREATE TABLE IF NOT EXISTS conversation_keys (
+    key          TEXT PRIMARY KEY,
+    conversation INTEGER NOT NULL,
+    -- the input in whose turn it was made
+    input        INTEGER
+);
+CREATE INDEX IF NOT EXISTS conversation_keys_of ON conversation_keys (conversation);
+CREATE TABLE IF NOT EXISTS conversation_turns (
+    id                 INTEGER PRIMARY KEY,
+    conversation       INTEGER NOT NULL,
+    at                 INTEGER NOT NULL,
+    input_tokens       INTEGER NOT NULL,
+    cached_tokens      INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    output_tokens      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS conversation_turns_at ON conversation_turns (at);
 CREATE TABLE IF NOT EXISTS console_messages (
     id    INTEGER PRIMARY KEY,
     at    INTEGER NOT NULL,
@@ -600,6 +635,7 @@ CREATE TABLE IF NOT EXISTS console_messages (
     meta  TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS console_messages_thread ON console_messages (json_extract(meta, '$.thread'));
+CREATE INDEX IF NOT EXISTS console_messages_input ON console_messages (json_extract(meta, '$.input'));
 CREATE TABLE IF NOT EXISTS lookout_sources (
     id         INTEGER PRIMARY KEY,
     name       TEXT NOT NULL,

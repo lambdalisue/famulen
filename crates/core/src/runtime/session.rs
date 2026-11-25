@@ -9,8 +9,9 @@ use tokio::sync::Notify;
 use super::RESTART_AFTER;
 use crate::app::App;
 use crate::claude::guest::Guest;
-use crate::claude::session::{self, Audience, InFlight, Options, Services};
+use crate::claude::session::{self, Audience, Handle, InFlight, Options, Services};
 use crate::console_log::Event;
+use crate::conversations::Conversation;
 use crate::input::{Input, Source};
 use crate::slack::web::GatewaySlack;
 use crate::store::{Store, StoredInput};
@@ -26,7 +27,10 @@ pub(super) const RELOAD_KEY: &str = "engine.reload";
 
 /// What each kind of session is started with.
 pub(super) struct OfSessions {
-    pub(super) resident: Options,
+    pub(super) owners: Options,
+    /// The system prompt of the owner's conversations, with memory as it
+    /// stands when one is started.
+    pub(super) prompt: Box<dyn Fn() -> String + Send + Sync>,
     pub(super) guests: Options,
 }
 
@@ -58,21 +62,53 @@ pub(super) fn workgroup_of(workgroups: &Workgroups, input: &Input) -> String {
 }
 
 /// The text the session receives: the header with the time, then the
-/// workgroup line, then the body.
+/// workgroup line and what was attached, then what the session is told
+/// besides, then the rest.
 fn deliverable(
     workgroups: &Workgroups,
     input: &Input,
+    besides: &str,
     now: impl std::fmt::Display,
-) -> (String, String) {
-    let workgroup_id = workgroup_of(workgroups, input);
-    let workgroup = workgroups.resolve(Some(&workgroup_id)).ok();
+) -> String {
+    let workgroup = workgroups
+        .resolve(Some(&workgroup_of(workgroups, input)))
+        .ok();
     let line = workgroup
         .as_ref()
         .and_then(|c| workgroups.describe_for_prompt(c).ok())
         .unwrap_or_default();
     let rendered = input.render_at(now);
     let (header, body) = rendered.split_once('\n').unwrap_or((&rendered, ""));
-    (workgroup_id, format!("{header}\n{line}\n{body}"))
+    // Each attached file has its line right below the workgroup's.
+    let mut attached = 0;
+    for line in body.split_inclusive('\n').take(input.attached().len()) {
+        attached += line.len();
+    }
+    let (attached, said) = body.split_at(attached);
+    format!("{header}\n{line}\n{attached}{besides}{said}")
+}
+
+/// Where what comes back to a conversation is answered, when the owner asked
+/// for it somewhere else than the console, where the answer finds its thread
+/// by itself.
+fn asked_in(app: &App, row: &StoredInput) -> anyhow::Result<String> {
+    if row.input.place().is_some() {
+        return Ok(String::new());
+    }
+    let place = app
+        .conversations
+        .asked_with(row, |request| app.request_made_in(request))?
+        .and_then(|input| input.place());
+    Ok(place
+        .map(|place| {
+            format!(
+                "The owner asked for it on Slack, so answer there: workspace: {} channel: {} thread_ts: {}\n",
+                place.workspace,
+                place.channel,
+                place.thread()
+            )
+        })
+        .unwrap_or_default())
 }
 
 /// The text of an input answered without the notebook. What the workgroup
@@ -91,132 +127,211 @@ fn guests_text(input: &Input, now: impl std::fmt::Display) -> String {
     input.render_at(now)
 }
 
-/// Keep one Claude Code process running on the saved conversation, and feed
-/// it every pending input but those that hold others' words, each of which
-/// a process of its own answers as `guests` says.
+/// The process of the conversation the last turn was in.
+struct Resident {
+    conversation: i64,
+    handle: Handle,
+    task: AbortOnDrop<anyhow::Result<()>>,
+}
+
+impl Resident {
+    async fn end(mut self) {
+        self.handle.end(&mut self.task.0).await;
+    }
+}
+
+/// Why the owner's process is done. Waits for ever when there is none.
+async fn resident_gone(resident: &mut Option<Resident>) -> String {
+    let Some(Resident { task, .. }) = resident else {
+        return std::future::pending().await;
+    };
+    match (&mut task.0).await {
+        Ok(Ok(())) => "it ended".into(),
+        Ok(Err(error)) => format!("{error:#}"),
+        Err(error) => error.to_string(),
+    }
+}
+
+/// Wait for the tool calls still running: before a process is started, so
+/// nothing is left unowned if the loop is stopped while waiting. A call that
+/// never answers is given up on.
+async fn settled(services: &Services<GatewaySlack>) -> bool {
+    let settled = tokio::time::timeout(SETTLE_LIMIT, services.in_flight.settled())
+        .await
+        .is_ok();
+    if !settled {
+        tracing::warn!("tool calls of the last session did not finish; going on anyway");
+    }
+    settled
+}
+
+/// Feed every pending input to the conversation it is of, one turn at a time,
+/// in a Claude Code process that goes on with it. The process stays for the
+/// next turn of the same conversation and ends before one of another. Inputs
+/// that hold others' words are each answered by a process of its own, as
+/// `guests` says.
 pub(super) async fn run_session(
-    OfSessions {
-        resident: options,
-        guests,
-    }: OfSessions,
+    of: OfSessions,
     services: Arc<Services<GatewaySlack>>,
     store: Store,
-    workgroups: Workgroups,
     arrived: Arc<Notify>,
     links: SessionLinks,
     tz: chrono_tz::Tz,
 ) -> anyhow::Result<()> {
     let changed = &links.reload_now;
+    let app = &links.app;
+    let mut resident: Option<Resident> = None;
+    let mut guest: Option<AnsweringGuest> = None;
+    let finished = settled(&services).await;
+    if recover_interrupted(&store, finished)?.is_some() && !finished {
+        app.console.notify(Event::Approvals);
+    }
     loop {
-        let options = Options {
-            resume: session::saved_session(&store)?,
-            ..options.clone()
-        };
-        // A reload asked for while no session runs (it could not start, or
-        // the last one ended) is carried out at once: no turn can be cut.
-        if store.state(RELOAD_KEY)?.is_some() {
+        if store.running()?.is_none() {
+            guest = None;
+        }
+        // Inputs came or a turn ended.
+        app.working.tell();
+        // The reload is started here, where turns are started, so no turn
+        // can start between seeing none running and the engine stopping.
+        if store.running()?.is_none() && store.state(RELOAD_KEY)?.is_some() {
             store.clear_state(RELOAD_KEY)?;
+            if let Some(resident) = resident.take() {
+                resident.end().await;
+            }
             changed.notify_one();
             std::future::pending::<()>().await;
         }
-        // Tool calls of the last session still running finish first: before a
-        // process is started, so nothing is left unowned if this loop is
-        // stopped while waiting. A call that never answers is given up on.
-        let settled = tokio::time::timeout(SETTLE_LIMIT, services.in_flight.settled())
-            .await
-            .is_ok();
-        if !settled {
-            tracing::warn!("tool calls of the last session did not finish; starting anyway");
-        }
-        tracing::info!(resume = ?options.resume, model = ?options.model, effort = ?options.effort, "starting claude");
-        let (handle, task) = match session::spawn(&options, services.clone(), Audience::Owner) {
-            Ok(started) => {
-                if recover_interrupted(&store, settled)?.is_some() && !settled {
-                    links.app.console.notify(Event::Approvals);
-                }
-                started
-            }
-            Err(error) => {
-                tracing::warn!(%error, bin = %options.bin, "could not start the secretary; is the agent CLI installed?");
-                services.journal.record(
-                    "session",
-                    format!("could not start {}: {error}", options.bin),
-                );
-                tokio::time::sleep(RESTART_AFTER * 6).await;
+        // One input per turn. A turn runs under one workgroup, and the tools
+        // it calls are judged by it; the next input waits for the turn to
+        // end. The store lets only one input run, so this holds however
+        // the turn ends.
+        if store.running()?.is_none()
+            && let Some(row) = next_input(app).await?
+        {
+            if let Some(who) = Guest::of(&row) {
+                let who = who.named(app).await;
+                guest = answer_guest(&of.guests, &services, app, &row, who, tz)?;
                 continue;
             }
-        };
-        let mut task = AbortOnDrop(task);
-        let mut guest: Option<AnsweringGuest> = None;
-        loop {
-            if store.running()?.is_none() {
-                guest = None;
-            }
-            // Inputs came or a turn ended.
-            links.app.working.tell();
-            // The reload is started here, where turns are started, so no turn
-            // can start between seeing none running and the engine stopping.
-            if store.running()?.is_none() && store.state(RELOAD_KEY)?.is_some() {
-                store.clear_state(RELOAD_KEY)?;
-                changed.notify_one();
-                std::future::pending::<()>().await;
-            }
-            // One input per turn. A turn runs under one workgroup, and the tools
-            // it calls are judged by it; the next input waits for the turn to
-            // end. The store lets only one input run, so this holds however
-            // the turn ends.
-            if store.running()?.is_none()
-                && let Some(row) = next_input(&links.app).await?
+            let conversation = app
+                .conversations
+                .settle(&row, |request| app.request_made_in(request))?;
+            if resident
+                .as_ref()
+                .is_none_or(|r| r.conversation != conversation.id)
             {
-                if let Some(who) = Guest::of(&row) {
-                    let who = who.named(&links.app).await;
-                    guest = answer_guest(&guests, &services, &links.app, &row, who, tz)?;
-                    continue;
+                if let Some(before) = resident.take() {
+                    before.end().await;
+                    settled(&services).await;
                 }
-                let (workgroup, text) = deliverable(
-                    &workgroups,
-                    &row.input,
-                    Utc::now().with_timezone(&tz).to_rfc3339(),
-                );
-                let text = if row.interrupted { resent(&text) } else { text };
-                let header = text.lines().next().unwrap_or_default().to_owned();
-                if store.start_turn(row.id, &workgroup)? {
-                    match handle.send(text) {
-                        Ok(()) => {
-                            links.app.working.began(row.id);
-                            services.journal.record("input", header);
-                        }
-                        Err(error) => {
-                            tracing::warn!(%error, id = row.id, "could not deliver; will retry after restart");
-                            store.undo_start(row.id)?;
-                        }
+                match start(&of, &services, &conversation) {
+                    Ok(started) => resident = Some(started),
+                    Err(error) => {
+                        tracing::warn!(%error, bin = %of.owners.bin, "could not start the secretary; is the agent CLI installed?");
+                        services.journal.record(
+                            "session",
+                            format!("could not start {}: {error}", of.owners.bin),
+                        );
+                        tokio::time::sleep(RESTART_AFTER * 6).await;
                     }
                 }
+                // Ending one and starting another took a while: whatever came
+                // meanwhile is looked at again.
+                continue;
             }
-            tokio::select! {
-                () = arrived.notified() => {}
-                why = guest_gone(&mut guest) => {
-                    guest = None;
-                    tracing::warn!(%why, "a guest's session ended before its turn");
-                    services
-                        .journal
-                        .record("session", format!("a guest's session ended before its turn: {why}"));
-                    // Not given again: it may have answered, and what others
-                    // write must not hold up the owner's inputs.
-                    store.end_turn()?;
-                }
-                ended = &mut task.0 => {
-                    match ended {
-                        Ok(Ok(())) => tracing::warn!("claude session ended"),
-                        Ok(Err(error)) => tracing::warn!(%error, "claude session ended"),
-                        Err(error) => tracing::warn!(%error, "claude session task failed"),
-                    }
-                    break;
-                }
+            if let Some(resident) = &resident {
+                give(app, &services, resident, &conversation, &row, tz)?;
             }
         }
-        tokio::time::sleep(RESTART_AFTER).await;
+        tokio::select! {
+            () = arrived.notified() => {}
+            why = guest_gone(&mut guest) => {
+                guest = None;
+                tracing::warn!(%why, "a guest's session ended before its turn");
+                services
+                    .journal
+                    .record("session", format!("a guest's session ended before its turn: {why}"));
+                // Not given again: it may have answered, and what others
+                // write must not hold up the owner's inputs.
+                store.end_turn()?;
+            }
+            why = resident_gone(&mut resident) => {
+                resident = None;
+                tracing::warn!(%why, "claude session ended");
+                // A guest's turn goes on without it.
+                if guest.is_none() {
+                    let finished = settled(&services).await;
+                    if recover_interrupted(&store, finished)?.is_some() && !finished {
+                        app.console.notify(Event::Approvals);
+                    }
+                }
+                tokio::time::sleep(RESTART_AFTER).await;
+            }
+        }
     }
+}
+
+/// Start the process that goes on with a conversation.
+fn start(
+    of: &OfSessions,
+    services: &Arc<Services<GatewaySlack>>,
+    conversation: &Conversation,
+) -> anyhow::Result<Resident> {
+    let options = Options {
+        resume: conversation.session.clone(),
+        system_prompt: (of.prompt)(),
+        ..of.owners.clone()
+    };
+    tracing::info!(conversation = conversation.id, resume = ?options.resume, model = ?options.model, effort = ?options.effort, "starting claude");
+    let (handle, task) =
+        session::spawn(&options, services.clone(), Audience::Owner(conversation.id))?;
+    Ok(Resident {
+        conversation: conversation.id,
+        handle,
+        task: AbortOnDrop(task),
+    })
+}
+
+/// Start the turn of an input in its conversation.
+fn give(
+    app: &App,
+    services: &Services<GatewaySlack>,
+    resident: &Resident,
+    conversation: &Conversation,
+    row: &StoredInput,
+    tz: chrono_tz::Tz,
+) -> anyhow::Result<()> {
+    let workgroup = workgroup_of(&app.workgroups, &row.input);
+    let besides = format!(
+        "{}{}",
+        asked_in(app, row)?,
+        app.conversations
+            .said_before(&app.console, conversation, row, &workgroup)?
+    );
+    let now = Utc::now().with_timezone(&tz).to_rfc3339();
+    let text = deliverable(&app.workgroups, &row.input, &besides, now);
+    let text = if row.interrupted { resent(&text) } else { text };
+    let header = text.lines().next().unwrap_or_default().to_owned();
+    if !app.store.start_turn(row.id, &workgroup)? {
+        return Ok(());
+    }
+    match resident.handle.send(text) {
+        Ok(()) => {
+            app.conversations
+                .began(conversation.id, &row.input, &workgroup)?;
+            app.working.began(row.id);
+            services.journal.record(
+                "input",
+                format!("{header} conversation: #{}", conversation.id),
+            );
+        }
+        Err(error) => {
+            tracing::warn!(%error, id = row.id, "could not deliver; will retry after restart");
+            app.store.undo_start(row.id)?;
+        }
+    }
+    Ok(())
 }
 
 /// The process answering one guest, and when it is given up on.
@@ -366,8 +481,8 @@ mod tests {
             },
             text: "これは".into(),
         };
-        let (workgroup, text) = deliverable(&workgroups, &console, "now");
-        assert_eq!(workgroup, "work");
+        let text = deliverable(&workgroups, &console, "", "now");
+        assert_eq!(workgroup_of(&workgroups, &console), "work");
         assert!(text.lines().nth(1).unwrap().contains("仕事"), "{text}");
         let slack = Input {
             sender: Sender::Owner,
@@ -413,9 +528,10 @@ mod tests {
         assert!(again.interrupted);
         assert_eq!(store.running().unwrap(), None);
         let (_tmp, records) = crate::records::testing::records("runtime-interrupted");
-        let (_, text) = deliverable(
+        let text = deliverable(
             &Workgroups::new(store.clone(), records.notebook().clone()).unwrap(),
             &again.input,
+            "",
             "now",
         );
         assert!(

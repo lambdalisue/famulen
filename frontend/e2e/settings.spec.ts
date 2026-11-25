@@ -973,6 +973,21 @@ test("a day of the usage lists its calls, tokens and yen by agent, then by model
   await expect(page.getByRole("table", { name: "期間の合計" }).getByRole("cell", { name: "秘書" }).first()).toBeVisible();
 });
 
+test("the usage page tells what each of the secretary's conversations used", async ({ page, request }) => {
+  const text = `会話ごとの量 ${Date.now()}`;
+  await call(request, "ConsoleService", "Send", { text, newConversation: true });
+  const used = async () => {
+    const usage = await call<{ conversations?: { title: string }[] }>(request, "ModelService", "GetConversationUsage", {});
+    return usage.conversations?.some((c) => c.title === text);
+  };
+  await expect.poll(used).toBe(true);
+  await visit(page, "/settings/usage", "設定 · 使った量");
+  const table = page.getByRole("table", { name: "秘書の会話ごとの使った量" });
+  await expect(table.getByRole("columnheader")).toHaveText(["会話", "ターン", "1 回あたりの入力", "入力", "うちキャッシュ", "出力"]);
+  await expect(table.getByRole("row").filter({ hasText: text }).getByRole("cell")).toHaveText([text, "1 回", "1", "1", "0", "1"]);
+  await expect(table.getByRole("row").filter({ hasText: "すべての会話" })).toBeVisible();
+});
+
 test("hovering a bar of the usage tells what it is made of", async ({ page, request }) => {
   await useSomething(request);
   await visit(page, "/settings/usage?span=year", "設定 · 使った量");

@@ -6,7 +6,7 @@ use famulen_core::input::Source;
 use http::StatusCode;
 use serde_json::{Value, json};
 
-use crate::support::{call, open, temp, try_call};
+use crate::support::{call, call_as, open, temp, try_call};
 
 fn texts(page: &Value) -> Vec<&str> {
     let messages = page["messages"].as_array();
@@ -191,4 +191,136 @@ async fn nothing_said_in_another_workgroup_is_told_by_its_thread() {
     let (status, _) = try_call(&api, "ConsoleService/Send", body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(api.app().store.next_pending().unwrap().is_none());
+}
+
+/// The turn of the oldest input that waits, in which the secretary `posts`.
+async fn turn(api: &famulen_api::Api, posts: &str) -> Value {
+    let app = api.app();
+    let row = app.store.next_pending().unwrap().unwrap();
+    let c = app.conversations.settle(&row, |_| None).unwrap();
+    app.store.start_turn(row.id, "all").unwrap();
+    app.conversations.began(c.id, &row.input, "all").unwrap();
+    let posted = call(api, "ConsoleService/PostMessage", json!({ "text": posts })).await;
+    app.conversations.ended(c.id, &row).unwrap();
+    app.store.end_turn().unwrap();
+    posted
+}
+
+#[tokio::test]
+async fn what_comes_back_later_is_said_in_the_thread_it_was_asked_in() {
+    let dir = temp();
+    let api = open(&dir);
+    let send = json!({ "text": "あとで知らせて", "workgroup": "all" });
+    let asked = call(&api, "ConsoleService/Send", send).await;
+    let row = api.app().store.next_pending().unwrap().unwrap();
+    api.app().store.start_turn(row.id, "all").unwrap();
+    let wake = call_as(
+        &api,
+        "secretary",
+        "RoutineService/WakeAt",
+        json!({ "note": "知らせる", "inMinutes": 1 }),
+    )
+    .await;
+    let task = call_as(
+        &api,
+        "secretary",
+        "WorkerService/DelegateTask",
+        json!({ "title": "調べる", "runner": "agent", "request": "調べて" }),
+    )
+    .await;
+    api.app().store.end_turn().unwrap();
+
+    let conversations = &api.app().conversations;
+    let of: i64 = asked["conversation"].as_str().unwrap().parse().unwrap();
+    let key = famulen_core::conversations::task_key(task["id"].as_str().unwrap());
+    assert_eq!(conversations.of(&key).unwrap(), Some(of), "{task}");
+
+    let due = famulen_core::input::Input {
+        sender: famulen_core::input::Sender::System,
+        source: Source::Wake {
+            id: wake["id"].as_str().unwrap().parse().unwrap(),
+            at: "now".into(),
+        },
+        text: "知らせる".into(),
+    };
+    api.app().store.enqueue(&due).unwrap();
+    let told = turn(&api, "時間です").await;
+    assert_eq!(told["replyTo"]["id"], asked["id"]);
+    assert_eq!(told["conversation"], asked["conversation"]);
+
+    let body = json!({ "conversation": asked["conversation"] });
+    let whole = call(&api, "ConsoleService/ListMessages", body).await;
+    assert_eq!(texts(&whole), ["あとで知らせて", "時間です"]);
+}
+
+#[tokio::test]
+async fn the_owner_goes_on_begins_anew_or_chooses_the_conversation() {
+    let dir = temp();
+    let api = open(&dir);
+    let send = async |text: &str, more: Value| {
+        let mut body = json!({ "text": text, "workgroup": "work" });
+        body.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        call(&api, "ConsoleService/Send", body).await["conversation"].clone()
+    };
+    let first = send("一つ目の話\n詳しく", json!({})).await;
+    assert_eq!(send("続き", json!({})).await, first);
+    let second = send("二つ目の話", json!({ "newConversation": true })).await;
+    assert_ne!(second, first);
+    assert_eq!(
+        send("一つ目の続き", json!({ "conversation": first })).await,
+        first
+    );
+
+    let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
+    let titles: Vec<_> = listed["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["title"].as_str().unwrap(),
+                c["last"]["text"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        titles,
+        [("二つ目の話", "二つ目の話"), ("一つ目の話", "一つ目の続き")]
+    );
+    assert_eq!(listed["conversations"][0]["waiting"], true);
+
+    let body = json!({ "text": "a", "workgroup": "work", "conversation": "99" });
+    let (status, _) = try_call(&api, "ConsoleService/Send", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn what_conversations_used_in_a_period_is_told_with_the_total() {
+    let dir = temp();
+    let api = open(&dir);
+    let send = json!({ "text": "話", "workgroup": "work" });
+    let said = call(&api, "ConsoleService/Send", send).await;
+    let id: i64 = said["conversation"].as_str().unwrap().parse().unwrap();
+    let usage = famulen_core::models::Usage {
+        input_tokens: Some(100),
+        output_tokens: Some(5),
+        calls: 1,
+    };
+    let cached = famulen_core::conversations::Cached {
+        read: 80,
+        written: 10,
+    };
+    for _ in 0..2 {
+        api.app().conversations.spent(id, &usage, cached).unwrap();
+    }
+    let used = call(&api, "ModelService/GetConversationUsage", json!({})).await;
+    let expected = json!({
+        "turns": "2", "inputTokens": "200", "cachedTokens": "160",
+        "cacheWriteTokens": "20", "outputTokens": "10",
+    });
+    assert_eq!(used["total"], expected);
+    assert_eq!(used["conversations"][0]["title"], "話");
+    assert_eq!(used["conversations"][0]["spent"], expected);
 }

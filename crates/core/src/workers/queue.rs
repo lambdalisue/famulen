@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::{Asked, Candidate, Limits, Order, Placed, Run, Settings, Sight, State, plan};
 use crate::app::App;
+use crate::conversations::task_key;
 use crate::models::{CapUnit, Role};
 pub use crate::records::is_delegated;
 use crate::records::{OWNER, Record, Records, SECRETARY, TASKS, is_over};
@@ -79,9 +80,14 @@ pub fn written(app: &App, task: &Record, by: crate::notebook::Writer) -> anyhow:
         Writer::Secretary => (SECRETARY, app.workgroups.working()?),
         Writer::Lookout | Writer::Worker => return Ok(()),
     };
-    app.workers
+    let ordered = app
+        .workers
         .runs
-        .delegated(&task.id, &order.digest()?, who, &workgroup)
+        .delegated(&task.id, &order.digest()?, who, &workgroup)?;
+    if ordered && who == SECRETARY {
+        app.conversations.move_to_running(task_key(&task.id))?;
+    }
+    Ok(())
 }
 
 /// The workgroups a task's connections must be in to be used without asking:

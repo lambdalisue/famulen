@@ -2,6 +2,7 @@
 
 use chrono::Utc;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use famulen_core::conversations::task_key;
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
@@ -349,6 +350,12 @@ impl WorkerService for Api {
         }
         let code = self.app.records.code(TASKS, &task.id).or_fail()?;
         workers::ordered(&self.app, &task, &code).or_fail()?;
+        if by_secretary(&ctx) {
+            self.app
+                .conversations
+                .move_to_running(task_key(&task.id))
+                .or_fail()?;
+        }
         let patch = Patch::default()
             .with("Status", "pending")
             .with("Waiting for", "");

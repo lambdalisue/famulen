@@ -38,6 +38,7 @@ pub struct App {
     pub calendars: Calendars,
     pub connections: Connections,
     pub console: ConsoleLog,
+    pub conversations: crate::conversations::Conversations,
     pub working: crate::working::Working,
     pub attachments: crate::attachments::Attachments,
     pub link_previews: crate::link_previews::LinkPreviews,
@@ -86,6 +87,17 @@ pub struct App {
 impl App {
     pub fn tz(&self) -> chrono_tz::Tz {
         self.settings.timezone()
+    }
+
+    /// The input whose turn made a request of the owner, when the secretary's
+    /// did.
+    pub fn request_made_in(&self, request: i64) -> Option<i64> {
+        self.gateway
+            .ticket(request)
+            .ok()
+            .flatten()
+            .filter(|ticket| ticket.actor == crate::permissions::SECRETARY)
+            .and_then(|ticket| ticket.origin?.parse().ok())
     }
 
     pub fn scheduler(&self) -> Scheduler {

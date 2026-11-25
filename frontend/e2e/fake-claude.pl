@@ -56,6 +56,7 @@ if (grep { $_ eq "--no-session-persistence" } @ARGV) {
 my $started = 0;
 while (my $line = <STDIN>) {
     next unless $line =~ /"type":"user"/;
+    $line =~ s{\\n> .*?(?=\\n)}{}g; # quoted for context, said to another turn
     print qq({"type":"system","subtype":"init","session_id":"e2e","tools":["Bash","Read"]}\n) unless $started++;
     print qq({"type":"control_request","request_id":"e2e-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}\n)
       if $line =~ /e2e-bash/;

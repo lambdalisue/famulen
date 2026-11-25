@@ -5,6 +5,11 @@ import { api } from "./api";
 export const modelsQuery = query(() => api.models.getModels({}), "models");
 export const usageQuery = query((span: UsageSpan, day: string) => api.models.getUsage({ span, day }), "usage");
 
+export const conversationUsageQuery = query(
+  (span: UsageSpan, day: string) => api.models.getConversationUsage({ span, day }),
+  "conversation-usage",
+);
+
 export const KINDS: [ModelKind, string][] = [
   [ModelKind.AGENT_CLI, "エージェント CLI"],
   [ModelKind.LOCAL, "ローカル"],
