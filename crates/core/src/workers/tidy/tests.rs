@@ -88,7 +88,7 @@ impl Fake {
         }
         if line.starts_with("ps") {
             return says(&format!(
-                "    1     0\n{} 501\n  7 501\n  8 501\n",
+                "    1     0 Ss\n{} 501 S\n  7 501 S+\n  8 501 R\n  9 501 Z\n 10 501 UE\n",
                 std::process::id()
             ));
         }
@@ -530,14 +530,31 @@ async fn processes_that_cannot_be_seen_keep_it() {
     let seen = format!("p{own}\nn/x\n");
     for (program, said, why) in [
         ("lsof", seen, "lsof"),
-        ("ps ", format!("{own} 501\n"), "ps"),
-        ("ps ", "1 0\n7 501\n".into(), "ps"),
+        ("ps ", format!("{own} 501 S\n"), "ps"),
+        ("ps ", "1 0 Ss\n7 501 S\n".into(), "ps"),
     ] {
         let b = bench("tidy-blind");
         let w = b.work();
         b.says(program, says(&said));
         b.is_kept(&w, &format!("{why} does not see")).await;
     }
+}
+
+#[tokio::test]
+async fn a_process_that_ended_while_it_was_asked_about_stands_in_no_way() {
+    let b = bench("tidy-ended-process");
+    let w = b.work();
+    let fake = b.fake.clone();
+    let now = format!("1 0 Ss\n{0} 501 S\n", std::process::id());
+    // Those that had ended by the time lsof looked.
+    b.says("ps ", says(&format!("{now}90 501 S\n91 501 S\n92 501 S\n")));
+    *b.fake.then.lock().unwrap() = Some((
+        "lsof",
+        Box::new(move || *fake.says.lock().unwrap() = vec![("ps ", says(&now))]),
+    ));
+    let left = b.tidy(How::Remove).await;
+    assert_eq!(left[0].fate, Fate::Removed, "{left:?}");
+    assert!(!w.path.exists());
 }
 
 #[tokio::test]
