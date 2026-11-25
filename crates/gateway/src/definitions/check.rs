@@ -61,8 +61,23 @@ fn account_fields(account: toml::Table) -> anyhow::Result<(Vec<AccountField>, Op
         }
         let at = format!("account.{name}");
         anyhow::ensure!(is_name(&name), "account field {name:?} is not a name");
-        let table = table(&value, &["label", "optional", "secret"], &at)?;
+        let table = table(&value, &["label", "optional", "secret", "generate"], &at)?;
+        if flag(table, "generate", &at)? {
+            anyhow::ensure!(
+                table.len() == 1,
+                "{at} is generated, so nothing else is said of it"
+            );
+            fields.push(AccountField {
+                label: String::new(),
+                optional: true,
+                secret: true,
+                generated: true,
+                name,
+            });
+            continue;
+        }
         fields.push(AccountField {
+            generated: false,
             label: string(table, "label", &at)?,
             optional: flag(table, "optional", &at)?,
             secret: flag(table, "secret", &at)?,

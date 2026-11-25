@@ -1,9 +1,7 @@
 //! What Famulen does with what the gateway hands over from the bundled
-//! Google definition: a new-mail notice is read into items for the lookout,
-//! and a calendar is read through the connection's tools. The gateway only
-//! passes the notices along; reading them is Famulen's.
+//! Google definition, and how it reads the account's mail for the lookout and
+//! its calendars through the connection's tools.
 
-use base64::Engine;
 use serde_json::{Value, json};
 
 use crate::app::App;
@@ -12,8 +10,6 @@ use crate::lookout::Item;
 
 /// The bundled definition of a Google account.
 pub const GOOGLE: &str = "google";
-/// Its receiver of new-mail notices.
-pub const MAIL: &str = "mail";
 /// Its receiver of calendar changes.
 pub const CALENDAR: &str = "calendar";
 
@@ -33,19 +29,37 @@ fn history_key(connection: &str) -> String {
     format!("mail.history.{connection}")
 }
 
-/// The history id a Pub/Sub message from Gmail tells of.
-pub fn notified_history(payload: &Value) -> Option<u64> {
-    let data = payload.pointer("/message/data")?.as_str()?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(data))
-        .ok()?;
-    let notice: Value = serde_json::from_slice(&bytes).ok()?;
-    match &notice["historyId"] {
+/// A history id, which Gmail writes as a number or as text.
+fn history_id(value: &Value) -> Option<u64> {
+    match value {
         Value::Number(n) => n.as_u64(),
         Value::String(s) => s.parse().ok(),
         _ => None,
     }
+}
+
+/// A tool call the service answered with an error.
+#[derive(Debug)]
+struct Refused {
+    tool: String,
+    text: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text: String = self.text.chars().take(200).collect();
+        write!(f, "{} failed: {text}", self.tool)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// Whether Google answered that what was asked for is not there (any more).
+fn is_gone(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<Refused>()
+        .and_then(|r| serde_json::from_str::<Value>(&r.text).ok())
+        .is_some_and(|answer| answer["error"]["code"] == 404)
 }
 
 /// The ids of the messages a history listing says were added.
@@ -64,11 +78,7 @@ fn last_history(page: &Value) -> Option<u64> {
     page["history"]
         .as_array()?
         .iter()
-        .filter_map(|h| match &h["id"] {
-            Value::Number(n) => n.as_u64(),
-            Value::String(s) => s.parse().ok(),
-            _ => None,
-        })
+        .filter_map(|h| history_id(&h["id"]))
         .max()
 }
 
@@ -140,37 +150,18 @@ impl App {
             .get(connection)?
             .ok_or_else(|| anyhow::anyhow!("no connection {connection}"))?;
         let result = self.gateway.call_as_owner(&c, tool, args).await?;
-        anyhow::ensure!(
-            !result.is_error,
-            "{tool} failed: {}",
-            result.text.chars().take(200).collect::<String>()
-        );
+        if result.is_error {
+            return Err(Refused {
+                tool: tool.to_owned(),
+                text: result.text,
+            }
+            .into());
+        }
         Ok(serde_json::from_str(&result.text)?)
     }
 
-    /// Read the mail a Gmail notice tells of and hand it to the lookout as
-    /// heard from the connection. The first notice only marks where to read
-    /// from; later ones read what was added since.
-    pub async fn read_mail_notice(
-        &self,
-        connection: &str,
-        payload: &Value,
-    ) -> anyhow::Result<usize> {
-        let Some(notified) = notified_history(payload) else {
-            return Ok(0);
-        };
-        self.read_mail(connection, Some(notified)).await
-    }
-
-    /// Read the mail added since the last read, as a notice would. A notice
-    /// is taken off the subscription before its mail is read, so mail whose
-    /// read failed would otherwise wait for the next notice.
-    pub async fn read_mail_since_last(&self, connection: &str) -> anyhow::Result<usize> {
-        self.read_mail(connection, None).await
-    }
-
     /// Read every Google account's mail since its last read.
-    pub async fn catch_up_mail(&self) {
+    pub async fn read_every_mail(&self) {
         let Ok(list) = self.connections.list() else {
             return;
         };
@@ -178,34 +169,47 @@ impl App {
             .into_iter()
             .filter(|c| is_google(c) && c.status == LOGGED_IN)
         {
-            if let Err(error) = self.read_mail_since_last(&c.id).await {
-                tracing::warn!(connection = %c.id, %error, "could not catch up on mail");
+            if let Err(error) = self.read_mail(&c.id).await {
+                tracing::warn!(connection = %c.id, %error, "could not read the mail");
             }
         }
     }
 
-    async fn read_mail(&self, connection: &str, notified: Option<u64>) -> anyhow::Result<usize> {
-        // A notice and a catch-up reading the same mailbox at once would both
+    /// Hand the mail added since the last read to the lookout as heard from
+    /// the connection. The first read only marks where to read from.
+    pub async fn read_mail(&self, connection: &str) -> anyhow::Result<usize> {
+        // Two reads of the same mailbox at once, as when a login ends, would
         // read from the same place and hand the lookout the mail twice.
         let _reading = MAIL_READING.lock().await;
         let key = history_key(connection);
         let Some(since) = self.store.state(&key)? else {
-            if let Some(notified) = notified {
-                self.store.set_state(&key, notified.to_string())?;
-            }
+            self.mark_mail(connection).await?;
             return Ok(0);
         };
         let mut ids = Vec::new();
         let mut page: Option<String> = None;
         let mut read_to: u64 = since.parse().unwrap_or(0);
+        let mut latest = None;
         for _ in 0..MAX_PAGES {
             let mut args = json!({ "since": since });
             if let Some(p) = &page {
                 args["page"] = json!(p);
             }
-            let answer = self.tool_json(connection, "list_history", args).await?;
+            let answer = match self.tool_json(connection, "list_history", args).await {
+                Err(error) if is_gone(&error) => {
+                    // Gmail keeps the history for about a week, so after a
+                    // longer stop there is nothing left to read on from.
+                    tracing::warn!(%connection, "the mail's history is gone; reading from now on");
+                    self.mark_mail(connection).await?;
+                    return Ok(0);
+                }
+                other => other?,
+            };
             ids.extend(added_messages(&answer));
             read_to = read_to.max(last_history(&answer).unwrap_or(0));
+            // Mail that came while the pages were read is after the first
+            // page's id, so it is in the next read whatever page it fell on.
+            latest = latest.or_else(|| history_id(&answer["historyId"]));
             page = answer["nextPageToken"].as_str().map(str::to_owned);
             if page.is_none() {
                 break;
@@ -214,9 +218,14 @@ impl App {
         ids.dedup();
         let mut heard = 0;
         for id in &ids {
-            let message = self
+            let message = match self
                 .tool_json(connection, "get_message", json!({ "id": id }))
-                .await?;
+                .await
+            {
+                // Deleted before it was read.
+                Err(error) if is_gone(&error) => continue,
+                other => other?,
+            };
             let labels: Vec<String> = message["labelIds"]
                 .as_array()
                 .into_iter()
@@ -230,15 +239,22 @@ impl App {
                 heard += 1;
             }
         }
-        // Pages left unread are read from the last record read, so the next
-        // notice picks them up instead of skipping to what it tells of.
-        let cursor = if page.is_some() {
-            read_to
-        } else {
-            read_to.max(notified.unwrap_or(0))
+        // Pages left unread are read from the last record read next time.
+        let cursor = match latest {
+            Some(latest) if page.is_none() => read_to.max(latest),
+            _ => read_to,
         };
         self.store.set_state(&key, cursor.to_string())?;
         Ok(heard)
+    }
+
+    /// Mark the mailbox as read up to now.
+    async fn mark_mail(&self, connection: &str) -> anyhow::Result<()> {
+        let profile = self.tool_json(connection, "get_profile", json!({})).await?;
+        let now = history_id(&profile["historyId"])
+            .ok_or_else(|| anyhow::anyhow!("the mailbox's profile has no history id"))?;
+        self.store
+            .set_state(history_key(connection), now.to_string())
     }
 
     /// The places a source reading what arrives on `connection` can be
@@ -335,10 +351,12 @@ impl App {
     }
 
     /// Ask again, before they lapse, for the notices of every Google
-    /// account: new mail when its Pub/Sub topic is set, and calendar changes
-    /// when the receivers' address and the account's token are set.
+    /// account's calendar changes, when the receivers are reached from outside.
     pub async fn renew_google_watches(&self, receive_url: Option<&str>) {
         let now = chrono::Utc::now().timestamp_millis();
+        let Some(base) = receive_url else {
+            return;
+        };
         let Ok(list) = self.connections.list() else {
             return;
         };
@@ -348,38 +366,16 @@ impl App {
             .into_iter()
             .filter(|c| is_google(c) && c.status == LOGGED_IN)
         {
-            let names = self.gateway.account_names(&c.id).unwrap_or_default();
-            let set = |k: &str| names.contains(k);
-            if set("topic") {
-                self.renew(&c.id, "watch_mailbox", json!({}), now, |answer| {
-                    if let Some(history) = answer["historyId"].as_str() {
-                        let key = history_key(&c.id);
-                        if self.store.state(&key).ok().flatten().is_none() {
-                            let _ = self.store.set_state(&key, history);
-                        }
-                    }
-                })
-                .await;
-            }
-            if let Some(base) = receive_url.filter(|_| set("channel_token")) {
-                let address = format!("{}/receive/{}/{CALENDAR}", base.trim_end_matches('/'), c.id);
-                let channel = format!("famulen-{}-{now}", c.id);
-                let args = json!({ "calendar": "primary", "channel": channel, "address": address });
-                self.renew(&c.id, "watch_events", args, now, |_| {}).await;
-            }
+            let address = format!("{}/receive/{}/{CALENDAR}", base.trim_end_matches('/'), c.id);
+            let channel = format!("famulen-{}-{now}", c.id);
+            let args = json!({ "calendar": "primary", "channel": channel, "address": address });
+            self.renew(&c.id, "watch_events", args, now).await;
         }
     }
 
-    /// Call a lookout-asking tool once its last answer's expiration is less
+    /// Call a notice-asking tool once its last answer's expiration is less
     /// than a day away, and keep the new expiration.
-    async fn renew(
-        &self,
-        connection: &str,
-        tool: &str,
-        args: Value,
-        now: i64,
-        then: impl FnOnce(&Value),
-    ) {
+    async fn renew(&self, connection: &str, tool: &str, args: Value, now: i64) {
         const DAY_MS: i64 = 24 * 3600 * 1000;
         // A refused ask is tried again this much later, not every minute.
         const RETRY_MS: i64 = 3600 * 1000;
@@ -402,7 +398,6 @@ impl App {
                     _ => now + DAY_MS,
                 };
                 let _ = self.store.set_state(&key, next.to_string());
-                then(&answer);
             }
             Err(error) => {
                 tracing::warn!(%connection, %tool, %error, "could not ask for the notices again");
@@ -417,15 +412,6 @@ impl App {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-
-    #[test]
-    fn a_gmail_notice_tells_its_history_id() {
-        let data = base64::engine::general_purpose::STANDARD
-            .encode(r#"{"emailAddress":"me@example.com","historyId":9876}"#);
-        let payload = json!({ "ackId": "a1", "message": { "data": data } });
-        assert_eq!(notified_history(&payload), Some(9876));
-        assert_eq!(notified_history(&json!({ "message": {} })), None);
-    }
 
     #[test]
     fn a_history_page_names_the_added_messages() {
@@ -450,7 +436,13 @@ pub(crate) mod tests {
                 path,
                 axum::routing::get(move || {
                     let answer = answer.clone();
-                    async move { answer.to_string() }
+                    let status = answer["error"]["code"].as_u64().unwrap_or(200) as u16;
+                    async move {
+                        (
+                            axum::http::StatusCode::from_u16(status).unwrap(),
+                            answer.to_string(),
+                        )
+                    }
                 }),
             );
         }
@@ -473,19 +465,25 @@ pub(crate) mod tests {
         (app, c.id)
     }
 
-    fn notice(history: u64) -> Value {
-        let data = base64::engine::general_purpose::STANDARD.encode(format!(
-            r#"{{"emailAddress":"me@example.com","historyId":{history}}}"#
-        ));
-        json!({ "ackId": "a", "message": { "data": data } })
+    fn mailbox_at(history: &str) -> (&'static str, Value) {
+        (
+            "/gmail/v1/users/me/profile",
+            json!({ "emailAddress": "me@example.com", "historyId": history }),
+        )
+    }
+
+    fn gone() -> Value {
+        json!({ "error": { "code": 404, "message": "Requested entity was not found." } })
     }
 
     #[tokio::test]
-    async fn a_mail_notice_is_read_through_the_tools_into_what_the_lookout_hears() {
+    async fn mail_added_since_the_last_read_is_read_through_the_tools_into_what_the_lookout_hears()
+    {
         let dir = crate::notebook::testing::TempDir::new("arrivals-mail");
         let (app, id) = with_google(
             dir.path(),
             vec![
+                mailbox_at("10"),
                 (
                     "/gmail/v1/users/me/history",
                     json!({ "history": [{ "messagesAdded": [{ "message": { "id": "m1" } }] }], "historyId": "12" }),
@@ -508,17 +506,22 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let first = app.read_mail_notice(&id, &notice(10)).await.unwrap();
-        let second = app.read_mail_notice(&id, &notice(12)).await.unwrap();
+        let first = app.read_mail(&id).await.unwrap();
+        let second = app.read_mail(&id).await.unwrap();
 
         assert_eq!(
             (first, second),
             (0, 1),
-            "the first notice only marks where to start"
+            "the first read only marks where to start"
         );
         let heard = app.lookout.heard_on(&id).unwrap();
         assert_eq!(heard[0].title, "見積もり");
         assert!(heard[0].body.contains("sato@example.com"));
+        assert_eq!(
+            app.store.state(history_key(&id)).unwrap().as_deref(),
+            Some("12"),
+            "the next read is from the mailbox's latest record"
+        );
     }
 
     #[tokio::test]
@@ -527,6 +530,7 @@ pub(crate) mod tests {
         let (app, id) = with_google(
             dir.path(),
             vec![
+                mailbox_at("10"),
                 (
                     "/gmail/v1/users/me/history",
                     json!({ "history": [{ "messagesAdded": [{ "message": { "id": "m1" } }] }], "historyId": "12" }),
@@ -549,8 +553,8 @@ pub(crate) mod tests {
             "仕事",
             json!({ "places": [{ "id": "Label_1", "name": "仕事" }] }),
         );
-        app.read_mail_notice(&id, &notice(10)).await.unwrap();
-        app.read_mail_notice(&id, &notice(12)).await.unwrap();
+        app.read_mail(&id).await.unwrap();
+        app.read_mail(&id).await.unwrap();
         assert_eq!(app.lookout.take_heard(work).unwrap().len(), 1);
         assert!(app.lookout.take_heard(rest).unwrap().is_empty());
     }
@@ -579,18 +583,20 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn mail_whose_notice_was_lost_is_read_when_the_mailbox_is_caught_up() {
-        let dir = crate::notebook::testing::TempDir::new("arrivals-mail-catch-up");
+    async fn a_message_deleted_before_it_was_read_does_not_hold_up_the_rest() {
+        let dir = crate::notebook::testing::TempDir::new("arrivals-mail-deleted");
         let (app, id) = with_google(
             dir.path(),
             vec![
+                mailbox_at("10"),
                 (
                     "/gmail/v1/users/me/history",
-                    json!({ "history": [{ "id": "12", "messagesAdded": [{ "message": { "id": "m1" } }] }], "historyId": "12" }),
+                    json!({ "history": [{ "id": "12", "messagesAdded": [{ "message": { "id": "m1" } }, { "message": { "id": "m2" } }] }], "historyId": "12" }),
                 ),
+                ("/gmail/v1/users/me/messages/m1", gone()),
                 (
-                    "/gmail/v1/users/me/messages/m1",
-                    json!({ "snippet": "届きました", "payload": { "headers": [{ "name": "Subject", "value": "請求書" }] } }),
+                    "/gmail/v1/users/me/messages/m2",
+                    json!({ "payload": { "headers": [{ "name": "Subject", "value": "請求書" }] } }),
                 ),
             ],
         )
@@ -605,25 +611,48 @@ pub(crate) mod tests {
                 Some(60),
             )
             .unwrap();
-        app.read_mail_notice(&id, &notice(10)).await.unwrap();
 
-        let heard = app.read_mail_since_last(&id).await.unwrap();
+        app.read_mail(&id).await.unwrap();
 
-        assert_eq!(heard, 1);
+        assert_eq!(app.read_mail(&id).await.unwrap(), 1);
         assert_eq!(app.lookout.heard_on(&id).unwrap()[0].title, "請求書");
+    }
+
+    #[tokio::test]
+    async fn a_mailbox_whose_history_is_gone_is_read_from_now_on() {
+        let dir = crate::notebook::testing::TempDir::new("arrivals-mail-expired");
+        let (app, id) = with_google(
+            dir.path(),
+            vec![mailbox_at("500"), ("/gmail/v1/users/me/history", gone())],
+        )
+        .await;
+        app.store.set_state(history_key(&id), "10").unwrap();
+
+        assert_eq!(app.read_mail(&id).await.unwrap(), 0);
         assert_eq!(
             app.store.state(history_key(&id)).unwrap().as_deref(),
-            Some("12")
+            Some("500")
         );
     }
 
     #[tokio::test]
-    async fn a_mailbox_never_noticed_is_not_caught_up() {
-        let dir = crate::notebook::testing::TempDir::new("arrivals-mail-unmarked");
-        let (app, id) = with_google(dir.path(), vec![]).await;
+    async fn a_mailbox_that_cannot_be_read_is_taken_up_from_the_same_place() {
+        let dir = crate::notebook::testing::TempDir::new("arrivals-mail-failed");
+        let (app, id) = with_google(
+            dir.path(),
+            vec![(
+                "/gmail/v1/users/me/history",
+                json!({ "error": { "code": 500 } }),
+            )],
+        )
+        .await;
+        app.store.set_state(history_key(&id), "10").unwrap();
 
-        assert_eq!(app.read_mail_since_last(&id).await.unwrap(), 0);
-        assert_eq!(app.store.state(history_key(&id)).unwrap(), None);
+        assert!(app.read_mail(&id).await.is_err());
+        assert_eq!(
+            app.store.state(history_key(&id)).unwrap().as_deref(),
+            Some("10")
+        );
     }
 
     #[tokio::test]
@@ -631,15 +660,18 @@ pub(crate) mod tests {
         let dir = crate::notebook::testing::TempDir::new("arrivals-mail-long");
         let (app, id) = with_google(
             dir.path(),
-            vec![(
-                "/gmail/v1/users/me/history",
-                json!({ "history": [{ "id": "11" }], "historyId": "99", "nextPageToken": "more" }),
-            )],
+            vec![
+                mailbox_at("10"),
+                (
+                    "/gmail/v1/users/me/history",
+                    json!({ "history": [{ "id": "11" }], "historyId": "99", "nextPageToken": "more" }),
+                ),
+            ],
         )
         .await;
 
-        app.read_mail_notice(&id, &notice(10)).await.unwrap();
-        app.read_mail_notice(&id, &notice(99)).await.unwrap();
+        app.read_mail(&id).await.unwrap();
+        app.read_mail(&id).await.unwrap();
 
         assert_eq!(
             app.store.state(history_key(&id)).unwrap().as_deref(),

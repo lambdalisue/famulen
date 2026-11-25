@@ -69,6 +69,8 @@ pub struct AccountField {
     pub optional: bool,
     /// Kept in the vault and filled only into what goes out.
     pub secret: bool,
+    /// Made by the gateway when missing; nobody is asked for it.
+    pub generated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

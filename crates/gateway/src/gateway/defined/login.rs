@@ -132,7 +132,12 @@ impl Gateway {
             secret.account = kept;
         } else {
             for (field, value) in kept {
-                secret.account.entry(field).or_insert(value);
+                if def.fields.iter().any(|f| f.generated && f.name == field) {
+                    // What was told of it outside goes on naming it.
+                    secret.account.insert(field, value);
+                } else {
+                    secret.account.entry(field).or_insert(value);
+                }
             }
         }
         self.sealed().set_secret(&target, &secret)?;

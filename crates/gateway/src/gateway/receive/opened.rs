@@ -119,6 +119,11 @@ impl Gateway {
     /// those no longer wanted. Call it again whenever connections, logins
     /// or destinations change; what is already open stays open.
     pub fn sync_connections(&self) -> anyhow::Result<()> {
+        for c in self.connections.list()? {
+            if let Err(error) = self.generate_account_values(&c.id) {
+                tracing::warn!(connection = %c.id, %error, "could not make the generated account values");
+            }
+        }
         let wanted = self.wanted()?;
         let mut tasks = crate::lock::lock(&self.running.tasks);
         tasks.retain(|opened, task| {

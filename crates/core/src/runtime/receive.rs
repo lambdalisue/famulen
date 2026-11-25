@@ -76,12 +76,9 @@ pub(super) fn receive(
     app.gateway.register_destination(
         LOOKOUT,
         Arc::new(move |a: Arrival| {
-            let app = lookout_app.clone();
-            tokio::spawn(async move {
-                if let Err(error) = watched(&app, &a).await {
-                    tracing::warn!(connection = %a.connection, %error, "could not read what arrived for the lookout");
-                }
-            });
+            if let Err(error) = watched(&lookout_app, &a) {
+                tracing::warn!(connection = %a.connection, %error, "could not read what arrived for the lookout");
+            }
         }),
     );
     let calendar_app = app.clone();
@@ -114,20 +111,9 @@ fn of_a_delegated_task(app: &App, arrival: &Arrival) -> anyhow::Result<bool> {
     }
 }
 
-/// Hand what arrived to the lookout, as heard from its connection: a Gmail
-/// notice is read into the mail it tells of; anything else is heard as it
-/// came.
-async fn watched(app: &App, arrival: &Arrival) -> anyhow::Result<()> {
+/// Hand what arrived to the lookout, as heard from its connection.
+fn watched(app: &App, arrival: &Arrival) -> anyhow::Result<()> {
     if of_a_delegated_task(app, arrival)? {
-        return Ok(());
-    }
-    let google = app
-        .connections
-        .get(&arrival.connection)?
-        .is_some_and(|c| crate::arrivals::is_google(&c));
-    if google && arrival.receiver == crate::arrivals::MAIL {
-        app.read_mail_notice(&arrival.connection, &arrival.payload)
-            .await?;
         return Ok(());
     }
     let text = match &arrival.payload {
@@ -166,7 +152,6 @@ mod tests {
         sync_receivers(&app).unwrap();
 
         let to = |c: &str, r: &str| app.gateway.destination_of(c, r).unwrap();
-        assert_eq!(to(&google.id, "mail").as_deref(), Some(LOOKOUT));
         assert_eq!(to(&google.id, "calendar").as_deref(), Some(CALENDAR));
         assert_eq!(to(&slack.id, "events").as_deref(), Some(CHANNEL));
         assert_eq!(

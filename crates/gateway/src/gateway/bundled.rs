@@ -87,7 +87,6 @@ mod tests {
         };
 
         assert_eq!(suggested("slack", "events").as_deref(), Some("channel"));
-        assert_eq!(suggested("google", "mail").as_deref(), Some("lookout"));
         assert_eq!(suggested("google", "calendar").as_deref(), Some("calendar"));
     }
 
