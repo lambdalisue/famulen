@@ -1,5 +1,6 @@
 //! The core of famulen.
 
+pub mod agents;
 pub mod app;
 pub mod approvals;
 pub mod arrivals;
