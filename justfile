@@ -20,8 +20,11 @@ lint:
     cargo clippy --workspace --all-targets -- -D warnings
 
 # Run the tests. The notebooks they make are thrown away at once, so Git does
-# not look after each commit whether one needs maintenance.
+# not look after each commit whether one needs maintenance. The library path
+# Nix's cargo sets on macOS for its own curl makes every program a test starts,
+# most of them Git, several times slower; the runner takes it out again.
 test:
+    CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER="env -u DYLD_LIBRARY_PATH" \
     GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false \
     cargo test --workspace --no-fail-fast
 
