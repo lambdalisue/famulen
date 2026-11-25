@@ -129,7 +129,7 @@ impl Workers {
     /// one that is over is not the lookout's to tell of either.
     pub fn heard_of(&self, session: &str) -> anyhow::Result<bool> {
         let run = self.runs.of_session(session)?;
-        if run == Some(true) {
+        if run.is_some() {
             self.heard
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -164,6 +164,15 @@ impl Workers {
     /// Remove what runs of an earlier process left behind.
     pub(crate) fn sweep(&self) {
         std::fs::remove_dir_all(&self.dir).ok();
+    }
+
+    /// What was told of a session was not attended to: it is looked at again
+    /// when the pool next looks.
+    fn hear_again(&self, session: &str) {
+        self.heard
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(session.to_owned());
     }
 
     /// Whether `session` was told of since the last time this was asked.

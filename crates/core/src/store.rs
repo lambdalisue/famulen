@@ -451,6 +451,18 @@ CREATE TABLE IF NOT EXISTS worker_runs (
     started_at INTEGER,
     ended_at   INTEGER
 );
+-- What became of a run after a turn of its session ended.
+CREATE TABLE IF NOT EXISTS worker_again (
+    run          INTEGER PRIMARY KEY,
+    -- how often it went on after it had ended
+    reopened     INTEGER NOT NULL DEFAULT 0,
+    -- how often it was asked to go on after a passing fault; of these, how
+    -- often in a row, when last, and when next
+    continued    INTEGER NOT NULL DEFAULT 0,
+    in_a_row     INTEGER NOT NULL DEFAULT 0,
+    continued_at INTEGER NOT NULL DEFAULT 0,
+    due_at       INTEGER NOT NULL DEFAULT 0
+);
 -- Who delegated a task, in which workgroup, and what it ordered then. Kept
 -- here, where a hand on the notebook does not reach.
 CREATE TABLE IF NOT EXISTS delegations (

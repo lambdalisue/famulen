@@ -235,6 +235,14 @@ pub fn is_delegated(task: &Record) -> bool {
     task.kind == TASKS && task.body.value("Assignee").as_deref() == Some(crate::workers::WORKER)
 }
 
+/// Whether a task whose run ended may be set under way again by that run.
+pub(crate) fn can_resume(task: &Record) -> bool {
+    matches!(
+        task.body.value("Status").as_deref(),
+        Some("in_progress" | "waiting" | "done")
+    )
+}
+
 /// Whether a task is over.
 pub fn is_over(task: &Record) -> bool {
     matches!(
@@ -590,6 +598,35 @@ impl Records {
         let subject = format!("{} の経過を書いた", record.title());
         self.notebook
             .write(&Writer::Secretary.signature(), &record, &subject)
+    }
+
+    /// Set a task its run goes on with under way again. Whether it was: one
+    /// that was put back in the queue, cancelled or taken back is left alone.
+    pub(crate) fn resume_task(&self, id: &str, line: &str) -> anyhow::Result<bool> {
+        let _writing = self.writing()?;
+        let Some(mut record) = self.get(TASKS, id)? else {
+            return Ok(false);
+        };
+        let before = record.body.value("Status").unwrap_or_default();
+        if !is_delegated(&record) || !can_resume(&record) {
+            return Ok(false);
+        }
+        let at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+        if before != "in_progress" {
+            record.body.set("Status", "in_progress")?;
+            record
+                .body
+                .log(&at, "famulen", &format!("{before} → in_progress"))?;
+        }
+        record.body.set("Waiting for", "")?;
+        record.body.set("Finished", "")?;
+        if !log_lines(&record).iter().any(|l| l.text == line) {
+            record.body.log(&at, "famulen", line)?;
+        }
+        let subject = format!("{} の経過を書いた", record.title());
+        self.notebook
+            .write(&Writer::Secretary.signature(), &record, &subject)?;
+        Ok(true)
     }
 
     /// Take a workgroup out of every record. The records stay.
