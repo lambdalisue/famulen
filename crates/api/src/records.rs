@@ -12,13 +12,13 @@ use crate::{Api, OrFail, by_secretary, changed, fail, given, workgroups_for, wri
 
 /// The titles and codes of records, read once for a listing.
 #[derive(Default)]
-struct Names {
+pub(crate) struct Names {
     titles: BTreeMap<String, BTreeMap<String, String>>,
     codes: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl Names {
-    fn link(
+    pub(crate) fn link(
         &mut self,
         records: &core::Records,
         kind: &str,

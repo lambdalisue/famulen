@@ -194,16 +194,45 @@ pub fn log(dir: &Path, limit: usize) -> anyhow::Result<Vec<CommitInfo>> {
     if limit == 0 || !has_head(dir)? {
         return Ok(Vec::new());
     }
-    let out = git(
-        dir,
-        &[
-            "log",
-            &format!("-n{limit}"),
-            "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%B%x1e",
-            "--",
-            ".",
-        ],
-    )?;
+    log_with(dir, limit, &["--", "."])
+}
+
+/// The latest commits that changed the file `rel`, given relative to `dir`,
+/// newest first.
+pub fn file_log(dir: &Path, rel: &str, limit: usize) -> anyhow::Result<Vec<CommitInfo>> {
+    if limit == 0 || !has_head(dir)? {
+        return Ok(Vec::new());
+    }
+    log_with(dir, limit, &["--", &format!(":(literal){rel}")])
+}
+
+/// The latest commits that added, changed or took away a line matching the
+/// extended regular expression `pattern` in `paths`, given relative to `dir`,
+/// newest first.
+pub fn line_log(
+    dir: &Path,
+    pattern: &str,
+    paths: &[&str],
+    limit: usize,
+) -> anyhow::Result<Vec<CommitInfo>> {
+    if limit == 0 || !has_head(dir)? {
+        return Ok(Vec::new());
+    }
+    let pattern = format!("-G{pattern}");
+    let mut args = vec![pattern.as_str(), "--"];
+    args.extend(paths);
+    log_with(dir, limit, &args)
+}
+
+fn log_with(dir: &Path, limit: usize, args: &[&str]) -> anyhow::Result<Vec<CommitInfo>> {
+    let limit = format!("-n{limit}");
+    let mut all = vec![
+        "log",
+        limit.as_str(),
+        "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%B%x1e",
+    ];
+    all.extend(args);
+    let out = git(dir, &all)?;
     out.split('\x1e')
         .map(|record| record.trim_start_matches('\n'))
         .filter(|record| !record.is_empty())
@@ -405,6 +434,29 @@ mod tests {
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].author, owner);
         assert_eq!(log[0].message, "edit core\n\nby hand");
+    }
+
+    #[test]
+    fn the_log_of_a_file_or_a_line_holds_only_the_commits_that_changed_it() {
+        let dir = repo("git-narrow");
+        for (file, text, message) in [
+            ("core.md", "- a {id: m1}\n", "add"),
+            ("core.md", "- a {id: m1}\n- b {id: m12}\n", "add another"),
+            ("pending.md", "- c {id: m3}\n", "elsewhere"),
+            ("core.md", "- a2 {id: m1}\n- b {id: m12}\n", "edit"),
+        ] {
+            std::fs::write(dir.path().join(file), text).unwrap();
+            commit_all(dir.path(), &me(), message).unwrap();
+        }
+        let said =
+            |log: Vec<CommitInfo>| -> Vec<String> { log.into_iter().map(|c| c.message).collect() };
+
+        let file = file_log(dir.path(), "core.md", 10).unwrap();
+        assert_eq!(said(file), ["edit", "add another", "add"]);
+        let line = line_log(dir.path(), "id: m1[,}]", &["core.md", "pending.md"], 10).unwrap();
+        assert_eq!(said(line), ["edit", "add"]);
+        let cut = line_log(dir.path(), "id: m1[,}]", &["core.md"], 1).unwrap();
+        assert_eq!(said(cut), ["edit"]);
     }
 
     #[test]

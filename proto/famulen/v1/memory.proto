@@ -4,6 +4,7 @@ package famulen.v1;
 
 import "famulen/v1/common.proto";
 import "famulen/v1/options.proto";
+import "famulen/v1/records.proto";
 
 // One remembered item: a line in a memory file.
 message MemoryItem {
@@ -18,6 +19,87 @@ message MemoryItem {
   // A note's time of day (HH:MM), when it was written down; the
   // text then leaves it out.
   string time = 6;
+  // A pending judgment's answer that waits for the dream.
+  PendingAnswer answer = 7;
+}
+
+// What the owner answered on a pending judgment.
+message PendingAnswer {
+  bool adopted = 1;
+  // Their own words; empty when they said no more.
+  string words = 2;
+  // The note that holds it, and when it was written (YYYY-MM-DD, HH:MM).
+  string note = 3;
+  string date = 4;
+  string time = 5;
+}
+
+// A remembered item with what it stands on.
+message MemoryDetail {
+  MemoryItem item = 1;
+  // core, pending, long or forgotten.
+  string layer = 2;
+  // semantic, procedural or prospective, in long.
+  string group = 3;
+  // The prose of a long-term memory.
+  string prose = 4;
+  // The dreams that changed it, newest first.
+  repeated MemoryNight nights = 5;
+  // The commits that changed it, newest first.
+  repeated FileChange history = 6;
+  // The memories it names or that name it.
+  repeated RelatedMemory related = 7;
+  // The records it links to.
+  repeated RecordLink links = 8;
+  // The commit that made it, as far back as the history goes.
+  FileChange created = 9;
+}
+
+// What one dream did with an item.
+message MemoryNight {
+  int64 dream = 1;
+  int64 at = 2;
+  // As DreamChange has it.
+  string op = 3;
+  string reason = 4;
+  string previous = 5;
+  // The notes it did it on.
+  repeated MemoryBasis basis = 6;
+}
+
+// A note a dream rested on, as it was then.
+message MemoryBasis {
+  string id = 1;
+  string date = 2;
+  string time = 3;
+  string text = 4;
+  string src = 5;
+  // Where it came from, for GetNoteOrigin; empty when the note did not say.
+  string origin = 6;
+}
+
+message RelatedMemory {
+  // supersedes, superseded or against.
+  string how = 1;
+  MemoryItem item = 2;
+}
+
+message GetMemoryRequest {
+  // The item's id, or else the long-term memory file it is.
+  string id = 1;
+  string path = 2;
+}
+
+message AnswerPendingRequest {
+  string id = 1;
+  // It is right, rather than what the words alone say.
+  bool adopt = 2;
+  string words = 3;
+}
+
+message RejectPendingRequest {
+  string id = 1;
+  string reason = 2;
 }
 
 // Where a note in the inbox came from, as far as it is still known.
@@ -226,9 +308,32 @@ service MemoryService {
   rpc ReadFile(ReadFileRequest) returns (FileContent) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  // Where a note waiting in the inbox (by its id) came from.
+  // Where a note waiting in the inbox (by its id) came from, or what a source
+  // as a memory writes it is (an origin, or slack:<channel>/<ts>).
   rpc GetNoteOrigin(ByName) returns (NoteOrigin) {
     option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // An item of core, pending, long-term or forgotten memory, whole.
+  rpc GetMemory(GetMemoryRequest) returns (MemoryDetail) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // The owner answers a pending judgment, in place of an answer that waits.
+  // It is kept as what they said, for the next dream to settle.
+  rpc AnswerPending(AnswerPendingRequest) returns (MemoryItem) {
+    option (console_only) = true;
+  }
+  // Take back the answer on a pending judgment (by its id) that waits.
+  rpc WithdrawAnswer(ByName) returns (Empty) {
+    option (console_only) = true;
+  }
+  // The owner rejects a pending judgment: it is forgotten at once.
+  rpc RejectPending(RejectPendingRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Put a forgotten item (by its id) that was pending back.
+  rpc RestoreMemory(ByName) returns (Empty) {
     option (console_only) = true;
   }
   // The owner rewrites a memory file; the change is kept as theirs.

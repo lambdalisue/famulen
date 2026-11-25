@@ -20,3 +20,19 @@ textarea.memory-text { min-height: min(60vh, 560px); line-height: 1.8; }
 .figures > div { border: 1px solid var(--line2); border-radius: var(--r); padding: 8px 12px; }
 .figures dd { margin: 0; font-size: var(--t-xl); line-height: 1.3; }
 .figures .none dd { color: var(--muted); }
+.memory-detail { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.memory-detail h3 { margin: var(--s2) 0 0; }
+.memory-summary { margin: 0; font-size: var(--t-md); font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.memory-copied { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.memory-copied code { overflow-wrap: anywhere; }
+.memory-sources { margin: 0; padding: 0; list-style: none; border: 1px solid var(--line2); border-radius: var(--r); }
+.memory-sources > li { padding: 8px 12px; }
+.memory-sources > li + li { border-top: 1px solid var(--line2); }
+.memory-source { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; overflow-wrap: anywhere; }
+.memory-night { display: flex; flex-direction: column; gap: 4px; }
+.memory-basis { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--line-strong); overflow-wrap: anywhere; }
+.memory-card { cursor: pointer; }
+.memory-card:hover { background: var(--panel); }
+.pending-actions { display: flex; flex-direction: column; gap: var(--s2); }
+.pending-actions > .row { flex-wrap: wrap; gap: var(--s2); }
+textarea.pending-words { width: 100%; min-height: 72px; line-height: 1.6; }

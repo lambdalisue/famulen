@@ -101,6 +101,23 @@ pub struct Change {
     /// The item's `reason=` attribute, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The notes it rests on, as they were: the inbox lets go of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub basis: Vec<Basis>,
+}
+
+/// A note a change rests on.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Basis {
+    pub id: String,
+    /// The day it was written.
+    pub date: String,
+    pub time: String,
+    pub text: String,
+    pub src: String,
+    /// Where it came from, as its `origin=` attribute says.
+    pub origin: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -135,6 +152,7 @@ impl DreamDiff {
                 from_file: None,
                 replaces: None,
                 reason: now.entry.get("reason").map(str::to_string),
+                basis: Vec::new(),
             };
             match now.layer {
                 Layer::Core | Layer::Long(_) => {
@@ -171,6 +189,7 @@ impl DreamDiff {
                 from_file: None,
                 replaces: None,
                 reason: None,
+                basis: Vec::new(),
             };
             let Some(now) = after.entries.get(id) else {
                 changes.push(base);

@@ -524,6 +524,7 @@ fn apply(
         from_file,
         replaces: None,
         reason: Some(reason.to_owned()),
+        basis: Vec::new(),
     };
     match judged.verdict.as_str() {
         SUSPECT => {

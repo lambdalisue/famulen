@@ -1,23 +1,20 @@
-import { createAsync, Navigate, useParams } from "@solidjs/router";
+import { createAsync, Navigate, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
 import NoteSheet from "~/components/NoteSheet";
-import { EntryRow, SrcTag } from "~/components/MemoryEntry";
-import { EmptyState, IconButton, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
-import type { Layer, MemoryItem } from "~/gen/famulen/v1/memory_pb";
+import { GROUP_NAMES, MemorySheet } from "~/components/MemoryDetail";
+import { DetailLink, EntryRow, SrcTag, usePick } from "~/components/MemoryEntry";
+import PendingActions from "~/components/PendingActions";
+import { EmptyState, IconButton, Keyed, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
+import type { Layer, MemoryFile, MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import * as icons from "~/lib/icons";
 import { layerQuery, visible } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
+import { keepScroll } from "~/lib/keepScroll";
 import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
 import { workgroup } from "~/lib/workgroup";
-
-const LONG_GROUPS: [string, string][] = [
-  ["semantic", "意味記憶"],
-  ["procedural", "手続き記憶"],
-  ["prospective", "展望記憶"],
-];
 
 const LAYERS = ["pending", "episodic", "working", "core", "long", "forgotten"];
 
@@ -53,30 +50,49 @@ function Periods(props: { periods: string[]; at: string; layer: string; label: (
 const shown = (items: MemoryItem[]) => items.filter((e) => visible(e, workgroup()));
 
 function Pending(props: { data: Layer; aide: string }) {
+  const pick = usePick();
   return (
     <>
       <PageHeader title="保留中の判断" note="まったく急がない。答えなくてよい。" actions={<FileLink path="pending.md" />} />
       <List>
-        <For each={shown(props.data.items)} fallback={<EmptyState>いまはない</EmptyState>}>
-          {(e) => (
-            <ListRow
-              class="memory-row"
-              title={<Markdown inline text={e.text} />}
-              sub={
-                <>
-                  <span>
-                    根拠 {e.attrs.ev ?? "0"} / 要る {e.attrs.need ?? "2"}
-                  </span>
-                  <Show when={e.attrs.against}>
-                    <span>あなたの言葉と食い違う</span>
-                  </Show>
-                </>
-              }
-              end={<AskAbout what={`保留中の判断：${e.text}`} label="答える" />}
-            />
-          )}
-        </For>
+        <Show when={shown(props.data.items).length > 0} fallback={<EmptyState>いまはない</EmptyState>}>
+          <Keyed each={shown(props.data.items)} by={(e) => e.id || e.text}>
+            {(e) => (
+              <ListRow
+                class="memory-row wraps"
+                title={<Markdown inline text={e().text} />}
+                sub={
+                  <>
+                    <SrcTag src={e().src} />
+                    <span>
+                      根拠 {e().attrs.ev ?? "0"} / 要る {e().attrs.need ?? "2"}
+                    </span>
+                    <Show when={e().attrs.against}>
+                      <span>あなたの言葉と食い違う</span>
+                    </Show>
+                  </>
+                }
+                onPick={() => pick(e())}
+                end={
+                  <>
+                    <AskAbout what={`保留中の判断：${e().text}`} />
+                    <DetailLink item={e()} />
+                  </>
+                }
+              >
+                <Show when={e().id}>
+                  <div class="item-more">
+                    <PendingActions item={e()} />
+                  </div>
+                </Show>
+              </ListRow>
+            )}
+          </Keyed>
+        </Show>
       </List>
+      <p class="sub">
+        採用と、書いた判断は、あなたの言葉として次の夢が記憶に入れる。却下したものはすぐ忘却に移り、保留に戻せる。何もしなければ保留のまま。
+      </p>
       <p class="sub">
         夢のたびに根拠を数え直し、そろえば {props.aide}{" "}
         が自分で決めて長期記憶に移す。話の流れで確かめられるときだけ、ついでに聞く。あなたの言ったことを覆すには、ふつうより多い根拠が要る。
@@ -125,17 +141,25 @@ function Notes(props: { data: Layer }) {
 }
 
 function Working(props: { data: Layer }) {
+  const navigate = useNavigate();
+  const href = (name: string) => withParams("/memory/file", { path: `working/${name}.md` });
   return (
     <>
       <PageHeader title="作業記憶" note="いま進めている仕事の途中経過。済めば消える。" />
       <For each={props.data.working} fallback={<EmptyState>いま進めている仕事はない</EmptyState>}>
         {(w) => (
-          <article class="card stack">
+          <article
+            class="card stack memory-card"
+            onClick={(e) => {
+              const selecting = window.getSelection()?.isCollapsed === false;
+              if (!selecting && e.target instanceof Element && !e.target.closest("a, button, .md-link")) navigate(href(w.name));
+            }}
+          >
             <div class="row">
               <h2 class="grow">
                 <Markdown inline text={w.title || w.name} />
               </h2>
-              <FileLink path={`working/${w.name}.md`} />
+              <LinkButton small variant="ghost" icon={icons.listDetails} label={`${w.title || w.name} ― 詳細を見る`} href={href(w.name)} />
             </div>
             <dl class="memory-working">
               <dt>ここまで</dt>
@@ -175,33 +199,54 @@ function Core(props: { data: Layer }) {
       <Meter label="大きさ" value={lines()} max={limit()} unit="行" />
       <p class="sub">上限を超えそうになると、夢の中で使われていないものから心得を外す。外しても長期記憶には残る。</p>
       <List>
-        <For each={shown(props.data.items)} fallback={<EmptyState>まだない</EmptyState>}>
-          {(e) => <EntryRow item={e} />}
-        </For>
+        <Show when={shown(props.data.items).length > 0} fallback={<EmptyState>まだない</EmptyState>}>
+          <Keyed each={shown(props.data.items)} by={(e) => e.id || e.text}>
+            {(e) => <EntryRow item={e()} />}
+          </Keyed>
+        </Show>
       </List>
     </>
   );
 }
 
 function Long(props: { data: Layer }) {
-  const files = (group: string) => props.data.files.filter((f) => f.path.split("/")[1] === group);
+  let top!: HTMLDivElement;
+  keepScroll("memory.long", () => top, "/memory/file");
+  const rows = (group: string) =>
+    props.data.files
+      .filter((f) => f.path.split("/")[1] === group)
+      .flatMap((file): { key: string; file: MemoryFile; entry?: MemoryItem }[] =>
+        file.entries.length === 0 ? [{ key: file.path, file }] : shown(file.entries).map((entry) => ({ key: file.path, file, entry })),
+      );
   return (
     <>
-      <PageHeader title="長期記憶" note="覚えたこと。必要なときに読みに行く。" />
-      <For each={LONG_GROUPS}>
+      <div ref={top} />
+      <PageHeader title="長期記憶" note="覚えたこと。必要なときに読みに行く。押すと詳細が開く。" />
+      <For each={GROUP_NAMES}>
         {([group, label]) => (
-          <section class="stack">
-            <h3>{label}</h3>
-            <For each={files(group)} fallback={<EmptyState>まだない</EmptyState>}>
-              {(f) => (
-                <Section title={<Markdown inline text={f.title.replace(/\.md$/, "")} />} action={<FileLink path={f.path} />}>
-                  <List>
-                    <For each={shown(f.entries)}>{(e) => <EntryRow item={e} />}</For>
-                  </List>
-                </Section>
-              )}
-            </For>
-          </section>
+          <Section title={label}>
+            <List>
+              <Show when={rows(group).length > 0} fallback={<EmptyState>まだない</EmptyState>}>
+                <Keyed each={rows(group)} by={(r) => r.key}>
+                  {(r) => (
+                    <Show
+                      when={r().entry}
+                      fallback={
+                        <ListRow
+                          leads
+                          href={withParams("/memory/file", { path: r().file.path })}
+                          title={r().file.title}
+                          sub="まだ何も書かれていない"
+                        />
+                      }
+                    >
+                      {(e) => <EntryRow item={e()} />}
+                    </Show>
+                  )}
+                </Keyed>
+              </Show>
+            </List>
+          </Section>
         )}
       </For>
     </>
@@ -209,6 +254,7 @@ function Long(props: { data: Layer }) {
 }
 
 function Forgotten(props: { data: Layer; at: string }) {
+  const pick = usePick();
   const month = () => props.at || props.data.periods[0] || "";
   return (
     <>
@@ -239,7 +285,13 @@ function Forgotten(props: { data: Layer; at: string }) {
                     <span>{e.attrs.forgot ?? ""}</span>
                   </>
                 }
-                end={<AskAbout what={`忘れた記憶：${e.text}`} label="戻すよう頼む" />}
+                onPick={() => pick(e)}
+                end={
+                  <>
+                    <AskAbout what={`忘れた記憶：${e.text}`} label="戻すよう頼む" />
+                    <DetailLink item={e} />
+                  </>
+                }
               />
             )}
           </For>
@@ -253,6 +305,8 @@ export default function MemoryLayer() {
   const params = useParams();
   const at = useParam("at");
   const owner = useOwner();
+  const [search, setSearch] = useSearchParams<{ item?: string }>();
+  const sheet = () => (["pending", "core", "forgotten"].includes(params.layer ?? "") ? (search.item ?? "") : "");
   const known = () => LAYERS.includes(params.layer ?? "");
   const data = createAsync(async () => (known() ? layerQuery(params.layer ?? "", at()) : undefined));
   createEffect(() => {
@@ -286,6 +340,7 @@ export default function MemoryLayer() {
             </Switch>
           )}
         </Show>
+        <MemorySheet id={sheet()} layer={params.layer ?? ""} onClose={() => setSearch({ item: undefined }, { scroll: false })} />
       </Show>
     </Show>
   );

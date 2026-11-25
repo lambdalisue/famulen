@@ -363,6 +363,33 @@ pub fn forget(
     Ok(entry)
 }
 
+/// Put a forgotten item back at the end of the one-line layer file it was in,
+/// without what forgetting noted on it. A long-term memory is not put back:
+/// only its summary was kept.
+pub fn restore(dir: &Path, id: &str) -> anyhow::Result<(PathBuf, Entry)> {
+    for month in forgotten_months(dir)?.into_iter().rev() {
+        let rel = forgotten_path(&month);
+        let mut doc = read_doc(dir, &rel)?;
+        let Some(mut entry) = doc.remove(id) else {
+            continue;
+        };
+        let was = PathBuf::from(entry.get("was").unwrap_or_default());
+        anyhow::ensure!(
+            matches!(Layer::of(&was), Some(Layer::Core | Layer::Pending)),
+            "{id} was not in core or pending memory, and cannot be put back"
+        );
+        for key in ["forgot", "reason", "was"] {
+            entry.remove_attr(key);
+        }
+        let mut target = doc_to_add_to(dir, &was)?;
+        target.push(entry.clone())?;
+        target.save(&dir.join(&was))?;
+        doc.save(&dir.join(rel))?;
+        return Ok((was, entry));
+    }
+    anyhow::bail!("no forgotten item {id}")
+}
+
 /// The months that have a forgotten file (`YYYY-MM`), oldest first.
 pub fn forgotten_months(dir: &Path) -> anyhow::Result<Vec<String>> {
     Ok(markdown_files(dir, Path::new(FORGOTTEN))?
@@ -463,6 +490,29 @@ mod tests {
             std::fs::read_to_string(tmp.path().join(CORE)).unwrap(),
             "# 心得\n\n- x\n"
         );
+    }
+
+    #[test]
+    fn a_forgotten_pending_item_goes_back_as_it_was_and_a_long_term_one_does_not() {
+        let tmp = TempDir::new("restore");
+        let dir = tmp.path();
+        ensure(dir).unwrap();
+        let pending = "# 保留中の判断\n\n- 朝が好き {id: m1, src: inferred, ev: 1}\n";
+        write_file(dir, PENDING, pending.as_bytes()).unwrap();
+        let long = "---\nid: m2\nsummary: 紅茶\n---\n\n長い本文\n";
+        write_file(dir, "long/semantic/tea.md", long.as_bytes()).unwrap();
+        let on = date(2026, 11, 25);
+        forget(dir, PENDING, "m1", "違う", on).unwrap();
+        forget(dir, "long/semantic/tea.md", "m2", "古い", on).unwrap();
+
+        restore(dir, "m1").unwrap();
+
+        assert_eq!(read_file(dir, PENDING).unwrap(), pending);
+        assert!(restore(dir, "m2").is_err());
+        assert!(restore(dir, "m1").is_err());
+        let left = forgotten(dir, "2026-11").unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id(), Some("m2"));
     }
 
     #[test]

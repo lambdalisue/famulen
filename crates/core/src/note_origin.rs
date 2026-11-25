@@ -277,6 +277,45 @@ impl App {
         Ok(told)
     }
 
+    /// What can still be told of a source as a memory writes it: an origin, or
+    /// `slack:<channel>/<ts>`, which leaves open which workspace it is in.
+    pub async fn told_of_source(&self, source: &str) -> anyhow::Result<Told> {
+        if let Some(origin) = Origin::parse(source) {
+            return self.told_of(origin).await;
+        }
+        let Some((channel, ts)) = source
+            .strip_prefix("slack:")
+            .and_then(|rest| rest.split_once('/'))
+            .filter(|(channel, ts)| is_plain(channel) && is_plain(ts))
+        else {
+            return Ok(Told::default());
+        };
+        let asked = self
+            .connections
+            .list()?
+            .into_iter()
+            .filter(crate::channel::is_slack)
+            .map(|c| async move {
+                let url = self.permalink(&c, channel, ts).await;
+                url.map(|_| c.id)
+            });
+        let Some(connection) = futures_util::future::join_all(asked)
+            .await
+            .into_iter()
+            .flatten()
+            .next()
+        else {
+            return Ok(Told::default());
+        };
+        let (channel, ts) = (channel.to_owned(), ts.to_owned());
+        self.told_of(Origin::Slack {
+            connection,
+            channel,
+            ts,
+        })
+        .await
+    }
+
     /// The text at `pointer` of what a tool answers in time.
     async fn asked(
         &self,
@@ -436,6 +475,21 @@ mod tests {
             told.excerpt,
             "田中（U0TANAKA1） a < b 資料 #dev https://y.example"
         );
+    }
+
+    #[tokio::test]
+    async fn a_source_that_names_no_workspace_is_found_in_the_one_that_knows_it() {
+        let dir = TempDir::new("origin-source");
+        let (app, _, _) = crate::slack::names::tests::with_slack(dir.path(), &[]).await;
+
+        let told = app.told_of_source("slack:C1/1795598544.5").await.unwrap();
+        assert_eq!(told.url, "https://acme.slack.com/archives/C1/p1");
+        assert_eq!(told.channel, "#general");
+        assert_eq!(told.at, Some(1_795_598_544));
+
+        for unknown in ["slack:プロフィール", "AI との会話", ""] {
+            assert_eq!(app.told_of_source(unknown).await.unwrap(), Told::default());
+        }
     }
 
     #[tokio::test]

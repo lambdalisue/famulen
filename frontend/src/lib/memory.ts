@@ -1,10 +1,12 @@
 import { query } from "@solidjs/router";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import { api } from "./api";
+import { withParams } from "./params";
 
 export const layersQuery = query(async () => (await api.memory.listLayers({})).layers, "memoryLayers");
 export const layerQuery = query((layer: string, at: string) => api.memory.getLayer({ layer, at }), "memoryLayer");
 export const noteOriginQuery = query((id: string) => api.memory.getNoteOrigin({ id }), "noteOrigin");
+export const memoryQuery = query((id: string, path: string) => api.memory.getMemory({ id, path }), "memory");
 export const memoryFileQuery = query((path: string) => api.memory.readFile({ path }), "memoryFile");
 export const dreamsQuery = query(() => api.memory.listDreams({}), "dreams");
 export const dreamSettingsQuery = query(() => api.memory.getDreamSettings({}), "dreamSettings");
@@ -18,6 +20,33 @@ export function layerHref(id: string): string {
 export function layerOfFile(path: string): string {
   const head = path.split("/")[0]?.replace(/\.md$/, "") ?? "";
   return ["core", "pending", "episodic", "working", "forgotten"].includes(head) ? head : "long";
+}
+
+/** Where a memory's details open: the page of its file, or over the list of its layer. */
+export function itemHref(item: MemoryItem): string {
+  const layer = layerOfFile(item.file);
+  if (layer === "long" || layer === "working" || !item.id) return withParams("/memory/file", { path: item.file });
+  const at = layer === "forgotten" ? item.file.replace(/^.*\/|\.md$/g, "") : "";
+  return withParams(layerHref(layer), { at, item: item.id });
+}
+
+/** What a memory's prose says of where it came from, apart from the rest of it. */
+export function splitSources(prose: string): { prose: string; sources: string[] } {
+  const sources: string[] = [];
+  let fence: string | undefined;
+  const lines = prose.split("\n").filter((line) => {
+    const mark = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== undefined) {
+      if (mark?.startsWith(fence)) fence = undefined;
+      return true;
+    }
+    fence = mark;
+    const said = /^(?:出どころ|出所)[：:]\s*(.+)$/.exec(line)?.[1];
+    if (!said) return true;
+    sources.push(...said.split(/[、,]\s*/).map((s) => s.trim()).filter(Boolean));
+    return false;
+  });
+  return { prose: lines.join("\n").trim(), sources };
 }
 
 /**

@@ -5,6 +5,7 @@ import Markdown from "~/components/Markdown";
 import { EmptyState, Legend, LinkButton, List, Loading, PageHeader, Section, Tag } from "~/components/ui";
 import type { Dream } from "~/gen/famulen/v1/memory_pb";
 import { dateTimeText } from "~/lib/dates";
+import { OP_LABELS } from "~/lib/dreams";
 import * as icons from "~/lib/icons";
 import { dreamSettingsQuery, dreamsQuery } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
@@ -17,19 +18,6 @@ const OPS: [string, string][] = [
   ["置き換えた", "#1baf7a"],
   ["忘れた", "#eda100"],
 ];
-
-const OP_LABELS: Record<string, string> = {
-  added: "足した",
-  edited: "直した",
-  replaced: "置き換えた",
-  archived: "忘れた",
-  confirmed: "確かめた",
-  pending_added: "保留にした",
-  moved: "移した",
-  deleted: "消した",
-  task_made: "タスクにした",
-  doubted: "古いかも",
-};
 
 /** What a bar is made of, in the order of OPS. */
 function opCounts(d: Dream): number[] {
