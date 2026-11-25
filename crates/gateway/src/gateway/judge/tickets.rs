@@ -219,6 +219,73 @@ impl Gateway {
             .collect())
     }
 
+    /// The ticket that already puts what `call` decides to the owner: the
+    /// same thing is asked of them once.
+    pub(super) fn held_on(&self, call: &Call, decides: &Value) -> anyhow::Result<Option<Ticket>> {
+        match decides["id"].as_str() {
+            Some(id) => Ok(self.held_tickets()?.into_iter().rfind(|t| {
+                t.actor == call.actor
+                    && t.connection == call.connection
+                    && t.tool == call.tool
+                    && t.shown["decides"]["id"] == id
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// The ticket of `tool` that puts the question `id` of a connection to
+    /// the owner.
+    pub fn held_decided(
+        &self,
+        connection: &str,
+        tool: &str,
+        id: &str,
+    ) -> anyhow::Result<Option<Ticket>> {
+        Ok(self.held_tickets()?.into_iter().rfind(|t| {
+            t.connection == connection && t.tool == tool && t.shown["decides"]["id"] == id
+        }))
+    }
+
+    /// Answer on the owner's word what `call` decides, which nothing asked
+    /// them of: checked and logged as an answer to a request is, with no
+    /// request put to them first.
+    pub async fn answer_unasked(
+        &self,
+        call: &Call,
+        answer: Answer,
+        replies: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let (permission, why) = self.permission_of(call)?;
+        anyhow::ensure!(permission != Permission::Forbid, "{why}");
+        let decides = self
+            .decided_by(&call.connection, &call.tool, &call.input)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("{} is not asked each time", call.tool))?;
+        let call = Call {
+            decides: Some(decides),
+            ..call.clone()
+        };
+        let ticket = self.hold(&call, "the owner answers it unasked")?;
+        let answered = if replies.is_empty() {
+            self.answer_ticket(ticket.id, answer).await
+        } else {
+            self.fill_ticket(ticket.id, replies).await
+        };
+        if answered.is_err() {
+            self.withdraw_ticket(ticket.id)?;
+        }
+        let ran = answered?
+            .and_then(|a| a.ran)
+            .ok_or_else(|| anyhow::anyhow!("it was answered already"))?;
+        if ran.is_err() {
+            self.store.conn().execute(
+                "UPDATE tickets SET status = 'lapsed' WHERE id = ?1",
+                params![ticket.id],
+            )?;
+        }
+        ran
+    }
+
     /// Take back the held tickets about a question that is asked no more;
     /// their ids.
     pub fn withdraw_decided(&self, connection: &str, id: &str) -> anyhow::Result<Vec<i64>> {

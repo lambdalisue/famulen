@@ -415,7 +415,10 @@ impl Gateway {
                 return Ok(unasked("the owner is asked of every call"));
             }
             return Ok(match &call.decides {
-                Some(_) => Verdict::Hold(self.hold(call, "the owner is asked of every call")?),
+                Some(decides) => Verdict::Hold(match self.held_on(call, decides)? {
+                    Some(ticket) => ticket,
+                    None => self.hold(call, "the owner is asked of every call")?,
+                }),
                 None => Verdict::Deny {
                     reason: "what it decides was not read".into(),
                 },

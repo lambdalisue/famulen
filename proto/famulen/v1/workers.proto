@@ -3,6 +3,7 @@ syntax = "proto3";
 package famulen.v1;
 
 import "famulen/v1/common.proto";
+import "famulen/v1/console.proto";
 import "famulen/v1/options.proto";
 import "famulen/v1/records.proto";
 
@@ -95,6 +96,34 @@ message WorkerRun {
   int32 percent = 16;
   // What it does now, in the worker's words.
   string doing = 17;
+  // What its session asks the owner, when it can be told.
+  RunQuestion question = 18;
+}
+
+// What an Adroit session waits on the owner for.
+message RunQuestion {
+  string id = 1;
+  // What is asked, as a request of it shows it. Its id is the request that
+  // puts it to the owner already, or 0.
+  Approval approval = 2;
+  // It is not told whole, so it can be answered only in Adroit.
+  bool truncated = 3;
+}
+
+message AnswerRunRequest {
+  int64 run = 1;
+  // The question's id.
+  string question = 2;
+  // Allow or deny.
+  ApprovalAnswer answer = 3;
+  // An answer for each question it asks, with allow.
+  repeated string replies = 4;
+}
+
+message AskRunAgainRequest {
+  int64 run = 1;
+  // The question's id.
+  string question = 2;
 }
 
 message ReadRunRequest {
@@ -195,6 +224,14 @@ service WorkerService {
   // Cancel a delegated task, by its code or id. An agent is stopped; an
   // Adroit session is left running for the owner, or end_session.
   rpc CancelDelegated(ByName) returns (Record);
+  // Give a run's session the owner's answer to what it waits on them for.
+  rpc AnswerRun(AnswerRunRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Put what a run's session waits for to the owner anew, as a request.
+  rpc AskRunAgain(AskRunAgainRequest) returns (Empty) {
+    option (console_only) = true;
+  }
   rpc GetWorkerSettings(Empty) returns (WorkerSettings) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

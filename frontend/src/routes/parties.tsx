@@ -203,8 +203,8 @@ export default function Parties() {
           id={id}
           back="/parties"
           lead={(r) => <Avatar party={r} index={index(r)} />}
-          top={(r) => <Guessed party={r} />}
-          extra={(r) => <Around party={r} />}
+          top={(r) => <Guessed party={r()} />}
+          extra={(r) => <Around party={r()} />}
         />
       )}
       add={{ label: "グループを足す", titleLabel: "名前", fields: [], preset: { Kind: "group" } }}

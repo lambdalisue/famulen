@@ -1,5 +1,5 @@
 import { createAsync, revalidate, useNavigate } from "@solidjs/router";
-import { createSignal, ErrorBoundary, For, type JSX, Show, Suspense } from "solid-js";
+import { createSignal, ErrorBoundary, For, type JSX, Show, Suspense, untrack } from "solid-js";
 import { Button, Disclosure, EmptyState, ErrorState, Keyed, Loading, whenConfirmed } from "~/components/ui";
 import type { RecordKind, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act } from "~/lib/act";
@@ -37,12 +37,12 @@ type Extra = {
   back: string;
   /** What this kind shows beside the title. */
   lead?: (r: Rec) => JSX.Element;
-  /** What this kind shows above the rest. */
-  top?: (r: Rec) => JSX.Element;
+  /** What this kind shows above the rest, made once as the record is read again. */
+  top?: (r: () => Rec) => JSX.Element;
   /** What its fields are folded under, where what is above says them already. */
   fold?: string;
   /** What this kind shows below its fields. */
-  extra?: (r: Rec) => JSX.Element;
+  extra?: (r: () => Rec) => JSX.Element;
 };
 
 /** The record's file, as it is written. */
@@ -141,7 +141,7 @@ function Content(props: { record: Rec } & Extra) {
         <Header record={r()} view={view()} onView={setView} save={save} onRemove={() => void remove()} lead={props.lead?.(r())} />
         <Show when={view() === "view"} fallback={<Raw record={r()} />}>
           <Standing record={r()} />
-          {props.top?.(r())}
+          {untrack(() => props.top?.(r))}
           <div class="rec-columns">
             <div class="rec-body">
               <Show when={!free() && kind()}>
@@ -171,7 +171,7 @@ function Content(props: { record: Rec } & Extra) {
                 links={r().links}
                 onSave={async (notes) => (await save({ notes })) !== undefined}
               />
-              {props.extra?.(r())}
+              {untrack(() => props.extra?.(r))}
             </div>
             <div class="rec-aside">
               <Show when={kind()}>{(k) => <Sections record={r()} kind={k()} aide={owner.aide()} save={save} />}</Show>

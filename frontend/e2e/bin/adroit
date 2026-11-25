@@ -1,0 +1,37 @@
+#!/usr/bin/env perl
+# Stands in for Adroit: a session waits on the owner as soon as it is started,
+# for a permission when its prompt says so, and is done once it is answered.
+use strict;
+use warnings;
+
+my $dir = $ENV{E2E_ADROIT_DIR} or die "E2E_ADROIT_DIR is not set";
+my (undef, $command, @args) = @ARGV;
+
+sub put {
+    my ($id, $text) = @_;
+    open my $out, '>', "$dir/$id.new" or die $!;
+    print $out $text;
+    close $out;
+    rename "$dir/$id.new", "$dir/$id" or die $!;
+}
+
+if ($command eq 'start') {
+    my $id = "s$$";
+    my $input = $args[-1] =~ /e2e-permission/
+        ? '"kind":"permission","tool":"Bash","input":{"command":"rm -rf build"}'
+        : '"kind":"question","tool":"AskUserQuestion","input":{"questions":[{"question":"このセッションを閉じますか？","options":[{"label":"閉じる"},{"label":"残す"}]}]}';
+    put($id, qq({"id":"$id","state":"waiting","question":{"id":"q-$id","truncated":false,$input},"turns":[],"undelivered":0}));
+    print qq({"id":"$id"});
+} elsif ($command eq 'show') {
+    open my $in, '<', "$dir/$args[0]" or die "no such session\n";
+    print <$in>;
+} elsif ($command eq 'answer') {
+    my $id = shift @args;
+    my $said = join ' ', grep { !/^--(question|json)$/ && $_ ne "q-$id" } @args;
+    put($id, qq({"id":"$id","state":"done","turns":[{"turn":1,"prompt":"p","reply":"答え: $said"}],"undelivered":0}));
+    print '{}';
+} elsif ($command eq 'watch') {
+    sleep 3600;
+} else {
+    print '[]';
+}

@@ -517,6 +517,7 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
         };
 
         let first = hold(call("q1")).await;
+        assert_eq!(hold(call("q1")).await.id, first.id, "asked once");
         assert_eq!(first.shown["decides"]["text"], "rm -rf?");
         assert_eq!(first.shown["call"]["question"], "q1");
         assert!(matches!(
@@ -597,6 +598,36 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
                 .is_none()
         );
 
+        let unasked = Call::new("owner", "ask", "answer", json!({ "question": "q1" }));
+        let mut told = g.subscribe_held();
+        let lacking = g.answer_unasked(&unasked, Answer::Approve, vec![]);
+        assert!(lacking.await.is_err(), "its questions were not answered");
+        assert_eq!(g.ticket(ticket.id + 1).unwrap().unwrap().status, "lapsed");
+        g.answer_unasked(&unasked, Answer::Approve, vec!["e f".into()])
+            .await
+            .unwrap();
+        let stale = Call::new("owner", "ask", "answer", json!({ "question": "q0" }));
+        for (call, replies) in [(&stale, vec!["g".into()]), (&unasked, vec![" ".into()])] {
+            assert!(
+                g.answer_unasked(call, Answer::Approve, replies)
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(told.try_recv().is_err(), "nothing is asked of the owner");
+        assert!(g.held_tickets().unwrap().is_empty());
+        g.set_permission(
+            "owner",
+            "conn:ask",
+            "answer",
+            Some(crate::permissions::Permission::Forbid),
+        )
+        .unwrap();
+        let forbidden = g.answer_unasked(&unasked, Answer::Approve, vec!["h".into()]);
+        assert!(forbidden.await.is_err());
+        g.set_permission("owner", "conn:ask", "answer", None)
+            .unwrap();
+
         let approved = g
             .answer_ticket(hold().await.id, Answer::Approve)
             .await
@@ -604,7 +635,7 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
         assert!(approved.unwrap().ran.unwrap().is_err(), "not answered");
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
-            "k-1 allow q1 --reply b c\n"
+            "k-1 allow q1 --reply b c\nk-1 allow q1 --reply e f\n"
         );
         std::fs::remove_file(&file).ok();
     }
