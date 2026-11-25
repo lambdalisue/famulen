@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { call, detail, field, record, row, toast, visit } from "./support";
+import { call, detail, field, record, row, throughTab, toast, visit } from "./support";
 
 const me = (as: string) => [{ name: "Relations", items: [{ text: "me", fields: [{ name: "As", value: as }] }] }];
 
@@ -133,13 +133,7 @@ for (const [name, viewport] of [
       await record(request, "parties", `無地 ${name}`, { fields: { Kind: "person" } });
       await pictured(page, p.id, "e2e-picture");
       await page.route("**/party-pictures/e2e-picture", (route) => route.fulfill({ contentType: "image/png", body: PIXEL }));
-      await visit(page, "/memos", /^メモ/);
-      await page.evaluate(() => {
-        const a = document.createElement("a");
-        a.href = "/parties";
-        document.querySelector("main")?.append(a);
-        a.click();
-      });
+      await throughTab(page, "/parties");
       const inList = row(page, `画像 ${name}`).locator(".avatar img");
       await expect(inList).toHaveAttribute("src", "/party-pictures/e2e-picture");
       await expect(row(page, `無地 ${name}`).locator(".avatar")).toHaveText("無");
@@ -159,13 +153,7 @@ for (const [name, viewport] of [
 test("a picture that is not there leaves the start of the name", async ({ page, request }) => {
   const p = await record(request, "parties", "欠画さん", { fields: { Kind: "person" } });
   await pictured(page, p.id, "gone");
-  await visit(page, "/memos", /^メモ/);
-  await page.evaluate(() => {
-    const a = document.createElement("a");
-    a.href = "/parties";
-    document.querySelector("main")?.append(a);
-    a.click();
-  });
+  await throughTab(page, "/parties");
   await expect(row(page, "欠画さん").locator(".avatar")).toHaveText("欠");
   await expect(row(page, "欠画さん").locator(".avatar img")).toHaveCount(0);
 });
