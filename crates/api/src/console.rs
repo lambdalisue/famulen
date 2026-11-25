@@ -9,6 +9,7 @@ use famulen_core::input::{Input, Sender, Source};
 use famulen_core::store::StoredInput;
 use famulen_core::wording;
 use famulen_core::workgroups::ALL;
+use famulen_core::working;
 use futures::StreamExt;
 use serde_json::json;
 
@@ -123,6 +124,16 @@ fn shown_in(m: &console_log::Message, workgroup: &str) -> bool {
     workgroup.is_empty()
         || workgroup == ALL
         || meta_text(m, "workgroup").is_none_or(|c| c == workgroup || c == ALL)
+}
+
+impl From<working::Shown> for pb::Working {
+    fn from(shown: working::Shown) -> Self {
+        Self {
+            text: shown.text,
+            seconds: shown.seconds as i32,
+            ..Default::default()
+        }
+    }
 }
 
 impl Api {
@@ -330,6 +341,7 @@ impl ConsoleService for Api {
         };
         self.app.store.enqueue(&input).or_fail()?;
         self.app.inputs.notify_one();
+        self.app.working.tell();
         Response::ok(message(&m))
     }
 
@@ -344,6 +356,7 @@ impl ConsoleService for Api {
             meta["open"] = json!(r.open);
         }
         let m = self.app.console.add(Who::Aide, &r.text, meta).or_fail()?;
+        self.app.working.answered();
         Response::ok(message(&m))
     }
 
@@ -439,8 +452,9 @@ impl ConsoleService for Api {
         use pb::__buffa::oneof::console_event::Event as E;
         let workgroup = request.workgroup.to_owned();
         let receiver = self.app.console.subscribe();
+        let working = self.app.working.clone();
         let stream = as_stream(receiver).filter_map(move |event| {
-            let workgroup = workgroup.clone();
+            let (workgroup, working) = (workgroup.clone(), working.clone());
             async move {
                 let event = match event {
                     Event::Message(m) if shown_in(&m, &workgroup) => {
@@ -449,6 +463,13 @@ impl ConsoleService for Api {
                     Event::Message(_) => return None,
                     Event::Approvals => E::Inbox(Box::default()),
                     Event::Records => E::Records(Box::default()),
+                    Event::Working => E::Working(Box::new(match working.shown(&workgroup) {
+                        Ok(shown) => shown.map(pb::Working::from).unwrap_or_default(),
+                        Err(error) => {
+                            tracing::warn!(%error, "could not tell what the secretary is doing");
+                            return None;
+                        }
+                    })),
                 };
                 Some(Ok(ConsoleEvent {
                     event: Some(event),
@@ -460,6 +481,9 @@ impl ConsoleService for Api {
     }
 }
 
+/// What tells a screen to read everything again.
+const AGAIN: [Event; 2] = [Event::Records, Event::Working];
+
 /// The broadcast as a stream. A receiver is told to read everything again when
 /// it begins, as what it read before may have changed since, and when it fell
 /// behind.
@@ -468,14 +492,14 @@ fn as_stream(
 ) -> impl futures::Stream<Item = Event> + Send + 'static {
     let told = futures::stream::unfold(receiver, |mut receiver| async move {
         match receiver.recv().await {
-            Ok(event) => Some((event, receiver)),
+            Ok(event) => Some((vec![event], receiver)),
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                Some((Event::Records, receiver))
+                Some((AGAIN.to_vec(), receiver))
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
         }
     });
-    futures::stream::iter([Event::Records]).chain(told)
+    futures::stream::iter(AGAIN).chain(told.flat_map(futures::stream::iter))
 }
 
 #[cfg(test)]
@@ -491,6 +515,7 @@ mod tests {
         let (tx, rx) = broadcast::channel(4);
         let mut events = Box::pin(as_stream(rx));
         assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Working)));
         assert_eq!(events.next().now_or_never(), None);
         tx.send(Event::Approvals).unwrap();
         assert_eq!(events.next().now_or_never(), Some(Some(Event::Approvals)));
@@ -501,10 +526,12 @@ mod tests {
         let (tx, rx) = broadcast::channel(1);
         let mut events = Box::pin(as_stream(rx));
         assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Working)));
         for _ in 0..3 {
             tx.send(Event::Approvals).unwrap();
         }
         assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Working)));
         assert_eq!(events.next().now_or_never(), Some(Some(Event::Approvals)));
     }
 }

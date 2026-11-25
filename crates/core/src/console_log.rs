@@ -40,6 +40,8 @@ pub enum Event {
     Message(Message),
     /// An approval was asked or answered.
     Approvals,
+    /// What the secretary is doing for the owner may have changed.
+    Working,
     /// Records changed; sections showing them may reload.
     Records,
 }

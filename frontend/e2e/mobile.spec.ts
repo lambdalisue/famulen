@@ -498,3 +498,16 @@ test("what is read far back stays while the conversation, longer than is read at
   await expect(oldest.locator(".markdown-body")).toHaveText(text);
   expect(Math.abs((await at()) - before)).toBeLessThanOrEqual(1);
 });
+
+test("what the secretary is doing fits the narrow layout, open and folded", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  await page.getByPlaceholder(/に頼む$/).fill("e2e-work を狭い画面で");
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  const working = page.getByTestId("working");
+  await expect(working).toHaveText("ウェブを調べています…");
+  await expect(working).toBeInViewport({ ratio: 1 });
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toContainText("ウェブを調べています…");
+  await expect.poll(async () => (await call(request, "ConsoleService", "GetStatus")).state, { timeout: 15_000 }).toBe("waiting");
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).not.toContainText("調べています");
+});

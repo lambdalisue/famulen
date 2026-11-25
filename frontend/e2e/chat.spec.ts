@@ -112,3 +112,33 @@ test("a file that cannot be taken says why, and nothing goes without it until it
   await page.getByRole("button", { name: "送る" }).click();
   await expect(page.getByTestId("message").last().getByRole("img", { name: "e2e-空.png" })).toBeVisible();
 });
+
+test("what the secretary is doing is shown in the conversation from the moment it is asked until it is done", async ({ page, browser }) => {
+  await visit(page, "/", /^ホーム/);
+  const working = page.getByTestId("working");
+  await expect(working).toHaveCount(0);
+  await page.getByPlaceholder(/に頼む$/).fill("e2e-work で調べて");
+  await page.getByRole("button", { name: "送る" }).click();
+  await expect(working).toHaveText("考えています…", { timeout: 1000 });
+  await expect(working).toHaveText("ウェブを調べています…");
+
+  const other = await browser.newPage();
+  await visit(other, "/", /^ホーム/);
+  await expect(other.getByTestId("working")).toHaveText("ウェブを調べています…");
+  await other.close();
+
+  await expect(working).toHaveText("考えています…");
+  await expect(working).toHaveCount(0);
+});
+
+test("an answer takes away what the secretary is doing before it is done", async ({ page, request }) => {
+  await visit(page, "/", /^ホーム/);
+  const working = page.getByTestId("working");
+  await page.getByPlaceholder(/に頼む$/).fill("e2e-work に答えて");
+  await page.getByRole("button", { name: "送る" }).click();
+  await expect(working).toHaveText("ウェブを調べています…");
+  await call(request, "ConsoleService", "PostMessage", { text: "e2e-答えた" });
+  await expect(page.getByTestId("message").last()).toContainText("e2e-答えた");
+  await expect(working).toHaveCount(0, { timeout: 1000 });
+  await expect.poll(async () => (await call(request, "ConsoleService", "GetStatus")).state, { timeout: 15_000 }).toBe("waiting");
+});

@@ -133,6 +133,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         workgroups: workgroups.clone(),
         calendars: calendars.clone(),
         connections: connections.clone(),
+        working: crate::working::Working::new(store.clone(), console.clone()),
         console: console.clone(),
         attachments: crate::attachments::Attachments::new(store.clone(), config.workdir()),
         notices: crate::notices::Notices::new(store.clone(), permissions.clone()),

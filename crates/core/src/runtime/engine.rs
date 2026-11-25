@@ -61,6 +61,7 @@ pub(super) fn start_engine(
     );
     let clients = clients.map(Arc::new);
     *app.slack.write().unwrap_or_else(|p| p.into_inner()) = clients.clone();
+    services.working = Some(app.working.clone());
     services.usage = Some((app.models.clone(), spec));
     services.turn_ended = Some(app.inputs.clone());
     services.in_flight = links.in_flight.clone();
