@@ -82,6 +82,17 @@ test("a memory that links to a record shows on it, and leads back", async ({ pag
   await expect(page).toHaveURL(new RegExp(`id=${memo.id}`));
 });
 
+test("what links to a record stays as it is on screen when the record is read again", async ({ page, request }) => {
+  const party = await record(request, "parties", "読み直す相手さん", { fields: { Kind: "person" } });
+  await record(request, "memos", "前からのメモ", { notes: `[[${party.code}]]` });
+  await visit(page, `/parties?id=${party.id}`, /^相手/);
+  const links = back(page, "触れているメモ");
+  const row = await links.getByRole("listitem").filter({ hasText: "前からのメモ" }).elementHandle();
+  await record(request, "memos", "後からのメモ", { notes: `[[${party.code}]]` });
+  await expect(links).toContainText("後からのメモ");
+  expect(await row?.evaluate((e) => e.isConnected)).toBe(true);
+});
+
 const SENTENCE = "キャサリン（Katherine Montgomery）（Slack・アットマーク、U09ABCDEFGH）：地区の区分（関東・関西・東海・福岡）の定義を確認している。";
 
 const roundness = (of: Locator) => of.evaluate((el) => Number.parseFloat(getComputedStyle(el).borderTopLeftRadius));
