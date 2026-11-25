@@ -541,8 +541,7 @@ async fn converse(job: Arc<Job>) -> anyhow::Result<Finish> {
                     });
                 }
                 Ok(Inbound::Other(event)) => {
-                    job.app.workers.sights.event(job.run, &event);
-                    if job.app.workers.sights.has_changed() {
+                    if job.app.workers.sights.event(job.run, &event) {
                         job.app.workers.poke();
                     }
                     if event["type"] == "assistant" {

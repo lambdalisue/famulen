@@ -250,11 +250,6 @@ impl Sights {
         std::mem::take(&mut self.lock().changed)
     }
 
-    /// Whether [`Sights::take_changed`] has a change to tell of.
-    pub(super) fn has_changed(&self) -> bool {
-        self.lock().changed
-    }
-
     pub(super) fn plan(&self, run: i64, steps: Vec<Step>) {
         self.change(run, |s| s.steps = steps);
     }
@@ -363,8 +358,11 @@ fn called(name: &str, input: &Value) -> String {
 }
 
 impl Sights {
-    /// One event of an agent's stream.
-    pub(super) fn event(&self, run: i64, event: &Value) {
+    /// One event of an agent's stream. Whether it changed the plan: that alone
+    /// is worth telling at once, as what an agent writes changes all the time
+    /// and every telling has each open console read everything again.
+    pub(super) fn event(&self, run: i64, event: &Value) -> bool {
+        let before = self.of(run).steps;
         let content = &event["message"]["content"];
         for block in content.as_array().into_iter().flatten() {
             match block["type"].as_str().unwrap_or_default() {
@@ -395,6 +393,7 @@ impl Sights {
                 _ => {}
             }
         }
+        self.of(run).steps != before
     }
 }
 
@@ -509,10 +508,12 @@ mod tests {
                 ] } }),
             ),
         ] {
-            sights.event(
+            let plans = block["name"] == "TodoWrite";
+            let changed = sights.event(
                 1,
                 &json!({ "type": kind, "message": { "content": [block] } }),
             );
+            assert_eq!(changed, plans, "only a plan is told at once");
         }
         let sight = sights.of(1);
         assert_eq!(texts(&sight), ["読む。", "Read /a", "中身"]);
