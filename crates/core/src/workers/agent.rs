@@ -115,14 +115,14 @@ pub(crate) fn executor_program() -> anyhow::Result<Program> {
     })
 }
 
-/// The variables an agent does not see: the secrets, and the credentials of
-/// a session Famulen itself was started inside.
+/// The variables an agent does not see: the secrets, the way to the owner's
+/// keys, and the credentials of a session Famulen itself was started inside.
 fn hidden_env() -> Vec<String> {
     let mut hidden = crate::config::hidden_vars();
     hidden.extend(
         std::env::vars_os()
             .filter_map(|(name, _)| name.into_string().ok())
-            .filter(|name| name.starts_with("ADROIT_")),
+            .filter(|name| name.starts_with("ADROIT_") || name == "SSH_AUTH_SOCK"),
     );
     hidden
 }
@@ -268,7 +268,7 @@ impl Job {
                 &run.order.tools,
                 &workdir(app, run.id),
                 directory.as_deref(),
-                &app.workers.sealed,
+                &app.workers.kept,
             ),
             app: app.clone(),
             run: run.id,
@@ -351,7 +351,8 @@ impl Job {
             servers: self.bounds.connections(),
             workdir: workdir.clone(),
             fence: Fence {
-                sealed: self.app.workers.sealed.clone(),
+                sealed: self.app.workers.kept.places.clone(),
+                hosts: self.app.workers.kept.hosts.clone(),
                 // The directories of other runs are kept from this one's shell.
                 unread: vec![self.app.workers.dir.clone()],
                 readable: vec![workdir],

@@ -35,6 +35,13 @@ pub const LISTEN_ENV: &str = "FAMULEN_LISTEN";
 /// `[api] hosts`.
 pub const API_HOSTS_ENV: &str = "FAMULEN_API_HOSTS";
 
+/// The places no agent doing a delegated task may reach, beside Famulen's
+/// own, as `PATH` lists places.
+pub const WORKERS_SEALED_ENV: &str = "FAMULEN_WORKERS_SEALED";
+
+/// Where the owner keeps a clone of the notebook, unless they say otherwise.
+const CLONES: &[&str] = &["~/notebook"];
+
 /// Where the gateway's HTTP receivers listen.
 pub const RECEIVE_LISTEN_ENV: &str = "FAMULEN_RECEIVE_LISTEN";
 /// Where the receivers are reached from outside.
@@ -56,6 +63,9 @@ pub struct Config {
     pub timezone: Tz,
     pub claude: Claude,
     pub api: ApiConfig,
+    /// The places no agent doing a delegated task may reach, beside Famulen's
+    /// own.
+    pub workers_sealed: Vec<PathBuf>,
     /// Where the owner opens the console, if set.
     pub console_url: Option<String>,
     /// The key the vault seals secrets with, from the environment only.
@@ -78,7 +88,15 @@ struct File {
     claude: Claude,
     #[serde(default)]
     api: ApiConfig,
+    #[serde(default)]
+    workers: Workers,
     console_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Workers {
+    sealed: Option<Vec<PathBuf>>,
 }
 
 /// What applies when neither the environment nor the file says.
@@ -174,6 +192,13 @@ impl Config {
                 .map_err(|e| anyhow::anyhow!("{TIMEZONE_ENV}: {e}"))?,
             None => file.timezone.unwrap_or(defaults.timezone),
         };
+        let below_home = |dir: PathBuf| match dir.strip_prefix("~") {
+            Ok(rest) => env("HOME")
+                .or_else(|| env("USERPROFILE").filter(|_| cfg!(windows)))
+                .map(|home| PathBuf::from(home).join(rest))
+                .ok_or_else(|| anyhow::anyhow!("HOME is not set, so {} is nowhere", dir.display())),
+            Err(_) => Ok(dir),
+        };
         let data_dir = env(DATA_DIR_ENV)
             .map(PathBuf::from)
             .or(file.data_dir)
@@ -181,15 +206,28 @@ impl Config {
         let notebook_dir = env(NOTEBOOK_DIR_ENV)
             .map(|dir| PathBuf::from(dir.trim()))
             .or(file.notebook_dir)
-            .map(|dir| match dir.strip_prefix("~") {
-                Ok(rest) => env("HOME")
-                    .map(|home| PathBuf::from(home).join(rest))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("HOME is not set, so {} is nowhere", dir.display())
-                    }),
-                Err(_) => Ok(dir),
-            })
+            .map(below_home)
             .transpose()?;
+        let named = env(WORKERS_SEALED_ENV)
+            .map(|places| std::env::split_paths(&places).collect())
+            .or(file.workers.sealed);
+        let workers_sealed: Vec<PathBuf> = match named {
+            Some(places) => places
+                .into_iter()
+                .map(below_home)
+                .collect::<Result<_, _>>()?,
+            // Where there is no home there is no clone in it.
+            None => CLONES
+                .iter()
+                .filter_map(|dir| below_home(dir.into()).ok())
+                .collect(),
+        };
+        if let Some(place) = workers_sealed.iter().find(|p| !p.is_absolute()) {
+            anyhow::bail!(
+                "a place kept from workers is named whole: {}",
+                place.display()
+            );
+        }
         let mut claude = file.claude;
         if let Some(model) = env(MODEL_ENV) {
             claude.model = Some(model.trim().to_owned());
@@ -223,6 +261,7 @@ impl Config {
             timezone,
             claude,
             api,
+            workers_sealed,
             console_url: env(CONSOLE_URL_ENV)
                 .or(file.console_url)
                 .map(|u| u.trim().trim_end_matches('/').to_owned()),

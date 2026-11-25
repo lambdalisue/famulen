@@ -36,6 +36,7 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 | `FAMULEN_TIMEZONE` | `timezone` | 主人のタイムゾーン（`Asia/Tokyo` などの IANA の名前） | このマシンのタイムゾーン、分からなければ UTC |
 | `FAMULEN_DATA_DIR` | `data_dir` | データの置き場所 | `$XDG_DATA_HOME/famulen`（`XDG_DATA_HOME` がなければ `~/.local/share/famulen`） |
 | `FAMULEN_NOTEBOOK_DIR` | `notebook_dir` | コンソールで決めるまでの、手帳の既定の場所。`~/` から書ける | データの置き場所の `notebook/` |
+| `FAMULEN_WORKERS_SEALED` | `[workers] sealed` | [手代](worker.md#手代)に届かせない場所。手帳の控えなど。`~/` から書ける。環境変数では `PATH` と同じ区切りで並べる | `~/notebook` |
 | `FAMULEN_LISTEN` | `[api] listen` | API の待ち受け先 | `127.0.0.1:7790` |
 | `FAMULEN_API_HOSTS` | `[api] hosts` | API がほかに答えてよいホスト名（カンマ区切り）。localhost と待ち受け先の番地には、いつも答える | なし |
 | `FAMULEN_RECEIVE_LISTEN` | （書けない） | [ゲートウェイ](gateway.md#受け口と宛先)の HTTP の受け口の待ち受け先。なければ HTTP の受け口は開かない | なし |

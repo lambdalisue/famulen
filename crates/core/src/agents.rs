@@ -113,6 +113,9 @@ pub struct Fence {
     /// Not read, but for what is `readable`.
     pub unread: Vec<PathBuf>,
     pub readable: Vec<PathBuf>,
+    /// Not connected to, whatever else is allowed; nor is a socket that is a
+    /// file.
+    pub hosts: Vec<String>,
 }
 
 /// How an agent's process is started.
