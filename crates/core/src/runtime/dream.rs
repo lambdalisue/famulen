@@ -211,6 +211,7 @@ mod tests {
                     feed: crate::lookout::Feed::Chat,
                     name: "会社",
                     workgroups: &[],
+                    names: &Default::default(),
                 },
                 &[crate::lookout::Item {
                     title: String::new(),

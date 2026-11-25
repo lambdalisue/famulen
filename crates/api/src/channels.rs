@@ -1,7 +1,7 @@
 //! The channels other than the console, and the Slack workspaces the bot is in.
 
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
-use famulen_core::slack::attention;
+use famulen_core::slack::{attention, names};
 
 use crate::connections::{state_of, status_label};
 use crate::pb::*;
@@ -53,25 +53,6 @@ impl Api {
     }
 }
 
-/// The name a Slack `users.info` answer shows for a user, and the handle
-/// typed after @: Slack shows the display name, or the real name when that
-/// is empty.
-fn slack_names(answer: &serde_json::Value) -> (String, String) {
-    let user = &answer["user"];
-    let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().trim().to_owned();
-    let shown = [
-        &user["profile"]["display_name"],
-        &user["profile"]["real_name"],
-        &user["real_name"],
-        &user["name"],
-    ]
-    .into_iter()
-    .map(text)
-    .find(|s| !s.is_empty())
-    .unwrap_or_default();
-    (shown, text(&user["name"]))
-}
-
 /// Where the Slack app's names are changed: its App Home page when the
 /// app's id is known.
 fn slack_settings_url(app: Option<&str>) -> String {
@@ -104,7 +85,7 @@ impl Api {
             Ok::<_, anyhow::Error>(serde_json::from_str::<serde_json::Value>(&result.text)?)
         };
         match tokio::time::timeout(std::time::Duration::from_secs(5), read).await {
-            Ok(Ok(answer)) => (name.display_name, name.handle) = slack_names(&answer),
+            Ok(Ok(answer)) => (name.display_name, name.handle) = names::shown(&answer),
             Ok(Err(error)) => name.problem = error.to_string(),
             Err(_) => name.problem = "Slack did not answer in time".into(),
         }
@@ -255,23 +236,7 @@ impl ChannelService for Api {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-
-    #[test]
-    fn a_slack_user_is_shown_by_its_display_name_and_mentioned_by_its_handle() {
-        let answer = json!({ "user": { "name": "fam", "real_name": "Famulen",
-            "profile": { "display_name": "ファム", "real_name": "Famulen" } } });
-        assert_eq!(slack_names(&answer), ("ファム".into(), "fam".into()));
-    }
-
-    #[test]
-    fn a_slack_bot_without_a_display_name_is_shown_by_its_real_name() {
-        let answer = json!({ "user": { "name": "fam",
-            "profile": { "display_name": "", "real_name": "Famulen" } } });
-        assert_eq!(slack_names(&answer), ("Famulen".into(), "fam".into()));
-    }
 
     #[test]
     fn the_slack_names_are_changed_on_the_apps_home_page() {
