@@ -308,6 +308,7 @@ fn message(
             thread_ts: field("thread_ts").map(str::to_owned),
             user: user.to_owned(),
             unmentioned: false,
+            others_before: false,
             attached: files(event),
         },
         text: field("text").unwrap_or_default().to_owned(),
@@ -423,6 +424,7 @@ mod tests {
                 thread_ts: None,
                 user: "U1".into(),
                 unmentioned: false,
+                others_before: false,
                 attached: Vec::new(),
             }
         );

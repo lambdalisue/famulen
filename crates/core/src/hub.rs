@@ -108,6 +108,15 @@ impl Hub {
     }
 }
 
+/// The answer to a tool call that was not made.
+pub(crate) fn failed(message: &Value, why: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": message["id"],
+        "result": { "content": [{ "type": "text", "text": why }], "isError": true },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

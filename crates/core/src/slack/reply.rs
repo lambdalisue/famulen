@@ -27,21 +27,17 @@ fn answered(store: &Store, workspace: &str, channel: &str) -> anyhow::Result<Opt
     let Some(row) = store.running_input()? else {
         return Ok(None);
     };
-    let Source::Slack {
-        workspace: from,
-        channel: at,
-        ts,
-        thread_ts,
-        ..
-    } = row.input.source
-    else {
+    let Some(place) = row.input.place() else {
         return Ok(None);
     };
-    Ok((from == workspace && at == channel).then(|| Answered {
-        input: row.id,
-        thread: thread_ts.unwrap_or(ts),
-        shown: row.input.sender == Sender::Owner,
-    }))
+    Ok(
+        (place.workspace == workspace && place.channel == channel).then(|| Answered {
+            input: row.id,
+            thread: place.thread().to_owned(),
+            shown: row.input.sender == Sender::Owner
+                && matches!(row.input.source, Source::Slack { .. }),
+        }),
+    )
 }
 
 /// Post `text`, Markdown, to `channel` of `workspace`: in `thread` when one
@@ -107,6 +103,7 @@ mod tests {
                 thread_ts: thread_ts.map(Into::into),
                 user: "U1".into(),
                 unmentioned,
+                others_before: false,
                 attached: Vec::new(),
             },
             text: "hi".into(),

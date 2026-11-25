@@ -12,11 +12,13 @@ use tokio::process::{ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::guest::{self, Guest};
 use super::protocol::{self, ControlRequest, Inbound};
 use crate::approvals::Approvals;
 use crate::hub::{self, Hub};
+use crate::input::{Place, Reach};
 use crate::journal::Journal;
-use crate::permissions::{Decision, Permissions};
+use crate::permissions::{Bound, Decision, Permissions};
 use crate::slack::clients::SlackClients;
 use crate::slack::web::Slack;
 use crate::store::Store;
@@ -47,6 +49,24 @@ pub struct Options {
     /// The folder of plugins made from the owner's enabled plugins, holding
     /// nothing but their skills.
     pub plugin_dir: Option<PathBuf>,
+}
+
+/// Who a process answers.
+#[derive(Debug, Clone)]
+pub enum Audience {
+    /// The owner, in the one resident conversation.
+    Owner,
+    /// Someone else, for one input; the process knows nothing of the owner's.
+    Guest(Guest),
+}
+
+impl Audience {
+    fn guest(&self) -> Option<&Guest> {
+        match self {
+            Self::Owner => None,
+            Self::Guest(guest) => Some(guest),
+        }
+    }
 }
 
 /// The settings that run shell commands in Claude Code's sandbox, which can
@@ -273,14 +293,17 @@ impl Handle {
 pub fn spawn<S: Slack + 'static>(
     options: &Options,
     services: Arc<Services<S>>,
+    audience: Audience,
 ) -> anyhow::Result<(Handle, JoinHandle<anyhow::Result<()>>)> {
     std::fs::create_dir_all(&options.workdir)?;
     let mut command = Command::new(&options.bin);
     crate::config::hide_secrets(&mut command);
+    match audience.guest() {
+        None => command.args(options.args()).envs(options.env()),
+        Some(_) => guest::configure(&mut command, options),
+    };
     let mut child = command
-        .args(options.args())
         .current_dir(&options.workdir)
-        .envs(options.env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -304,7 +327,13 @@ pub fn spawn<S: Slack + 'static>(
         let mut lines = BufReader::new(stdout).lines();
         while let Some(line) = lines.next_line().await? {
             match protocol::parse_line(&line) {
-                Ok(inbound) => on_inbound(inbound, &tx, &services),
+                Ok(Inbound::Init { tools, .. })
+                    if audience.guest().is_some() && guest::offered_more(&tools) =>
+                {
+                    child.start_kill().ok();
+                    anyhow::bail!("a guest's session was offered more than its answer: {tools:?}")
+                }
+                Ok(inbound) => on_inbound(inbound, &tx, &services, &audience),
                 Err(error) => tracing::debug!(%error, %line, "unreadable line from claude"),
             }
         }
@@ -332,9 +361,12 @@ fn on_inbound<S: Slack + 'static>(
     inbound: Inbound,
     tx: &mpsc::UnboundedSender<Value>,
     services: &Arc<Services<S>>,
+    audience: &Audience,
 ) {
     let store = &services.store;
     match inbound {
+        // Its conversation and its tools are gone after the one turn.
+        Inbound::Init { .. } if audience.guest().is_some() => {}
         Inbound::Init { session_id, tools } => {
             tracing::info!(%session_id, tools = tools.len(), "claude session ready");
             services.journal.record(
@@ -366,8 +398,13 @@ fn on_inbound<S: Slack + 'static>(
                     "ended"
                 },
             );
-            remember_session(store, &session_id);
-            if let Err(error) = store.end_turn() {
+            if audience.guest().is_none() {
+                remember_session(store, &session_id);
+            }
+            // A turn another process runs is not ended by this one's.
+            if answers(store, audience)
+                && let Err(error) = store.end_turn()
+            {
                 tracing::warn!(%error, "could not mark the turn ended");
             }
             if let Some(turn_ended) = &services.turn_ended {
@@ -384,7 +421,7 @@ fn on_inbound<S: Slack + 'static>(
         Inbound::Control {
             request_id,
             request,
-        } => answer(request_id, request, tx, services),
+        } => answer(request_id, request, tx, services, audience),
         Inbound::Other(value) => {
             let kind = value
                 .get("type")
@@ -420,8 +457,27 @@ fn answer<S: Slack + 'static>(
     request: ControlRequest,
     tx: &mpsc::UnboundedSender<Value>,
     services: &Arc<Services<S>>,
+    audience: &Audience,
 ) {
     match request {
+        ControlRequest::McpMessage { message, .. }
+            if message["method"] == "tools/call" && !answers(&services.store, audience) =>
+        {
+            let refused = hub::failed(&message, guest::NOT_ITS_TURN);
+            let _ = tx.send(protocol::mcp_response(&request_id, Some(refused)));
+        }
+        // A connection's call is judged where it arrives.
+        ControlRequest::McpMessage {
+            server_name,
+            message,
+        } if message["method"] == "tools/call"
+            && server_name != hub::SERVER_NAME
+            && beyond_answering(&services.store, &format!("mcp__{server_name}__"), &message)
+                .is_some() =>
+        {
+            let refused = hub::failed(&message, ONLY_ANSWER);
+            let _ = tx.send(protocol::mcp_response(&request_id, Some(refused)));
+        }
         ControlRequest::CanUseTool {
             caller,
             tool_name,
@@ -429,10 +485,19 @@ fn answer<S: Slack + 'static>(
         } => {
             let tx = tx.clone();
             let services = services.clone();
+            let audience = audience.clone();
             let guard = services.in_flight.enter();
             tokio::spawn(async move {
                 let _guard = guard;
-                let response = permit(&request_id, caller, &tool_name, &input, &services).await;
+                let response = permit(
+                    &request_id,
+                    caller,
+                    &tool_name,
+                    &input,
+                    &services,
+                    &audience,
+                )
+                .await;
                 let _ = tx.send(response);
             });
         }
@@ -442,17 +507,34 @@ fn answer<S: Slack + 'static>(
         } if server_name == hub::SERVER_NAME => {
             let tx = tx.clone();
             let services = services.clone();
+            let audience = audience.clone();
+            let place = match audience.guest() {
+                Some(guest) => guest.place.clone(),
+                None => answering(&services.store),
+            };
             let guard = services.in_flight.enter();
             tokio::spawn(async move {
                 let _guard = guard;
-                let response = services.hub.handle(&message).await;
+                let hub = match audience.guest() {
+                    Some(guest) => Hub::new(guest.tools(services.hub.tools().clone())),
+                    None => services.hub.clone(),
+                };
+                let mut message = message;
+                if let Some(place) = &place {
+                    pin_thread(&mut message, place);
+                }
+                let response = hub.handle(&message).await;
                 let _ = tx.send(protocol::mcp_response(&request_id, response));
             });
         }
         ControlRequest::McpMessage {
             server_name,
             message,
-        } => match services.gateway.clone() {
+        } => match services
+            .gateway
+            .clone()
+            .filter(|_| audience.guest().is_none())
+        {
             Some(gateway) => {
                 let tx = tx.clone();
                 let guard = services.in_flight.enter();
@@ -461,7 +543,8 @@ fn answer<S: Slack + 'static>(
                     .unwrap_or_else(|error| {
                         tracing::warn!(%error, %server_name, "could not read the workgroup; asking");
                         Some("the workgroup could not be read".into())
-                    });
+                    })
+                    .or_else(|| ask_outward_connection(services, &server_name, &message));
                 let origin = services.store.call_origin().unwrap_or_else(|error| {
                     tracing::warn!(%error, "could not read what the call is made for");
                     None
@@ -563,10 +646,37 @@ async fn permit<S: Slack>(
     tool_name: &str,
     input: &Value,
     services: &Services<S>,
+    audience: &Audience,
 ) -> Value {
+    if answers(&services.store, audience)
+        && let Some(guest) = audience.guest()
+        && tool_name == crate::approvals::asked::TOOL
+    {
+        return ask_owner(request_id, guest, input, services);
+    }
+    let refused = if !answers(&services.store, audience) {
+        Some(guest::NOT_ITS_TURN.to_owned())
+    } else {
+        audience
+            .guest()
+            .and_then(|guest| guest.refusal(tool_name, input))
+            .or_else(|| beyond_answering(&services.store, tool_name, input))
+    };
+    if let Some(refused) = refused {
+        tracing::info!(%tool_name, "refused without the notebook");
+        services
+            .journal
+            .record("permission", format!("{tool_name}: forbidden"));
+        return protocol::deny_tool(request_id, &refused);
+    }
+    let bound = Bound {
+        ask: ask_outward(services, tool_name, input).await,
+        waive: answering(&services.store).is_some()
+            || audience.guest().is_some_and(Guest::carries_the_owners_word),
+    };
     let decision = match services
         .permissions
-        .decide_for(caller, tool_name, input)
+        .decide_bound(caller, tool_name, input, bound)
         .await
     {
         Ok(decision) => decision,
@@ -589,9 +699,249 @@ async fn permit<S: Slack>(
         .record("permission", format!("{tool_name}: {verdict}"));
     match decision {
         Decision::Allow => protocol::allow_tool(request_id, input),
+        // Why may tell of the owner's rules, which are not a guest's to know.
+        Decision::Forbid(_) if audience.guest().is_some() => {
+            protocol::deny_tool(request_id, "This may not be sent.")
+        }
         Decision::Forbid(message) => protocol::deny_tool(request_id, &message),
         Decision::Held(id) => protocol::deny_tool(request_id, &crate::gateway::held_message(id)),
     }
+}
+
+/// Whether the running turn is for the process that serves `audience`. When
+/// that cannot be read, it is not.
+fn answers(store: &Store, audience: &Audience) -> bool {
+    store.running_input().is_ok_and(|row| {
+        let guests = row
+            .as_ref()
+            .is_some_and(|r| r.input.reach() == Reach::Guest);
+        match audience {
+            Audience::Owner => !guests,
+            Audience::Guest(guest) => row.is_some_and(|r| guests && r.id == guest.input),
+        }
+    })
+}
+
+/// Put a guest's question to the owner; the call itself is never made.
+fn ask_owner<S: Slack>(
+    request_id: &str,
+    guest: &Guest,
+    input: &Value,
+    services: &Services<S>,
+) -> Value {
+    let told = match guest.ask(input).map(|ask| ask.put(&services.permissions)) {
+        Ok(Ok(told)) => told,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "could not ask the owner for a guest");
+            "The owner could not be asked. Say in one line that you cannot answer that here."
+        }
+        Err(why) => why,
+    };
+    services
+        .journal
+        .record("permission", "a guest's question: put to the owner");
+    protocol::deny_tool(request_id, told)
+}
+
+/// Where the running turn answers the one question the owner allowed, when it
+/// is such a turn.
+fn answering(store: &Store) -> Option<Place> {
+    let row = store.running_input().ok()??;
+    (row.input.reach() == Reach::Answering)
+        .then(|| row.input.place())
+        .flatten()
+}
+
+/// What the turn that answers one question may use beside the answer:
+/// the notebook and the calendar, not the conversation, the logs or the files
+/// of this machine.
+const NOTEBOOK_READS: &[&str] = &[
+    "search_notebook",
+    "read_file",
+    "list_kinds",
+    "list_records",
+    "get_record",
+    "list_layers",
+    "get_layer",
+    "list_party_memories",
+    "list_events",
+];
+const ONLY_ANSWER: &str = "This turn answers one question the owner allowed: it may only read the notebook with Famulen's own tools, and answer with send_slack where it was asked.";
+
+/// Why a call goes beyond answering the one question the running turn is for.
+fn beyond_answering(store: &Store, tool_name: &str, input: &Value) -> Option<String> {
+    match store.running_input() {
+        Ok(Some(row)) if row.input.reach() == Reach::Answering => {}
+        Ok(_) => return None,
+        Err(_) => return Some(guest::NOT_ITS_TURN.to_owned()),
+    }
+    let fits = match crate::permissions::split_tool(tool_name) {
+        Some((hub::SERVER_NAME, "send_slack")) => {
+            answering(store).is_some_and(|place| place.takes(input))
+        }
+        Some((hub::SERVER_NAME, tool)) => NOTEBOOK_READS.contains(&tool),
+        Some(_) => false,
+        None => tool_name == "ToolSearch",
+    };
+    (!fits).then(|| ONLY_ANSWER.to_owned())
+}
+
+/// An answer put into its thread at once: which input is answered is read
+/// only when it is posted, and another may run by then.
+fn pin_thread(message: &mut Value, place: &Place) {
+    let Some(params) = message
+        .get_mut("params")
+        .filter(|p| p["name"] == "send_slack")
+    else {
+        return;
+    };
+    if let Some(arguments) = params.get_mut("arguments").and_then(Value::as_object_mut) {
+        let named = ["thread_ts", "threadTs"]
+            .iter()
+            .any(|key| arguments.get(*key).is_some_and(|t| t != ""));
+        if !named {
+            arguments.remove("threadTs");
+            arguments.insert("thread_ts".into(), place.thread().into());
+        }
+    }
+}
+
+/// Why the owner is asked before what is said or done outside in this turn:
+/// its material is others' words, and the notebook is at hand.
+const OUTWARD: &str = "this turn is about what others wrote, so nothing goes out without the owner";
+
+/// What such a turn changes without asking, beside what only reads: it stays
+/// in the notebook or goes to the owner, and has nobody act later. A tool not
+/// named here asks, so that a new one does not slip through.
+const INSIDE: &[&str] = &[
+    "post_message",
+    "remember",
+    "set_working",
+    "close_working",
+    "link_account",
+    "give_feedback",
+    "refresh_calendars",
+];
+/// Built-in tools that reach outside, or write a file by hand, where no one
+/// sees whether it has a worker or a schedule act.
+const REACHING: &[&str] = &[
+    "Bash",
+    "PowerShell",
+    "WebFetch",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+];
+/// Kinds of record nothing acts on by itself.
+const INERT: &[&str] = &[
+    "memos",
+    "events",
+    "calendars",
+    "parties",
+    "holdings",
+    "contracts",
+];
+
+/// Whether saving a record has no one act on it later: a worker takes up a
+/// delegated task, and a routine runs by itself.
+fn inert(record: &Value) -> bool {
+    let empty = |key: &str| {
+        record.get(key).is_none_or(|v| {
+            v.is_null() || v == "" || v.as_array().is_some_and(|items| items.is_empty())
+        })
+    };
+    let fields = record.get("fields").and_then(Value::as_array);
+    let fields = || {
+        fields.into_iter().flatten().map(|f| {
+            let part = |key: &str| f.get(key).and_then(Value::as_str).unwrap_or_default();
+            let several = f
+                .get("values")
+                .and_then(Value::as_array)
+                .is_some_and(|v| !v.is_empty());
+            (
+                part("name"),
+                if several { "several" } else { part("value") },
+            )
+        })
+    };
+    match record.get("kind").and_then(Value::as_str) {
+        Some("tasks") if empty("id") => {
+            empty("sections")
+                && fields().all(|(name, value)| {
+                    !name.eq_ignore_ascii_case("assignee")
+                        || matches!(value, "owner" | "secretary" | "")
+                })
+        }
+        // It may be delegated already, so only what is not part of the order.
+        Some("tasks") => {
+            empty("notes")
+                && empty("title")
+                && empty("sections")
+                && empty("details")
+                && fields().all(|(name, _)| matches!(name, "Priority" | "Due" | "Related"))
+        }
+        Some(kind) => INERT.contains(&kind),
+        None => false,
+    }
+}
+
+fn inward(store: &Store) -> bool {
+    // Asking once too often is the safe side.
+    store.running_input().map_or(true, |row| {
+        row.is_some_and(|r| r.input.reach() == Reach::Inward)
+    })
+}
+
+fn ask_outward_connection<S>(
+    services: &Services<S>,
+    server: &str,
+    message: &Value,
+) -> Option<String> {
+    if message["method"] != "tools/call" || !inward(&services.store) {
+        return None;
+    }
+    let tool = message
+        .pointer("/params/name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let reads = services
+        .permissions
+        .only_reads(server, tool)
+        .unwrap_or_default();
+    (!reads).then(|| OUTWARD.to_owned())
+}
+
+async fn ask_outward<S: Slack>(
+    services: &Services<S>,
+    tool_name: &str,
+    input: &Value,
+) -> Option<String> {
+    if !inward(&services.store) {
+        return None;
+    }
+    let asks = match crate::permissions::split_tool(tool_name) {
+        Some((hub::SERVER_NAME, "send_slack")) => {
+            let field = |key| input.get(key).and_then(Value::as_str).unwrap_or_default();
+            !services
+                .approvals
+                .is_owners_dm(field("workspace"), field("channel"))
+                .await
+        }
+        Some((hub::SERVER_NAME, "save_record")) => !inert(input),
+        Some((hub::SERVER_NAME, tool)) => {
+            !INSIDE.contains(&tool)
+                && !services
+                    .hub
+                    .tools()
+                    .list()
+                    .iter()
+                    .any(|t| t.name == tool && t.read_only)
+        }
+        Some(_) => false,
+        None => REACHING.contains(&tool_name),
+    };
+    asks.then(|| OUTWARD.to_owned())
 }
 
 /// The running turn's workgroup. Every tool call comes inside a turn; without
@@ -605,6 +955,7 @@ fn running_workgroup(store: &Store) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub::OwnTools;
 
     fn options(resume: Option<&str>) -> Options {
         Options {
@@ -620,6 +971,292 @@ mod tests {
             writable: Vec::new(),
             plugin_dir: None,
         }
+    }
+
+    struct Tools;
+
+    impl OwnTools for Tools {
+        fn list(&self) -> Vec<hub::ToolDef> {
+            [
+                ("search_notebook", true),
+                ("remember", false),
+                ("send_slack", false),
+                ("delegate_task", false),
+                ("save_record", false),
+                ("wake_at", false),
+                ("list_messages", true),
+            ]
+            .map(|(name, read_only)| hub::ToolDef {
+                name: name.into(),
+                description: String::new(),
+                input_schema: serde_json::json!({}),
+                read_only,
+                confirm: false,
+            })
+            .into()
+        }
+
+        fn call(
+            &self,
+            name: &str,
+            _: Value,
+        ) -> futures_util::future::BoxFuture<'static, anyhow::Result<String>> {
+            let name = name.to_owned();
+            Box::pin(async move { Ok(name) })
+        }
+    }
+
+    /// Services in the turn of an input.
+    fn in_turn(
+        sender: crate::input::Sender,
+        source: crate::input::Source,
+    ) -> (Services<&'static crate::slack::fake::FakeSlack>, Audience) {
+        let store = Store::open_in_memory().unwrap();
+        let input = crate::input::Input {
+            sender,
+            source,
+            text: "x".into(),
+        };
+        let id = store.enqueue(&input).unwrap().unwrap();
+        let row = store.get(id).unwrap().unwrap();
+        store.start_turn(id, "all").unwrap();
+        let gateway = crate::permissions::test_gateway(
+            famulen_gateway::store::Store::open_in_memory().unwrap(),
+        );
+        let permissions = Permissions::new(store.clone(), gateway);
+        permissions.record_own_tools(&Tools.list()).unwrap();
+        let services = Services::new(
+            None,
+            store,
+            permissions,
+            BTreeMap::new(),
+            "/memory",
+            Arc::new(Tools),
+            None,
+        );
+        let audience = Guest::of(&row).map_or(Audience::Owner, Audience::Guest);
+        (services, audience)
+    }
+
+    fn slack(others_before: bool) -> crate::input::Source {
+        crate::input::Source::Slack {
+            workspace: "w1".into(),
+            channel: "C1".into(),
+            ts: "2.0".into(),
+            thread_ts: None,
+            user: "U2".into(),
+            unmentioned: true,
+            others_before,
+            attached: Vec::new(),
+        }
+    }
+
+    async fn allowed(
+        turn: &(Services<&'static crate::slack::fake::FakeSlack>, Audience),
+        tool: &str,
+        input: Value,
+    ) -> bool {
+        let caller = crate::permissions::Caller::Secretary;
+        let response = permit("r1", caller, tool, &input, &turn.0, &turn.1).await;
+        response.to_string().contains(r#""behavior":"allow""#)
+    }
+
+    const SEARCH: &str = "mcp__famulen__search_notebook";
+    const REMEMBER: &str = "mcp__famulen__remember";
+    const SEND: &str = "mcp__famulen__send_slack";
+    const DELEGATE: &str = "mcp__famulen__delegate_task";
+
+    const SAVE: &str = "mcp__famulen__save_record";
+
+    fn record(kind: &str, assignee: &str) -> Value {
+        serde_json::json!({ "kind": kind, "title": "t",
+            "fields": [{ "name": "Assignee", "value": assignee }] })
+    }
+
+    #[test]
+    fn an_answer_is_put_into_its_thread_before_another_turn_can_run() {
+        let place = in_turn(crate::input::Sender::Other, slack(false))
+            .0
+            .store
+            .running_input()
+            .unwrap()
+            .and_then(|row| row.input.place())
+            .unwrap();
+        let mut message =
+            serde_json::json!({ "params": { "name": "send_slack", "arguments": to("C1") } });
+        pin_thread(&mut message, &place);
+        assert_eq!(message["params"]["arguments"]["thread_ts"], "2.0");
+    }
+
+    #[tokio::test]
+    async fn the_owner_is_asked_of_a_guests_answer_unless_they_decided_it_already() {
+        use crate::input::{Sender, Source};
+        let confirm = |turn: &(Services<&'static crate::slack::fake::FakeSlack>, Audience)| {
+            let to = Some(crate::permissions::Permission::Confirm);
+            let permissions = &turn.0.permissions;
+            permissions
+                .set_scoped("owner", "conn:famulen", "send_slack", to)
+                .unwrap();
+        };
+        let guest = in_turn(Sender::Other, slack(false));
+        confirm(&guest);
+        assert!(!allowed(&guest, SEND, to("C1")).await);
+        let held = guest.0.permissions.gateway().held_tickets().unwrap();
+        assert_eq!(held.len(), 1);
+
+        let answering = in_turn(
+            Sender::Owner,
+            Source::Asked {
+                request: 1,
+                workspace: "w1".into(),
+                channel: "C1".into(),
+                ts: "2.0".into(),
+                thread_ts: None,
+                user: "U2".into(),
+                granted: true,
+            },
+        );
+        confirm(&answering);
+        assert!(allowed(&answering, SEND, to("C1")).await);
+    }
+
+    #[test]
+    fn a_turn_is_ended_only_by_the_process_that_answers_it() {
+        let (services, guest) = in_turn(crate::input::Sender::Other, slack(false));
+        let services = Arc::new(services);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let ended = || Inbound::Result {
+            session_id: "s".into(),
+            is_error: false,
+            text: String::new(),
+            usage: Default::default(),
+        };
+        on_inbound(ended(), &tx, &services, &Audience::Owner);
+        assert!(services.store.running().unwrap().is_some());
+        on_inbound(ended(), &tx, &services, &guest);
+        assert!(services.store.running().unwrap().is_none());
+        assert_eq!(
+            saved_session(&services.store).unwrap().as_deref(),
+            Some("s")
+        );
+    }
+
+    fn may_send(turn: &(Services<&'static crate::slack::fake::FakeSlack>, Audience)) {
+        let allow = Some(crate::permissions::Permission::Allow);
+        turn.0
+            .permissions
+            .set_scoped("owner", "conn:famulen", "send_slack", allow)
+            .unwrap();
+    }
+
+    fn to(channel: &str) -> Value {
+        serde_json::json!({ "workspace": "w1", "channel": channel, "text": "hi" })
+    }
+
+    #[tokio::test]
+    async fn the_owner_uses_the_notebook_as_ever_and_a_guest_only_answers() {
+        use crate::input::Sender;
+        let owner = in_turn(Sender::Owner, slack(false));
+        for tool in [SEARCH, REMEMBER, "Read"] {
+            assert!(allowed(&owner, tool, Value::Null).await, "{tool}");
+        }
+        for guest in [
+            in_turn(Sender::Other, slack(false)),
+            in_turn(Sender::Owner, slack(true)),
+        ] {
+            for tool in [SEARCH, REMEMBER, DELEGATE, "Read", "Bash"] {
+                assert!(!allowed(&guest, tool, Value::Null).await, "{tool}");
+            }
+            may_send(&guest);
+            assert!(allowed(&guest, SEND, to("C1")).await);
+            assert!(!allowed(&guest, SEND, to("C2")).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_resident_session_may_use_nothing_while_a_guest_is_answered() {
+        let (services, _) = in_turn(crate::input::Sender::Other, slack(false));
+        let turn = (services, Audience::Owner);
+        for tool in [SEARCH, "Read", SEND] {
+            assert!(!allowed(&turn, tool, to("C1")).await, "{tool}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_guests_question_is_put_to_the_owner_instead_of_made() {
+        let guest = in_turn(crate::input::Sender::Other, slack(false));
+        let ask = serde_json::json!({ "question": "Aさんの給与" });
+        assert!(!allowed(&guest, crate::approvals::asked::TOOL, ask).await);
+        let held = guest.0.permissions.gateway().held_tickets().unwrap();
+        assert_eq!(held[0].tool, "ask_owner");
+    }
+
+    #[tokio::test]
+    async fn a_question_the_owner_allowed_is_only_read_for_and_answered_there() {
+        let turn = in_turn(
+            crate::input::Sender::Owner,
+            crate::input::Source::Asked {
+                request: 1,
+                workspace: "w1".into(),
+                channel: "C1".into(),
+                ts: "2.0".into(),
+                thread_ts: None,
+                user: "U2".into(),
+                granted: true,
+            },
+        );
+        for (tool, input, expected) in [
+            (SEARCH, Value::Null, true),
+            ("Read", Value::Null, false),
+            ("mcp__famulen__list_messages", Value::Null, false),
+            (SEND, to("C1"), true),
+            (SEND, to("C2"), false),
+            (REMEMBER, Value::Null, false),
+            (DELEGATE, Value::Null, false),
+            ("Bash", Value::Null, false),
+            ("WebFetch", Value::Null, false),
+            ("mcp__gmail__send_message", Value::Null, false),
+        ] {
+            assert_eq!(allowed(&turn, tool, input).await, expected, "{tool}");
+        }
+    }
+
+    #[tokio::test]
+    async fn what_the_lookout_passed_on_is_judged_with_the_notebook_and_told_only_inside() {
+        let turn = in_turn(
+            crate::input::Sender::System,
+            crate::input::Source::Lookout {
+                item: 1,
+                source: "1".into(),
+            },
+        );
+        for tool in [SEARCH, REMEMBER, "Read"] {
+            assert!(allowed(&turn, tool, Value::Null).await, "{tool}");
+        }
+        may_send(&turn);
+        assert!(!allowed(&turn, SEND, to("C1")).await);
+        for (tool, input) in [
+            (DELEGATE, Value::Null),
+            ("mcp__famulen__wake_at", Value::Null),
+            ("WebFetch", Value::Null),
+            ("Write", serde_json::json!({ "file_path": "/memory/x.md" })),
+            (SAVE, record("routines", "secretary")),
+            (SAVE, record("tasks", "worker")),
+        ] {
+            assert!(!allowed(&turn, tool, input).await, "{tool}");
+        }
+        let held = turn.0.permissions.gateway().held_tickets().unwrap();
+        assert_eq!(held.len(), 7, "the owner is asked of each");
+        assert!(allowed(&turn, SAVE, record("tasks", "secretary")).await);
+        assert!(allowed(&turn, SAVE, record("memos", "")).await);
+        let mut changed = record("tasks", "secretary");
+        changed["id"] = "task-7w1hbn".into();
+        changed["notes"] = "別の依頼".into();
+        assert!(!allowed(&turn, SAVE, changed).await);
+
+        let message = |method: &str| serde_json::json!({ "method": method, "params": { "name": "send_message" } });
+        assert!(ask_outward_connection(&turn.0, "gmail", &message("tools/call")).is_some());
+        assert!(ask_outward_connection(&turn.0, "gmail", &message("tools/list")).is_none());
     }
 
     #[test]

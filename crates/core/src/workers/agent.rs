@@ -22,6 +22,7 @@ use crate::app::App;
 use crate::claude::protocol::{self, ControlRequest, Inbound};
 use crate::claude::session::sandbox_settings;
 use crate::gateway::NEEDS_OWNER;
+use crate::hub::failed;
 use crate::models::{ModelSpec, Models, Role, Usage};
 use crate::permissions::{Caller, DELEGATE_INSTEAD, Decision, LAUNCHERS};
 
@@ -378,15 +379,6 @@ impl Job {
         }
         Some(response)
     }
-}
-
-/// The answer to a tool call that was not made.
-fn failed(message: &Value, why: &str) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": message["id"],
-        "result": { "content": [{ "type": "text", "text": why }], "isError": true },
-    })
 }
 
 /// A worker's process and every one it starts, killed together when this is

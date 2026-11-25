@@ -53,6 +53,7 @@ const KEY_CHARS: usize = 32;
 /// decides on, or may show a secret.
 pub(super) fn kept_to_dm(ticket: &Ticket) -> bool {
     matches!(ticket.connection.as_str(), VAULT | DEFINITIONS)
+        || super::asked::is_ask(ticket)
         || ticket.shown.get("decides").is_some()
         || may_hold_secret(&ticket.shown)
 }

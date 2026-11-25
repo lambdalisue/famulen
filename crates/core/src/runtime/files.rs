@@ -215,6 +215,7 @@ mod tests {
                 thread_ts: None,
                 user: "U1".into(),
                 unmentioned: false,
+                others_before: false,
                 attached: vec![file("画面.png", "image/png", "ok")],
             },
             text: String::new(),

@@ -749,6 +749,7 @@ mod tests {
                 thread_ts: None,
                 user: "U1".into(),
                 unmentioned: false,
+                others_before: false,
                 attached: Vec::new(),
             },
             text: format!("message {ts}"),

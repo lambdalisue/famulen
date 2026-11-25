@@ -42,6 +42,15 @@ pub enum Caller {
     Subagent,
 }
 
+/// What a turn adds to the permission of a call made in it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Bound {
+    /// Why the owner is asked even where the permission allows the call.
+    pub ask: Option<String>,
+    /// The owner said yes to it before, so only a forbid stops it.
+    pub waive: bool,
+}
+
 /// What to answer Claude Code for one call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
@@ -200,6 +209,18 @@ impl Permissions {
         tool_name: &str,
         input: &Value,
     ) -> anyhow::Result<Decision> {
+        self.decide_bound(caller, tool_name, input, Bound::default())
+            .await
+    }
+
+    /// [`Permissions::decide_for`], within what the turn lets it do.
+    pub async fn decide_bound(
+        &self,
+        caller: Caller,
+        tool_name: &str,
+        input: &Value,
+        bound: Bound,
+    ) -> anyhow::Result<Decision> {
         if caller == Caller::Subagent {
             return Ok(Decision::Forbid(DELEGATE_INSTEAD.to_owned()));
         }
@@ -226,6 +247,8 @@ impl Permissions {
         };
         let call = Call {
             origin: self.store.call_origin()?,
+            waive: (call.waive && bound.ask.is_none()) || bound.waive,
+            ask: bound.ask,
             ..call
         };
         Ok(match self.gateway.judge_assessed(&call).await? {

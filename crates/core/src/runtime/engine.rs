@@ -12,8 +12,8 @@ use tokio::task::JoinSet;
 
 use super::keep;
 use super::open::sealed_places;
-use super::prompt::system_prompt;
-use super::session::{SessionLinks, run_session};
+use super::prompt::{guest_prompt, system_prompt};
+use super::session::{OfSessions, SessionLinks, run_session};
 use super::slack::read_channel;
 use crate::app::{Answerer, App};
 use crate::approvals::Answer;
@@ -150,11 +150,34 @@ pub(super) fn start_engine(
         writable: crate::writable::places(store)?,
         plugin_dir: owners_skills(&config.workdir()),
     };
+    let guests = Options {
+        workdir: config.data_dir.join("guest"),
+        system_prompt: guest_prompt(
+            &app.aide_name(),
+            Gender::load(store)?,
+            &store.state("persona.tone")?.unwrap_or_default(),
+        ),
+        add_dirs: Vec::new(),
+        connections: Vec::new(),
+        plugin_dir: None,
+        ..options.clone()
+    };
     engine.spawn({
         let (store, workgroups, links) = (store.clone(), app.workgroups.clone(), links.clone());
         async move {
-            if let Err(error) =
-                run_session(options, services, store, workgroups, arrived, links, tz).await
+            if let Err(error) = run_session(
+                OfSessions {
+                    resident: options,
+                    guests,
+                },
+                services,
+                store,
+                workgroups,
+                arrived,
+                links,
+                tz,
+            )
+            .await
             {
                 tracing::error!(%error, "the session loop stopped");
             }
