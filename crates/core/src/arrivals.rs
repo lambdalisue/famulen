@@ -2,6 +2,8 @@
 //! Google definition, and how it reads the account's mail for the lookout and
 //! its calendars through the connection's tools.
 
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 
 use crate::app::App;
@@ -18,6 +20,10 @@ const LOGGED_IN: &str = "つながっている";
 
 /// How many pages of a listing are read at most.
 const MAX_PAGES: usize = 20;
+
+/// How many mails the owner sent are read to find one person among whom they
+/// went to.
+const SENT_READ: usize = 5;
 
 static MAIL_READING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -136,6 +142,15 @@ fn address(value: &str) -> &str {
         None => value,
     }
     .trim()
+}
+
+/// Whether a text is one address and nothing a search reads otherwise.
+fn is_address(text: &str) -> bool {
+    text.split_once('@').is_some_and(|(name, domain)| {
+        !name.is_empty() && domain.contains('.') && !domain.contains('@')
+    }) && text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "@.+-_%'".contains(c))
 }
 
 /// Whether an address sends mail no person writes.
@@ -303,6 +318,59 @@ impl App {
             .into());
         }
         Ok(serde_json::from_str(&result.text)?)
+    }
+
+    /// Which of `addresses` the owner wrote mail to from a Google account.
+    /// What cannot be asked counts as not written to.
+    pub async fn written_to(
+        &self,
+        connection: &str,
+        addresses: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        let mut written_to = BTreeSet::new();
+        // Mail between the owner's own accounts is no correspondence.
+        let own: BTreeSet<String> = self
+            .connections
+            .list()
+            .unwrap_or_default()
+            .iter()
+            .map(|c| c.account.to_lowercase())
+            .collect();
+        for address in addresses {
+            if own.contains(address) || !is_address(address) {
+                continue;
+            }
+            match self.wrote_to(connection, address).await {
+                Ok(true) => {
+                    written_to.insert(address.clone());
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    // The rest would most likely wait for the same failure.
+                    tracing::warn!(%connection, %error, "could not look for mail the owner sent");
+                    break;
+                }
+            }
+        }
+        written_to
+    }
+
+    async fn wrote_to(&self, connection: &str, address: &str) -> anyhow::Result<bool> {
+        // Gmail finds those in Cc, and addresses alike, by `to` too.
+        let args = json!({ "query": format!("in:sent to:\"{address}\""), "max": SENT_READ });
+        let answer = self.tool_json(connection, "search_messages", args).await?;
+        for found in answer["messages"].as_array().into_iter().flatten() {
+            let args = json!({ "id": found["id"] });
+            let message = self.tool_json(connection, "get_message", args).await?;
+            let to = header(&message, "To").unwrap_or_default();
+            if to
+                .split(',')
+                .any(|one| self::address(one).eq_ignore_ascii_case(address))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Read every Google account's mail since its last read.
@@ -591,6 +659,39 @@ pub(crate) mod tests {
                 }),
             );
         }
+        serving(dir, router).await
+    }
+
+    /// Famulen with a Google account in which a search for `sent` finds a mail
+    /// that went to `to`, and any other finds none.
+    pub(crate) async fn with_mailbox(
+        dir: &std::path::Path,
+        sent: &'static str,
+        to: &'static str,
+    ) -> (App, String) {
+        use axum::extract::Query;
+        let search = move |Query(query): Query<std::collections::BTreeMap<String, String>>| {
+            let found = query.get("q").map(String::as_str) == Some(sent);
+            async move {
+                if found {
+                    json!({ "messages": [{ "id": "s1" }] }).to_string()
+                } else {
+                    json!({ "resultSizeEstimate": 0 }).to_string()
+                }
+            }
+        };
+        let message = json!({ "payload": { "headers": [{ "name": "To", "value": to }] } });
+        let message = message.to_string();
+        let router = axum::Router::new()
+            .route("/gmail/v1/users/me/messages", axum::routing::get(search))
+            .route(
+                "/gmail/v1/users/me/messages/s1",
+                axum::routing::get(move || async move { message }),
+            );
+        serving(dir, router).await
+    }
+
+    async fn serving(dir: &std::path::Path, router: axum::Router) -> (App, String) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -861,6 +962,37 @@ pub(crate) mod tests {
             "id: m1\nfrom: Sato <sato@example.com>\n明日の打ち合わせは"
         );
         assert_eq!(message_of(&item), Some("m1"));
+    }
+
+    #[tokio::test]
+    async fn only_whom_mail_was_addressed_to_was_written_to() {
+        let addresses = BTreeSet::from(["sato@example.com".to_owned()]);
+        for (to, written) in [
+            ("\"Sato, T\" <Sato@example.com>, mori@example.com", true),
+            ("sato.taro@example.com, jiro.sato@example.com", false),
+            ("", false),
+        ] {
+            let dir = crate::notebook::testing::TempDir::new("arrivals-written");
+            let (app, id) = with_mailbox(dir.path(), r#"in:sent to:"sato@example.com""#, to).await;
+            let found = app.written_to(&id, &addresses).await;
+            assert_eq!(found.len() == 1, written, "{to}");
+        }
+    }
+
+    #[test]
+    fn only_a_plain_address_is_looked_for() {
+        assert!(is_address("a.b+c@example.co.jp"));
+        for text in [
+            "",
+            "a",
+            "a@b",
+            "@b.c",
+            "a@b.c@d.e",
+            "a@b.c\" OR x",
+            "a@b.c d",
+        ] {
+            assert!(!is_address(text), "{text}");
+        }
     }
 
     fn mail(headers: &[(&str, &str)], labels: &[&str]) -> Item {

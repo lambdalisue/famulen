@@ -235,7 +235,13 @@ async fn note_people(
     if !tells_of_people(source) {
         return Ok(());
     }
-    let noted = people::of_those_dealt_with(source.feed, items, people::noted_from(answer));
+    let mut noted = people::of_those_dealt_with(source.feed, items, people::noted_from(answer));
+    if source.feed == Feed::Mail && !noted.is_empty() {
+        let senders = people::senders(items, &noted);
+        let written_to = app.written_to(&source.connection, &senders).await;
+        noted = people::of_correspondents(items, noted, &written_to);
+    }
+    noted.truncate(people::MOST_NOTES);
     if noted.is_empty() {
         return Ok(());
     }
@@ -444,6 +450,50 @@ mod tests {
 
         let notes = dreaming::waiting_notes(&app.memory_dir).unwrap();
         assert_eq!(notes[0].1.body(), "倉谷匠（会社、U1）：経理の担当");
+    }
+
+    #[tokio::test]
+    async fn of_mail_only_who_the_owner_wrote_to_is_noted() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-mail-people");
+        let (app, connection) = crate::arrivals::tests::with_mailbox(
+            dir.path(),
+            r#"in:sent to:"sato@example.com""#,
+            "sato@example.com",
+        )
+        .await;
+        memory::ensure(&app.memory_dir).unwrap();
+        let mail = |from: &str| Item {
+            title: "a".into(),
+            body: format!("id: m1\nfrom: {from}\na"),
+        };
+        let items = [mail("Sato <Sato@example.com>"), mail("mori@example.com")];
+        let note = |item: usize| serde_json::json!({ "item": item, "who": "", "note": "n", "tie": "asks" });
+        let mut people = vec![note(1); people::MOST_NOTES];
+        people.extend(vec![note(0); people::MOST_NOTES + 1]);
+        let answer = serde_json::json!({ "people": people });
+        let source = LookoutSource {
+            id: 1,
+            name: "メール".into(),
+            connection,
+            tool: lookout::ARRIVED.into(),
+            args: serde_json::json!({}),
+            interval: 60,
+            own_interval: None,
+            feed: Feed::Mail,
+            route: None,
+            enabled: true,
+            last_run: None,
+        };
+
+        note_people(&app, &source, &items, &answer).await.unwrap();
+
+        let notes = dreaming::waiting_notes(&app.memory_dir).unwrap();
+        let bodies: Vec<_> = notes.iter().map(|(_, n)| n.body()).collect();
+        assert_eq!(
+            bodies,
+            ["Sato（メール、Sato@example.com）：n"; people::MOST_NOTES],
+            "those left out take no room"
+        );
     }
 
     #[test]
