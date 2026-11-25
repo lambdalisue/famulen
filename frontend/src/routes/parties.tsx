@@ -1,6 +1,6 @@
 import { addDays, dayOf, hm, localDate, monthOf, shortTime, today } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, createSignal, For, onMount, Show } from "solid-js";
 import { EntryRow } from "~/components/MemoryEntry";
 import RecordDetail from "~/components/records/detail/RecordDetail";
 import RecordsPage, { type Group } from "~/components/records/RecordsPage";
@@ -47,13 +47,28 @@ function toMe(r: Rec): string[] {
     .flatMap((i) => valuesOf(i, "As"));
 }
 
+/** A party's picture, or the start of its name. */
 function Avatar(props: { party: Rec; index: number }) {
+  const [missing, setMissing] = createSignal("");
+  const shown = () => (props.party.picture === missing() ? "" : props.party.picture);
+  let img: HTMLImageElement | undefined;
+  onMount(() => {
+    // It may have failed before this code ran.
+    if (img?.complete && img.naturalWidth === 0) setMissing(props.party.picture);
+  });
   return (
     <span
       class={`avatar${valueOf(props.party, "Kind") === "person" || !valueOf(props.party, "Kind") ? "" : " org"}`}
       style={{ background: PALETTE[props.index % PALETTE.length] }}
     >
-      {Array.from(props.party.title)[0] ?? "?"}
+      <Show when={shown()} fallback={Array.from(props.party.title)[0] ?? "?"}>
+        <img
+          ref={img}
+          src={`/party-pictures/${encodeURIComponent(shown())}`}
+          alt=""
+          onError={() => setMissing(props.party.picture)}
+        />
+      </Show>
     </span>
   );
 }
@@ -183,7 +198,14 @@ export default function Parties() {
       row={row}
       cards
       detail={(id) => (
-        <RecordDetail kind="parties" id={id} back="/parties" top={(r) => <Guessed party={r} />} extra={(r) => <Around party={r} />} />
+        <RecordDetail
+          kind="parties"
+          id={id}
+          back="/parties"
+          lead={(r) => <Avatar party={r} index={index(r)} />}
+          top={(r) => <Guessed party={r} />}
+          extra={(r) => <Around party={r} />}
+        />
       )}
       add={{ label: "グループを足す", titleLabel: "名前", fields: [], preset: { Kind: "group" } }}
       hint="人と会社・チームは、秘書がやりとりの中で覚えていく。長く出てこない人は休みになり、また出ると戻る。"

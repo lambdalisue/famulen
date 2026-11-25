@@ -91,7 +91,7 @@ pub struct Attachments {
 
 /// What a file is, by what it holds: its media type and the extension it is
 /// kept under. What its sender says it is counts for nothing.
-fn kind_of(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+pub(crate) fn kind_of(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     const SIGNATURES: &[(&[u8], &str, &str)] = &[
         (b"\x89PNG\r\n\x1a\n", "image/png", "png"),
         (b"\xff\xd8\xff", "image/jpeg", "jpg"),

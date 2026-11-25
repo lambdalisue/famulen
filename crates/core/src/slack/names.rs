@@ -38,6 +38,13 @@ pub fn shown(answer: &Value) -> (String, String) {
     (shown, text(&user["name"]))
 }
 
+/// Whether Slack refused because it knows no such member.
+pub(crate) fn is_unknown(error: &anyhow::Error) -> bool {
+    let why = error.to_string();
+    let unknown = ["user_not_found", "user_not_visible"];
+    unknown.iter().any(|u| why.contains(u))
+}
+
 /// What Slack answered for a member.
 #[derive(Debug, Clone, PartialEq)]
 enum Answer {
@@ -119,9 +126,7 @@ impl App {
             Ok(name) => Answer::Named(name),
             Err(error) => {
                 tracing::warn!(%connection, %member, %error, "could not read a member's name");
-                let why = error.to_string();
-                let unknown = ["user_not_found", "user_not_visible"];
-                if unknown.iter().any(|u| why.contains(u)) {
+                if is_unknown(&error) {
                     Answer::Unknown
                 } else {
                     Answer::Failed
@@ -142,17 +147,28 @@ pub(crate) mod tests {
         dir: &std::path::Path,
         members: &'static [(&'static str, &'static str)],
     ) -> (App, String, Arc<Mutex<Vec<String>>>) {
+        with_slack_answering(dir, move |user| {
+            match members.iter().find(|(id, _)| *id == user) {
+                Some((_, name)) => json!({ "ok": true, "user": { "name": "handle",
+                    "profile": { "display_name": name, "phone": "090-0000-0000" } } }),
+                None => json!({ "ok": false, "error": "user_not_found" }),
+            }
+        })
+        .await
+    }
+
+    /// The same, answering for each member as `answer` says.
+    pub(crate) async fn with_slack_answering(
+        dir: &std::path::Path,
+        answer: impl Fn(&str) -> Value + Clone + Send + Sync + 'static,
+    ) -> (App, String, Arc<Mutex<Vec<String>>>) {
         use axum::extract::Query;
         let asked: Arc<Mutex<Vec<String>>> = Arc::default();
         let seen = asked.clone();
         let info = move |Query(query): Query<BTreeMap<String, String>>| {
             let user = query["user"].clone();
             seen.lock().unwrap().push(user.clone());
-            let answer = match members.iter().find(|(id, _)| *id == user) {
-                Some((_, name)) => json!({ "ok": true, "user": { "name": "handle",
-                    "profile": { "display_name": name, "phone": "090-0000-0000" } } }),
-                None => json!({ "ok": false, "error": "user_not_found" }),
-            };
+            let answer = answer(&user);
             async move { answer.to_string() }
         };
         let router = axum::Router::new().route("/users.info", axum::routing::get(info));

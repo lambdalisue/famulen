@@ -28,6 +28,7 @@ mod paths;
 pub mod people;
 pub mod permissions;
 pub mod persona;
+pub mod pictures;
 pub mod purchases;
 pub mod records;
 pub mod runtime;

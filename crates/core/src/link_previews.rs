@@ -31,6 +31,7 @@ const PAGE: Wanted = Wanted {
     types: &["text/html", "application/xhtml+xml"],
     most: 1024 * 1024,
     cut: true,
+    hosts: &[],
 };
 /// Pictures alone: an SVG is a document.
 const IMAGE: Wanted = Wanted {
@@ -43,6 +44,7 @@ const IMAGE: Wanted = Wanted {
     ],
     most: 5 * 1024 * 1024,
     cut: false,
+    hosts: &[],
 };
 
 const TITLE_CHARS: usize = 200;

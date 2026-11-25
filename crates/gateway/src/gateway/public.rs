@@ -29,6 +29,8 @@ pub struct Wanted<'a> {
     pub most: usize,
     /// Whether the beginning of a longer body does.
     pub cut: bool,
+    /// The hosts asked, redirects included; any when there are none.
+    pub hosts: &'a [&'a str],
 }
 
 /// What was read.
@@ -248,6 +250,10 @@ impl Public {
         let mut at = Url::parse(url).map_err(|_| Unread::Refused("not an address"))?;
         for _ in 0..=MAX_REDIRECTS {
             self.reach.check(&at).map_err(Unread::Refused)?;
+            if !wanted.hosts.is_empty() && !at.host_str().is_some_and(|h| wanted.hosts.contains(&h))
+            {
+                return Err(Unread::Refused("not a host asked for"));
+            }
             let response = self
                 .http
                 .get(at.clone())
@@ -361,6 +367,7 @@ mod tests {
         types: &["text/html"],
         most: 10,
         cut: true,
+        hosts: &[],
     };
 
     fn gateway() -> Gateway {
@@ -516,6 +523,31 @@ mod tests {
         let page = let_in.read_public("owner", &from, PAGE).await.unwrap();
         assert_eq!(page.body, b"inside");
         assert_eq!(page.url.as_str(), format!("http://{inside}/"));
+    }
+
+    #[tokio::test]
+    async fn only_the_hosts_asked_for_are_read_redirects_included() {
+        let at = serve(html("page").route(
+            "/away",
+            get(|| async { Redirect::temporary("http://elsewhere.example/") }),
+        ))
+        .await;
+        let gateway = gateway().reading_also([at]);
+        let here = Wanted {
+            hosts: &["127.0.0.1"],
+            ..PAGE
+        };
+        let read =
+            |path, wanted| gateway.read_public("famulen", format!("http://{at}{path}"), wanted);
+        assert!(read("/", here).await.is_ok());
+        assert!(read("/away", here).await.is_err());
+        assert_eq!(gateway.log().recent(1).unwrap()[0].decision, "deny");
+        let there = Wanted {
+            hosts: &["elsewhere.example"],
+            ..PAGE
+        };
+        assert!(read("/", there).await.is_err());
+        assert_eq!(gateway.log().recent(1).unwrap()[0].decision, "deny");
     }
 
     #[tokio::test]

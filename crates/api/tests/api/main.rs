@@ -14,6 +14,7 @@ mod logs;
 mod lookout;
 mod obsolete;
 mod persona;
+mod pictures;
 mod records;
 mod roles;
 mod sharing;

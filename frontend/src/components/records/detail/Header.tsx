@@ -1,5 +1,5 @@
 import { createAsync } from "@solidjs/router";
-import { createEffect, For, onCleanup, onMount } from "solid-js";
+import { createEffect, For, type JSX, onCleanup, onMount } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import { Icon, IconButton, Segmented, Tag, TextField } from "~/components/ui";
 import { say } from "~/lib/act";
@@ -111,7 +111,14 @@ function Workgroups(props: { record: Rec; save: SaveRecord }) {
 }
 
 /** What a record is called, what it is tagged with, and what is done with it whole. */
-export default function Header(props: { record: Rec; view: string; onView: (v: string) => void; save: SaveRecord; onRemove: () => void }) {
+export default function Header(props: {
+  record: Rec;
+  view: string;
+  onView: (v: string) => void;
+  save: SaveRecord;
+  onRemove: () => void;
+  lead?: JSX.Element;
+}) {
   const r = () => props.record;
   return (
     <header class="rec-title">
@@ -139,7 +146,10 @@ export default function Header(props: { record: Rec; view: string; onView: (v: s
         <AskAbout framed what={`${KIND_NAMES[r().kind] ?? r().kind}：${r().title}（${r().code}）`} />
         <IconButton variant="danger" icon={icons.trash} label={`${r().title}を消す`} onClick={() => props.onRemove()} />
       </div>
-      <Title title={r().title} onSave={(title) => void props.save({ title })} />
+      <div class="rec-named">
+        {props.lead}
+        <Title title={r().title} onSave={(title) => void props.save({ title })} />
+      </div>
       <div class="rec-tags">
         <span class="chips-edit">
           <Labels record={r()} save={props.save} />

@@ -35,6 +35,8 @@ import { type SaveRecord, useRecordEdit } from "./useRecordEdit";
 type Extra = {
   /** Where to go once it is removed. */
   back: string;
+  /** What this kind shows beside the title. */
+  lead?: (r: Rec) => JSX.Element;
   /** What this kind shows above the rest. */
   top?: (r: Rec) => JSX.Element;
   /** What its fields are folded under, where what is above says them already. */
@@ -136,7 +138,7 @@ function Content(props: { record: Rec } & Extra) {
   return (
     <KnownLinks.Provider value={() => r().links}>
       <article class="rec">
-        <Header record={r()} view={view()} onView={setView} save={save} onRemove={() => void remove()} />
+        <Header record={r()} view={view()} onView={setView} save={save} onRemove={() => void remove()} lead={props.lead?.(r())} />
         <Show when={view() === "view"} fallback={<Raw record={r()} />}>
           <Standing record={r()} />
           {props.top?.(r())}
@@ -227,7 +229,7 @@ export default function RecordDetail(props: { kind: string; id: string } & Extra
     >
       <Suspense fallback={<Loading />}>
         <Show when={record() !== null} fallback={<EmptyState>この記録はもうない</EmptyState>}>
-          <Show when={there()}>{(r) => <Content record={r()} back={props.back} top={props.top} fold={props.fold} extra={props.extra} />}</Show>
+          <Show when={there()}>{(r) => <Content record={r()} back={props.back} lead={props.lead} top={props.top} fold={props.fold} extra={props.extra} />}</Show>
         </Show>
       </Suspense>
     </ErrorBoundary>
