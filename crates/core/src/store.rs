@@ -110,6 +110,20 @@ impl Store {
         Ok((changed == 1).then(|| conn.last_insert_rowid()))
     }
 
+    /// When an input was kept or last changed, in Unix seconds; 0 when there
+    /// is none.
+    pub fn touched_at(&self, id: i64) -> anyhow::Result<i64> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT updated_at FROM inputs WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
     /// The oldest input that has not reached the session yet.
     pub fn next_pending(&self) -> anyhow::Result<Option<StoredInput>> {
         self.query_input(

@@ -161,6 +161,8 @@ pub struct Services<S> {
     pub memory_dir: PathBuf,
     /// Where each turn's usage is counted, and as which model.
     pub usage: Option<(crate::models::Models, crate::models::ModelSpec)>,
+    /// Told of what the session does, to show it on the console.
+    pub working: Option<crate::working::Working>,
     /// Told when a turn ends, so inputs held for another workgroup go in.
     pub turn_ended: Option<Arc<tokio::sync::Notify>>,
     pub in_flight: InFlight,
@@ -194,6 +196,7 @@ impl<S: Slack + Clone> Services<S> {
             store,
             memory_dir,
             usage: None,
+            working: None,
             turn_ended: None,
             in_flight: InFlight::default(),
             gateway: None,
@@ -388,6 +391,14 @@ fn on_inbound<S: Slack + 'static>(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             tracing::debug!(kind, "claude event");
+            if let Some(working) = &services.working {
+                working.follow(&value, |tool| {
+                    crate::wording::under_way(
+                        tool,
+                        services.permissions.connection_of(tool).as_ref(),
+                    )
+                });
+            }
             if kind == "assistant" {
                 record_assistant(&services.journal, &value);
             }

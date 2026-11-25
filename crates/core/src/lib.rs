@@ -41,6 +41,7 @@ pub mod triage;
 pub mod wording;
 pub mod workers;
 pub mod workgroups;
+pub mod working;
 pub mod writable;
 
 pub use famulen_gateway as gateway;

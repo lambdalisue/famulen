@@ -118,6 +118,8 @@ pub(super) async fn run_session(
         };
         let mut task = AbortOnDrop(task);
         loop {
+            // Inputs came or a turn ended.
+            links.app.working.tell();
             // The reload is started here, where turns are started, so no turn
             // can start between seeing none running and the engine stopping.
             if store.running()?.is_none() && store.state(RELOAD_KEY)?.is_some() {
@@ -141,7 +143,10 @@ pub(super) async fn run_session(
                 let header = text.lines().next().unwrap_or_default().to_owned();
                 if store.start_turn(row.id, &workgroup)? {
                     match handle.send(text) {
-                        Ok(()) => services.journal.record("input", header),
+                        Ok(()) => {
+                            links.app.working.began(row.id);
+                            services.journal.record("input", header);
+                        }
                         Err(error) => {
                             tracing::warn!(%error, id = row.id, "could not deliver; will retry after restart");
                             store.undo_start(row.id)?;
