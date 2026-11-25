@@ -136,6 +136,10 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         working: crate::working::Working::new(store.clone(), console.clone()),
         console: console.clone(),
         attachments: crate::attachments::Attachments::new(store.clone(), config.workdir()),
+        link_previews: crate::link_previews::LinkPreviews::new(
+            gateway.clone(),
+            permissions.clone(),
+        ),
         notices: crate::notices::Notices::new(store.clone(), permissions.clone()),
         permissions,
         models: Models::new(store.clone()).with_gateway(gateway.clone()),

@@ -22,6 +22,7 @@ mod judge;
 mod keeping;
 mod logins;
 mod model_keys;
+mod public;
 mod push;
 mod receive;
 mod redefining;
@@ -32,6 +33,7 @@ pub use defined::*;
 pub use judge::*;
 pub use keeping::{DELETE_SECRET, DESCRIBE_SECRET, Holder, PUT_SECRET, VAULT};
 pub use model_keys::model_key_name;
+pub use public::{PublicPage, Wanted};
 pub use push::{Pushed, Subscription};
 pub use receive::{Arrival, Destination, Receipt};
 pub use redefining::{CHANGE_DEFINITION, DEFINITIONS, DefinitionChange};
@@ -79,6 +81,7 @@ pub struct Gateway {
     /// Weighs what the auto permission leaves to a model; set by the program
     /// using the gateway.
     assessor: Arc<std::sync::RwLock<Option<Arc<dyn Assessor>>>>,
+    public: public::Public,
     push: push::Push,
 }
 
@@ -118,6 +121,7 @@ impl Gateway {
             jwks: Arc::default(),
             held: tokio::sync::broadcast::channel(64).0,
             assessor: Arc::default(),
+            public: Default::default(),
             push: Default::default(),
         }
     }

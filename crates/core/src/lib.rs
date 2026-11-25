@@ -17,6 +17,7 @@ pub mod dreaming;
 pub mod hub;
 pub mod input;
 pub mod journal;
+pub mod link_previews;
 pub mod lookout;
 pub mod memory;
 pub mod models;

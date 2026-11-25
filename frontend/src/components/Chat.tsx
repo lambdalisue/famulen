@@ -3,6 +3,7 @@ import { A, revalidate } from "@solidjs/router";
 import AideIcon from "~/components/AideIcon";
 import ApprovalCard from "~/components/ApprovalCard";
 import { AttachedList, DraftList } from "~/components/Attachments";
+import LinkCards from "~/components/LinkCards";
 import Markdown from "~/components/Markdown";
 import { createPull } from "~/components/pull";
 import * as icons from "~/lib/icons";
@@ -18,6 +19,7 @@ import { inboxQuery } from "~/lib/data";
 import { useWaiting } from "~/lib/inbox";
 import { working } from "~/lib/events";
 import { createKept, createSame } from "~/lib/kept";
+import { hasLinks } from "~/lib/links";
 import { excerptOf } from "~/lib/records";
 import { tabNamed } from "~/lib/tabs";
 import { useOwner } from "~/lib/owner";
@@ -44,6 +46,9 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
         <div class="text">
           <Markdown text={chatMarkdown(props.m.text)} plain={props.m.text} />
         </div>
+      </Show>
+      <Show when={hasLinks(props.m.text)}>
+        <LinkCards message={props.m.id} />
       </Show>
       <AttachedList files={props.m.attachments} at={props.m.at} />
       <Show when={open()}>
@@ -147,7 +152,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     const top = seen.getBoundingClientRect().top;
     const below = (el: Element) => el.getBoundingClientRect().bottom > top;
     const first = [...seen.querySelectorAll<HTMLElement>("[data-id]")].find(below);
-    const part = first && ([...first.querySelectorAll(".markdown-body > *, .attached > *")].find(below) ?? first);
+    const part = first && ([...first.querySelectorAll(".markdown-body > *, .attached > *, .link-cards > *")].find(below) ?? first);
     reading = first?.dataset.id && part ? { id: first.dataset.id, at: offset(first, seen), part, partAt: offset(part, seen) } : undefined;
     was = { top: seen.scrollTop, height: seen.scrollHeight, room: seen.clientHeight };
   };

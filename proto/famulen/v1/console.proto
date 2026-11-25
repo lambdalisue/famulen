@@ -55,6 +55,26 @@ message ListMessagesResponse {
   bool more = 2;
 }
 
+message ListLinkPreviewsRequest {
+  // The message whose links are told.
+  int64 message = 1;
+}
+
+// What a page a link leads to tells of itself.
+message LinkPreview {
+  string url = 1;
+  string site = 2;
+  string title = 3;
+  string description = 4;
+  // Where its picture is: /link-images/<id>. Empty when it has none.
+  string image = 5;
+}
+
+message ListLinkPreviewsResponse {
+  // In the order the links come; a page that tells nothing is left out.
+  repeated LinkPreview previews = 1;
+}
+
 message SendRequest {
   string text = 1;
   string workgroup = 2;
@@ -240,6 +260,11 @@ service ConsoleService {
   // The conversation, oldest first.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // What the pages the links in a message lead to tell of themselves.
+  rpc ListLinkPreviews(ListLinkPreviewsRequest) returns (ListLinkPreviewsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
   }
   // The owner says something to the secretary.
   rpc Send(SendRequest) returns (ConsoleMessage) {

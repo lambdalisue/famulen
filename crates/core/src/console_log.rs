@@ -121,6 +121,12 @@ impl ConsoleLog {
         Ok(())
     }
 
+    /// The message with this id.
+    pub fn get(&self, id: i64) -> anyhow::Result<Option<Message>> {
+        let found = self.rows(id.saturating_add(1), 1)?.pop();
+        Ok(found.filter(|m| m.id == id))
+    }
+
     /// The latest messages, oldest first.
     pub fn recent(&self, limit: usize) -> anyhow::Result<Vec<Message>> {
         self.before(0, limit, |_| true)
@@ -185,6 +191,15 @@ mod tests {
         };
         assert_eq!(m.text, "こんにちは");
         assert_eq!(log.recent(10).unwrap(), vec![m]);
+    }
+
+    #[test]
+    fn a_message_is_found_by_its_id() {
+        let log = ConsoleLog::new(Store::open_in_memory().unwrap());
+        let m = log.add(Who::Owner, "a", Value::Null).unwrap();
+        log.add(Who::Owner, "b", Value::Null).unwrap();
+        assert_eq!(log.get(m.id).unwrap(), Some(m));
+        assert_eq!(log.get(9).unwrap(), None);
     }
 
     #[test]

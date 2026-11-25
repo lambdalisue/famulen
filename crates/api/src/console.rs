@@ -351,6 +351,25 @@ impl ConsoleService for Api {
         Response::ok(message(&m))
     }
 
+    async fn list_link_previews(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ListLinkPreviewsRequest>,
+    ) -> ServiceResult<ListLinkPreviewsResponse> {
+        let said = self.app.console.get(request.message).or_fail()?;
+        let previews = match said {
+            Some(m) => self.app.link_previews.of(&m).await.or_fail()?,
+            None => Vec::new(),
+        };
+        Response::ok(ListLinkPreviewsResponse {
+            previews: previews
+                .into_iter()
+                .map(crate::link_previews::link_preview)
+                .collect(),
+            ..Default::default()
+        })
+    }
+
     async fn post_message(
         &self,
         _ctx: RequestContext,

@@ -9,6 +9,7 @@ mod conversation;
 mod definitions;
 mod destinations;
 mod dream_settings;
+mod link_previews;
 mod logs;
 mod lookout;
 mod obsolete;

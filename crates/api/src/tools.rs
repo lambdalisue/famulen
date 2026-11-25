@@ -305,6 +305,7 @@ mod tests {
                 .contains(&json!("CALENDAR_MODE_FAINT"))
         );
         for console_only in [
+            "list_link_previews",
             "send",
             "subscribe_events",
             "answer_approval",
