@@ -131,10 +131,10 @@ impl Role {
     /// `claude --effort` takes it; `None` leaves it to the model.
     pub fn default_effort(self) -> Option<&'static str> {
         match self {
-            Role::Secretary | Role::Lookout => Some("medium"),
+            Role::Secretary | Role::Lookout | Role::Worker => Some("medium"),
             Role::Dream => Some("xhigh"),
             Role::Triage | Role::Assess => Some("low"),
-            Role::Worker | Role::Voice => None,
+            Role::Voice => None,
         }
     }
 

@@ -14,7 +14,6 @@ mod slack;
 mod watch;
 
 pub use dream::*;
-pub(crate) use engine::secretary as secretary_model;
 pub use open::*;
 pub use prompt::*;
 pub use receive::*;

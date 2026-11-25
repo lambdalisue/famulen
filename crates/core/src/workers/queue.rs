@@ -40,10 +40,6 @@ pub fn approval(app: &App, ticket: Option<i64>) -> anyhow::Result<Approval> {
     })
 }
 
-/// How many runs of agents a day may bring while the worker role has no model
-/// of its own, and so no cap the owner chose.
-pub const UNASSIGNED_RUNS: i64 = 20;
-
 /// What a task orders, refused when it could not be run as it is.
 pub fn ordered(app: &App, task: &Record, code: &str) -> anyhow::Result<Order> {
     let order = Order::of(task, code)?;
@@ -110,14 +106,13 @@ pub fn limits(app: &App, now: DateTime<Utc>) -> anyhow::Result<Limits> {
     let settings = Settings::load(&app.store)?;
     let used = app.models.used_today(Role::Worker, app.tz(), now)?.1;
     let agents_left = match app.models.assignment(Role::Worker)? {
+        None => Some(0),
         Some(_) if !app.models.within_cap(Role::Worker, app.tz(), now)? => Some(0),
         Some(a) if a.cap_unit == CapUnit::Calls => a
             .cap
             .map(|cap| (cap - used as f64).ceil().max(0.0) as usize),
         // What a run will cost is not known before it ends.
         Some(_) => None,
-        // The secretary's model stands in, whose cap is not the worker's.
-        None => Some(usize::try_from(UNASSIGNED_RUNS - used).unwrap_or(0)),
     };
     Ok(Limits {
         slots: settings.slots as usize,

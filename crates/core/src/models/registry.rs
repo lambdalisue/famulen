@@ -77,11 +77,6 @@ pub fn role_from_id(id: &str) -> Option<Role> {
 /// Who changes the models: the owner, from the console.
 const OWNER: &str = "owner";
 
-/// Set for a role once its default model was put in place.
-fn seeded_key(role: Role) -> String {
-    format!("models.defaults.{}", role_id(role))
-}
-
 impl Models {
     pub fn new(store: Store) -> Self {
         Self {
@@ -212,12 +207,11 @@ impl Models {
         self.register(spec, None)
     }
 
-    /// The models each role starts with, once per role: Claude through the
-    /// agent CLI, Sonnet for the secretary, Opus for the dream, Haiku for the
-    /// lookout, for triage and for assessing, each thinking as deep as its
-    /// work needs. A role added later gets its default when it first appears;
-    /// a role already assigned keeps its model, and what the owner removes
-    /// later is not brought back.
+    /// Gives every role without a model the one it starts with: Claude
+    /// through the agent CLI, Sonnet for the secretary and the workers, Opus
+    /// for the dream, Haiku for the lookout, for triage and for assessing,
+    /// each thinking as deep as its work needs. A role already assigned keeps
+    /// its model.
     pub fn seed_defaults(&self) -> anyhow::Result<()> {
         let claude = |id: &str, name: &str, model: &str| ModelSpec {
             id: id.to_owned(),
@@ -231,7 +225,7 @@ impl Models {
         let defaults = [
             (
                 claude("claude-sonnet", "Claude (Sonnet)", "sonnet"),
-                vec![Role::Secretary],
+                vec![Role::Secretary, Role::Worker],
             ),
             (
                 claude("claude-opus", "Claude (Opus)", "opus"),
@@ -245,10 +239,6 @@ impl Models {
         for (spec, roles) in defaults {
             let mut open = Vec::new();
             for role in roles {
-                if self.store.state(seeded_key(role))?.is_some() {
-                    continue;
-                }
-                self.store.set_state(seeded_key(role), "1")?;
                 if self.assignment(role)?.is_none() {
                     open.push(role);
                 }
@@ -372,7 +362,8 @@ impl Models {
         Ok(())
     }
 
-    pub fn unassign(&self, role: Role) -> anyhow::Result<()> {
+    #[cfg(test)]
+    fn unassign(&self, role: Role) -> anyhow::Result<()> {
         self.store
             .conn()
             .execute("DELETE FROM roles WHERE role = ?1", [role_id(role)])?;
@@ -667,7 +658,7 @@ mod tests {
     fn a_model_removed_before_it_was_found_stays_removed() {
         let b = empty();
         b.seed_defaults().unwrap();
-        b.unassign(Role::Dream).unwrap();
+        b.assign(Role::Dream, "claude-sonnet", None, None).unwrap();
         b.unregister("claude-opus").unwrap();
         b.take_in(Source::Claude, vec![offered("opus", "Opus")])
             .unwrap();
@@ -820,24 +811,28 @@ mod tests {
         assert_eq!(effort_of(Role::Dream).as_deref(), Some("xhigh"));
         assert_eq!(effort_of(Role::Lookout).as_deref(), Some("medium"));
         assert_eq!(effort_of(Role::Triage).as_deref(), Some("low"));
+        assert_eq!(model_of(Role::Worker), "claude-sonnet");
+        assert_eq!(effort_of(Role::Worker).as_deref(), Some("medium"));
         assert_eq!(model_of(Role::Assess), "claude-haiku");
         assert_eq!(effort_of(Role::Assess).as_deref(), Some("low"));
         b.assign(Role::Dream, "claude-haiku", None, None).unwrap();
         b.seed_defaults().unwrap();
-        assert_eq!(model_of(Role::Dream), "claude-haiku", "seeded once");
+        assert_eq!(model_of(Role::Dream), "claude-haiku");
     }
 
     #[test]
-    fn a_role_added_later_gets_its_default_once_and_the_others_stay_as_left() {
+    fn a_role_without_a_model_gets_its_default_and_the_others_stay_as_left() {
         let b = Models::new(Store::open_in_memory().unwrap());
         b.seed_defaults().unwrap();
-        b.unassign(Role::Dream).unwrap();
+        b.assign(Role::Dream, "claude-haiku", None, None).unwrap();
         b.unassign(Role::Assess).unwrap();
-        b.store.clear_state(seeded_key(Role::Assess)).unwrap();
 
         b.seed_defaults().unwrap();
 
-        assert!(b.assignment(Role::Dream).unwrap().is_none());
+        assert_eq!(
+            b.assignment(Role::Dream).unwrap().unwrap().model,
+            "claude-haiku"
+        );
         assert_eq!(
             b.assignment(Role::Assess).unwrap().unwrap().model,
             "claude-haiku"
