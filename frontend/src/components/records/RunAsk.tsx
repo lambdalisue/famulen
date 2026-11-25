@@ -19,7 +19,7 @@ function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint }) {
   const answer = (given: ApprovalAnswer, replies: string[] = []) =>
     void once(() => api.workers.answerRun({ ...about(), answer: given, replies }), "答えを届けた");
   return (
-    <div class="approval" role="group" aria-label="セッションの問い">
+    <div class="approval asked-in" role="group" aria-label="セッションの問い">
       <div class="row">
         <b class="asked-does grow">{props.question.approval?.deed}</b>
         <Show when={!props.question.truncated}>

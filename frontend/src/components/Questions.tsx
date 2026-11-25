@@ -38,25 +38,23 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
             <div class="question-choices">
               <For each={q.choices}>
                 {(c) => (
-                  <Button
-                    small
-                    classList={{ primary: (chosen()[i()] ?? []).includes(c.label) }}
+                  <button
+                    type="button"
+                    class="question-choice"
+                    classList={{ on: (chosen()[i()] ?? []).includes(c.label) }}
+                    aria-label={c.label}
+                    aria-description={c.description || undefined}
                     aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)}
-                    title={c.description}
                     onClick={() => choose(i(), q, c.label)}
                   >
-                    {c.label}
-                  </Button>
+                    <b>{c.label}</b>
+                    <Show when={c.description}>
+                      <span>{c.description}</span>
+                    </Show>
+                  </button>
                 )}
               </For>
             </div>
-            <For each={q.choices.filter((c) => c.description)}>
-              {(c) => (
-                <span class="sub">
-                  {c.label}：{c.description}
-                </span>
-              )}
-            </For>
             <TextField
               aria-label={`${q.question} に自分の言葉で答える`}
               placeholder="自分の言葉で答える"

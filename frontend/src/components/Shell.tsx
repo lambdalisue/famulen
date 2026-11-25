@@ -188,9 +188,10 @@ export default function Shell(props: { children?: JSX.Element }) {
                     type="button"
                     aria-pressed={c.id === current()?.id}
                     class={`wg-btn${c.id === current()?.id ? " on" : ""}`}
+                    style={{ "--wg": own(c.color) }}
                     onClick={() => choose(c.id)}
                   >
-                    <span class="dot" style={{ background: own(c.color) }} />
+                    <span class="dot" />
                     {c.name}
                   </button>
                 )}

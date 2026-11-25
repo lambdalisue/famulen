@@ -85,17 +85,19 @@ test("what is read stays where it is as a thread opens, is answered in and close
   for (let i = 0; i < 30; i++) await post(request, `e2e 並ぶ ${i} です。${"長い話。".repeat(i % 9)}`);
   await post(request, "e2e 並ぶ 返信", root.id);
   await visit(page, "/", /^ホーム/);
+  // Threads of the other tests come into sight as older messages are read.
+  const at = page.locator(`#messages [data-id="${root.id}"]`);
+  const opens = at.getByRole("button", { name: "返信 1 件" });
   await page.locator("#messages").hover();
   await expect(async () => {
     await page.mouse.wheel(0, -3000);
-    await expect(page.getByRole("button", { name: "返信 1 件" })).toBeInViewport({ timeout: 200 });
+    await expect(opens).toBeAttached({ timeout: 200 });
   }).toPass();
-  const at = page.locator(`#messages [data-id="${root.id}"]`);
   await at.evaluate((el) => el.scrollIntoView());
   await page.waitForTimeout(200);
   const top = () => at.evaluate((el) => el.getBoundingClientRect().top);
   const was = await top();
-  await page.getByRole("button", { name: "返信 1 件" }).click();
+  await opens.click();
   await send(page, "e2e 並ぶ スレッドで");
   await expect(thread(page).getByTestId("message")).toHaveCount(3);
   expect(Math.abs((await top()) - was)).toBeLessThan(5);

@@ -42,10 +42,10 @@ export default function Message(props: {
     <div class={owner() ? "msg owner" : "msg aide"} data-testid="message" data-id={props.m.id.toString()}>
       <span class="meta">
         <Show when={!owner()}>
-          <AideIcon size={20} />
+          <AideIcon size={28} />
         </Show>
         <span>
-          {owner() ? "あなた" : props.aide} · {shortTime(props.m.at, props.tz)}
+          <b>{owner() ? "あなた" : props.aide}</b> · {shortTime(props.m.at, props.tz)}
           {props.m.origin ? ` · ${props.m.origin}` : ""}
           {props.m.about ? ` · ${props.m.about}` : ""}
         </span>
