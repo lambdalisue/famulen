@@ -100,6 +100,20 @@ impl UsageSpan {
 }
 
 impl UsagePeriod {
+    /// When it begins, and when what comes after it does, in Unix seconds.
+    pub fn seconds(self, tz: Tz) -> Option<(i64, i64)> {
+        let begins = |day: NaiveDate| {
+            let midnight = day.and_hms_opt(0, 0, 0)?;
+            // A day whose midnight a clock change skips begins an hour later.
+            let begins = tz.from_local_datetime(&midnight).earliest().or_else(|| {
+                let hour = chrono::Duration::hours(1);
+                tz.from_local_datetime(&(midnight + hour)).earliest()
+            })?;
+            Some(begins.timestamp())
+        };
+        Some((begins(self.from)?, begins(self.to.succ_opt()?)?))
+    }
+
     fn holds(&self, day: NaiveDate) -> bool {
         self.from <= day && day <= self.to
     }

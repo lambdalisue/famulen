@@ -1,6 +1,6 @@
 # すべての入力を、差し替えられるモデル CLI の常駐セッション 1 つに渡す
 
-状態：採用
+状態：20261126-keep-a-session-of-the-model-cli-for-each-thread-and-let-the-system-keep-what-belongs-to-which.md に置き換えられた
 
 ## 背景
 

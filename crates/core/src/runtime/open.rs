@@ -135,6 +135,11 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         connections: connections.clone(),
         working: crate::working::Working::new(store.clone(), console.clone()),
         console: console.clone(),
+        conversations: {
+            let conversations = crate::conversations::Conversations::new(store.clone());
+            conversations.adopt_the_one_before()?;
+            conversations
+        },
         attachments: crate::attachments::Attachments::new(store.clone(), config.workdir()),
         link_previews: crate::link_previews::LinkPreviews::new(
             gateway.clone(),

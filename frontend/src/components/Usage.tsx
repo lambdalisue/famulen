@@ -1,6 +1,7 @@
 import { createAsync, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import AskAbout from "~/components/AskAbout";
+import ConversationUsage from "~/components/ConversationUsage";
 import UsageChart, { type Column } from "~/components/UsageChart";
 import type { UsageRow } from "~/gen/famulen/v1/settings_pb";
 import * as icons from "~/lib/icons";
@@ -36,7 +37,8 @@ export default function Usage() {
   const [params, setParams] = useSearchParams<{ by?: string; span?: string; day?: string }>();
   const by = (): By => (params.by === "model" ? "model" : "agent");
   const span = (): Span => SPANS.find(([key]) => key === params.span)?.[0] ?? "month";
-  const usage = createAsync(() => usageQuery(SPANS.find(([key]) => key === span())![2], params.day ?? ""));
+  const wanted = () => SPANS.find(([key]) => key === span())![2];
+  const usage = createAsync(() => usageQuery(wanted(), params.day ?? ""));
   const models = createAsync(() => modelsQuery());
   const [picked, setPicked] = createSignal<string>();
 
@@ -250,6 +252,7 @@ export default function Usage() {
             </table>
           </div>
         </section>
+        <ConversationUsage span={wanted()} day={params.day ?? ""} />
       </Show>
     </section>
   );

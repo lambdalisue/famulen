@@ -3,6 +3,7 @@ syntax = "proto3";
 package famulen.v1;
 
 import "famulen/v1/common.proto";
+import "famulen/v1/console.proto";
 import "famulen/v1/lookout.proto";
 import "famulen/v1/memory.proto";
 import "famulen/v1/options.proto";
@@ -393,6 +394,15 @@ message UsageBucket {
   repeated UsageRow rows = 3;
 }
 
+// What the secretary's conversations used in a period.
+message ConversationUsage {
+  // The most input first; those that used little are left out when there are
+  // many.
+  repeated Conversation conversations = 1;
+  // What all of them used.
+  ConversationSpent total = 2;
+}
+
 message Usage {
   // YYYY-MM-DD.
   string from = 1;
@@ -444,6 +454,10 @@ service ModelService {
     option (console_only) = true;
   }
   rpc GetUsage(GetUsageRequest) returns (Usage) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // What the secretary's conversations used in a period.
+  rpc GetConversationUsage(GetUsageRequest) returns (ConversationUsage) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }

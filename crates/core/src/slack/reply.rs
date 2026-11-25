@@ -11,6 +11,8 @@ use crate::store::Store;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Posted {
     pub ts: String,
+    /// The thread it was posted in; empty outside any.
+    pub thread: String,
     /// As Slack was given it.
     pub text: String,
 }
@@ -78,7 +80,11 @@ pub async fn send<S: Slack>(
             tracing::debug!(%error, "could not take the status away");
         }
     }
-    Ok(Posted { ts, text })
+    Ok(Posted {
+        ts,
+        thread: thread.unwrap_or_default(),
+        text,
+    })
 }
 
 #[cfg(test)]

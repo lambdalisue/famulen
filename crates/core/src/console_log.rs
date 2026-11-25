@@ -8,6 +8,7 @@ use tokio::sync::broadcast;
 
 use crate::attachments::{self, Attached};
 use crate::store::{Store, now};
+use crate::workgroups::ALL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +45,31 @@ impl Message {
     /// The message its thread begins with, when it replies to one.
     pub fn thread(&self) -> Option<i64> {
         self.meta.get("thread").and_then(Value::as_i64)
+    }
+
+    /// The input it is kept as, for what came in on Slack.
+    pub fn input(&self) -> Option<i64> {
+        self.meta.get("input").and_then(Value::as_i64)
+    }
+
+    /// Whether it was said on Slack and is shown here as well.
+    pub fn on_slack(&self) -> bool {
+        self.meta
+            .get("origin")
+            .and_then(Value::as_str)
+            .is_some_and(|origin| origin.starts_with("Slack"))
+    }
+
+    /// Whether it shows while `workgroup` is chosen: one said in another
+    /// workgroup is left out, one said in すべて is kept.
+    pub fn shown_in(&self, workgroup: &str) -> bool {
+        workgroup.is_empty()
+            || workgroup == ALL
+            || self
+                .meta
+                .get("workgroup")
+                .and_then(Value::as_str)
+                .is_none_or(|of| of == workgroup || of == ALL)
     }
 
     /// The files that came with it.
@@ -152,6 +178,18 @@ impl ConsoleLog {
              WHERE json_extract(meta, '$.thread') = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(params![root], row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The messages kept as one of `inputs`, oldest first.
+    pub fn of_inputs(&self, inputs: &[i64]) -> anyhow::Result<Vec<Message>> {
+        let conn = self.store.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, at, who, text, meta FROM console_messages
+             WHERE json_extract(meta, '$.input') IN (SELECT value FROM json_each(?1))
+             ORDER BY id",
+        )?;
+        let rows = stmt.query_map([serde_json::to_string(inputs)?], row)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

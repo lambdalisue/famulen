@@ -296,6 +296,36 @@ impl ModelService for Api {
         })
     }
 
+    async fn get_conversation_usage(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, GetUsageRequest>,
+    ) -> ServiceResult<ConversationUsage> {
+        let tz = self.app.tz();
+        let (span, day) = asked_period(&request.to_owned_message(), Utc::now().with_timezone(&tz))?;
+        let (from, to) = span
+            .period(day)
+            .and_then(|period| period.seconds(tz))
+            .ok_or_else(|| fail(format!("no usage can be shown around {day}")))?;
+        let all = &self.app.conversations;
+        let used = all.spent_between(from, to).or_fail()?;
+        let total = used.iter().map(|(_, spent)| *spent).sum();
+        let conversations = used
+            .into_iter()
+            .take(NAMED)
+            .filter_map(|(id, spent)| {
+                let c = all.get(id).transpose()?;
+                Some(c.and_then(|c| self.conversation(c, "", spent)))
+            })
+            .collect::<anyhow::Result<_>>()
+            .or_fail()?;
+        Response::ok(ConversationUsage {
+            conversations,
+            total: crate::console::spent(total).into(),
+            ..Default::default()
+        })
+    }
+
     async fn get_usage(
         &self,
         _ctx: RequestContext,
@@ -303,16 +333,7 @@ impl ModelService for Api {
     ) -> ServiceResult<Usage> {
         let tz = self.app.tz();
         let now = Utc::now();
-        let span = match request.span.as_known() {
-            Some(pb::UsageSpan::USAGE_SPAN_WEEK) => CoreSpan::Week,
-            Some(pb::UsageSpan::USAGE_SPAN_YEAR) => CoreSpan::Year,
-            _ => CoreSpan::Month,
-        };
-        let day = match given(request.day) {
-            None => now.with_timezone(&tz).date_naive(),
-            Some(day) => chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
-                .map_err(|_| fail(format!("day is YYYY-MM-DD: {day}")))?,
-        };
+        let (span, day) = asked_period(&request.to_owned_message(), now.with_timezone(&tz))?;
         let report = self.app.models.usage(span, day, tz, now).or_fail()?;
         Response::ok(Usage {
             from: report.period.from.to_string(),
@@ -336,6 +357,27 @@ impl ModelService for Api {
             ..Default::default()
         })
     }
+}
+
+/// How many conversations the usage of a period names.
+const NAMED: usize = 50;
+
+/// The span and the day a caller asks the usage of.
+fn asked_period(
+    r: &GetUsageRequest,
+    now: chrono::DateTime<chrono_tz::Tz>,
+) -> Result<(CoreSpan, chrono::NaiveDate), connectrpc::ConnectError> {
+    let span = match r.span.as_known() {
+        Some(pb::UsageSpan::USAGE_SPAN_WEEK) => CoreSpan::Week,
+        Some(pb::UsageSpan::USAGE_SPAN_YEAR) => CoreSpan::Year,
+        _ => CoreSpan::Month,
+    };
+    let day = match given(&r.day) {
+        None => now.date_naive(),
+        Some(day) => chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+            .map_err(|_| fail(format!("day is YYYY-MM-DD: {day}")))?,
+    };
+    Ok((span, day))
 }
 
 fn usage_row(row: famulen_core::models::UsageRow) -> Option<UsageRow> {

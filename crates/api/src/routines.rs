@@ -2,10 +2,11 @@
 
 use chrono::Utc;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use famulen_core::conversations::wake_key;
 use famulen_core::schedule::{cron_from, describe_cron};
 
 use crate::pb::*;
-use crate::{Api, OrFail, changed, fail, writer};
+use crate::{Api, OrFail, by_secretary, changed, fail, writer};
 
 fn wake(w: famulen_core::schedule::Wakeup) -> Wake {
     Wake {
@@ -97,7 +98,7 @@ impl RoutineService for Api {
 
     async fn wake_at(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         request: ServiceRequest<'_, WakeAtRequest>,
     ) -> ServiceResult<Wake> {
         let r = request.to_owned_message();
@@ -115,6 +116,12 @@ impl RoutineService for Api {
         };
         let scheduler = self.app.scheduler();
         let id = scheduler.wake_at(at, &r.note, &r.why, now).or_fail()?;
+        // It is set; failing here would have it set twice.
+        if by_secretary(&ctx)
+            && let Err(error) = self.app.conversations.link_to_running([wake_key(id)])
+        {
+            tracing::warn!(%error, "could not keep which conversation a wake-up is of");
+        }
         changed(self);
         Response::ok(wake(famulen_core::schedule::Wakeup {
             id,

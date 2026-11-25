@@ -334,21 +334,21 @@ impl Runs {
     }
 
     /// Keep who delegated a task and in which workgroup, unless what it orders
-    /// is what was kept before.
+    /// is what was kept before. Returns whether it was kept.
     pub fn delegated(
         &self,
         task: &str,
         digest: &str,
         by: &str,
         workgroup: &str,
-    ) -> anyhow::Result<()> {
-        self.store.conn().execute(
+    ) -> anyhow::Result<bool> {
+        let changed = self.store.conn().execute(
             "INSERT INTO delegations (task, digest, by, workgroup) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (task) DO UPDATE SET digest = ?2, by = ?3, workgroup = ?4
              WHERE digest != ?2",
             params![task, digest, by, workgroup],
         )?;
-        Ok(())
+        Ok(changed == 1)
     }
 
     /// Who delegated a task as it is ordered by `digest`, and in which
