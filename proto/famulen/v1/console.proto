@@ -75,6 +75,8 @@ message ListMessagesResponse {
   repeated ConsoleMessage messages = 1;
   // Whether older messages remain.
   bool more = 2;
+  // Of a conversation's, the newest message the owner has read; 0 is none.
+  int64 read_to = 3;
 }
 
 message ListLinkPreviewsRequest {
@@ -136,6 +138,15 @@ message Conversation {
   bool waiting = 11;
   // What was said last in it, as far as the workgroup shows it.
   ConsoleMessage last = 12;
+  // How many of the secretary's messages the owner has not read: those said
+  // after what the owner last said in it, and not shown to them yet.
+  int32 unread = 13;
+}
+
+message ReadConversationRequest {
+  int64 conversation = 1;
+  // The newest of its messages that was shown to the owner.
+  int64 message = 2;
 }
 
 message ListConversationsRequest {
@@ -144,6 +155,9 @@ message ListConversationsRequest {
   // Only those used before this one; 0 begins with the one used last.
   int64 before = 2;
   int32 limit = 3;
+  // One that is told besides, however long ago it was used, when the workgroup
+  // shows it; 0 is none.
+  int64 also = 4;
 }
 
 message ListConversationsResponse {
@@ -165,8 +179,8 @@ message SendRequest {
   repeated string attachments = 5;
   // The message it replies to; 0 is none.
   int64 reply_to = 6;
-  // The secretary's conversation to go on with, for what is no reply; 0 goes
-  // on with the one the owner was in a moment ago, or begins one.
+  // The secretary's conversation to go on with, whichever the message it
+  // replies to is of; 0 is, for what is no reply, to go on with the one the owner was in a moment ago, or begins one.
   int64 conversation = 7;
   // Begin a conversation, for what is no reply.
   bool new_conversation = 8;
@@ -204,6 +218,8 @@ message Approval {
   string place = 21;
   // What it is given, a row for each; empty when it is not given named things.
   repeated ApprovalGiven given = 22;
+  // The secretary's conversation it was asked in; 0 when it is of none.
+  int64 conversation = 23;
 }
 
 // One thing a held call is given.
@@ -235,6 +251,8 @@ message HeldInput {
   string text = 2;
   // Unix seconds, when it arrived.
   int64 at = 3;
+  // The secretary's conversation it is in; 0 when it is of none.
+  int64 conversation = 4;
 }
 
 message Inbox {
@@ -353,6 +371,10 @@ service ConsoleService {
   // The secretary's conversations.
   rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The owner was shown what is said in a conversation.
+  rpc ReadConversation(ReadConversationRequest) returns (Empty) {
+    option (console_only) = true;
   }
   // What the pages the links in a message lead to tell of themselves.
   rpc ListLinkPreviews(ListLinkPreviewsRequest) returns (ListLinkPreviewsResponse) {

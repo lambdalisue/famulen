@@ -132,12 +132,12 @@ export function SessionAsk(props: { approval: Approval; disabled: boolean; onAns
 }
 
 /** A call that waits for the owner's answer. */
-export default function ApprovalCard(props: { approval: Approval; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
+export default function ApprovalCard(props: { approval: Approval; hidden?: boolean; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
   const r = () => props.approval;
   const change = () => (r().tool === CHANGE_DEFINITION ? proposal(r().input) : undefined);
   const asks = () => r().questions.length > 0;
   return (
-    <div id={approvalId(r().id)} tabindex="-1" class="approval" data-testid="approval" data-kind={change() ? "definition" : undefined}>
+    <div id={approvalId(r().id)} tabindex="-1" class="approval" hidden={props.hidden} data-testid="approval" data-kind={change() ? "definition" : undefined}>
       <header class="asked-head">
         <Icon svg={asks() ? icons.messages : icons.shieldCheck} size={16} />
         <span>

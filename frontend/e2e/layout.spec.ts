@@ -188,11 +188,13 @@ test.describe("the conversation is as high as the window, with the bar over the 
       await page.setViewportSize({ width, height: 900 });
       await open(page, "/tasks");
       const chat = await box(page, ".chat");
+      const head = await box(page, ".talk-head");
       const messages = await box(page, ".messages");
       const bar = await box(page, ".topbar");
       const tabs = await box(page, ".tabs");
       expect(chat).toMatchObject({ left: 0, top: 0, bottom: 900 });
-      expect(messages.top).toBe(0);
+      expect(head.top).toBe(0);
+      expect(messages.top).toBe(head.bottom);
       expect(bar).toMatchObject({ left: chat.right, top: 0, right: width, bottom: tabs.top });
       await expect(page.locator(".topbar .logo")).toBeInViewport({ ratio: 1 });
       await expect(page.locator(".topbar .brand")).toBeInViewport({ ratio: 1 });

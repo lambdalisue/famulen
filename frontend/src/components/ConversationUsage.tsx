@@ -2,17 +2,7 @@ import { createAsync } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
 import type { UsageSpan } from "~/gen/famulen/v1/settings_pb";
 import { conversationUsageQuery, shortTokens } from "~/lib/models";
-
-/** What conversations that the owner did not begin are of. */
-const SOURCES: Record<string, string> = {
-  slack: "Slack",
-  schedule: "定期の仕事",
-  wake: "起床予約",
-  arrival: "つなぎ先の知らせ",
-  lookout: "見張り",
-  approval: "確認の答え",
-  worker: "委託の終わり",
-};
+import { SOURCES } from "~/lib/talks";
 
 interface Spent {
   turns: bigint;

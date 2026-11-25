@@ -96,7 +96,7 @@
   .chat .talk, .chat .m-sheetbar, .chat #approvals { display: none; }
   .m-peek { position: relative; display: flex; align-items: center; min-height: 48px; padding: 10px 16px 4px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
   .m-peek > .sheet-grip { position: absolute; top: 5px; left: 50%; width: 32px; height: 3px; margin-left: -16px; }
-  .m-peek, .m-sheetbar { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .m-peek, .m-sheetbar, .talk-head { touch-action: none; user-select: none; -webkit-user-select: none; }
   .peek-line { display: flex; align-items: center; gap: var(--s2); width: 100%; min-width: 0; }
   .peek-text { flex: 1; min-width: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .composer { margin: 4px 12px 8px; padding: 4px 4px 4px 8px; box-shadow: none; }
@@ -109,7 +109,12 @@
   .rec-name { min-height: 44px; }
   .records-more { display: inline-flex; align-items: center; min-height: 44px; }
   body.chat-open .chat { --under: calc(56px + env(safe-area-inset-bottom)); top: var(--seen-top, 0px); bottom: auto; height: calc(var(--seen-height, 100dvh) - var(--under)); padding-top: var(--clear-top); background: var(--card); box-shadow: none; z-index: 28; }
-  body.chat-open .chat .talk { display: flex; }
+  body:not(.chat-open) .chat :is(.talk-head, .talk-list, .talk-new, .talk-said, .arrival, .dest) { display: none; }
+  body.chat-open .chat .talk:not([hidden]) { display: flex; }
+  .dest .segs-item { position: relative; min-height: 32px; min-width: 52px; }
+  .dest .segs-item::after { content: ""; position: absolute; inset: -6px 0; }
+  .talk-about > summary { min-height: 44px; }
+  .talk-back { min-width: 44px; }
   .thread { position: absolute; inset: 0; z-index: 1; border-top: 0; }
   /* What is seen stays small; the finger is given more room than that. */
   .msg .meta .reply, .replying .btn { position: relative; }
@@ -127,7 +132,13 @@
   body.chat-open .composer > .line { flex: 0 1 auto; min-height: 44px; align-items: stretch; }
   body.chat-open .composer :is(.send, .attach) { align-self: flex-end; }
   .composer .attach { width: 44px; height: 44px; margin-left: -6px; }
-  body.chat-open .chat .m-sheetbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 16px 4px; border-bottom: 1px solid var(--line2); }
+  body.chat-open .chat .m-sheetbar { display: block; flex: none; height: 20px; padding-top: 8px; background: var(--card); }
+  /* One bar: what closes the conversation stands at the end of what heads it. */
+  .m-sheetbar > .row { position: absolute; top: calc(var(--clear-top) + 20px); right: 8px; z-index: 2; }
+  .m-sheetbar > .row > :not(.btn) { display: none; }
+  .talk-head, .talk-tools { padding-right: 60px; }
+  .talk-list { padding-top: 6px; }
+  .talk-tools > .aide-icon { display: none; }
   body.chat-open :is(.m-peek, .m-float) { display: none; }
   body.typing :is(.m-tabbar, .m-peek, .m-float) { display: none; }
   body.typing.chat-open .chat { --under: 0px; }

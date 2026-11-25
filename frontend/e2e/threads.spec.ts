@@ -26,15 +26,15 @@ test("a message is replied to, its reply quotes it, and the thread holds both an
 
   const reply = inTalk(page, "e2e 返信 一つ目");
   await expect(reply.locator(".quote")).toContainText("元の 報告");
-  const opener = page.getByRole("button", { name: "返信 1 件" });
-  await opener.click();
+  const begun = page.locator(`#messages [data-id="${root.id}"]`);
+  await begun.getByRole("button", { name: "返信 1 件" }).click();
   const said = thread(page).getByTestId("message");
   await expect(said).toHaveCount(2);
   await expect(said.locator(".quote"), "what the thread begins with is there to see").toHaveCount(0);
 
   await send(page, "e2e 返信 二つ目");
   await expect(said).toHaveCount(3);
-  await expect(page.getByRole("button", { name: "返信 2 件" })).toBeVisible();
+  await expect(begun.getByRole("button", { name: "返信 2 件" })).toBeVisible();
   // The secretary's word is in the thread and in the conversation.
   await post(request, "e2e 返信 秘書から", root.id);
   await expect(said).toHaveCount(4);

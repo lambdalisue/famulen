@@ -24,7 +24,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: process.env.CI ? "github" : "list",
-  use: { baseURL: console, trace: "retain-on-failure", locale: "ja-JP" },
+  use: { baseURL: console, trace: "retain-on-failure", locale: "ja-JP",
+    // Most of what is tested is said in one line; what is about the list of conversations begins from that.
+    storageState: { cookies: [], origins: [{ origin: console, localStorage: [{ name: "famulen.talk", value: "all" }] }] },
+  },
   projects: [
     {
       name: "desktop",

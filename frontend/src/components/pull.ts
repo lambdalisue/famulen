@@ -6,7 +6,7 @@ const SLOP = 6;
 const FAR = 90;
 const FAST = 0.5;
 
-const HANDLES = ".m-peek, .m-sheetbar";
+const HANDLES = ".m-peek, .m-sheetbar, .talk-head";
 
 /**
  * What a sheet carries so that it is pulled up by its peek and down by its

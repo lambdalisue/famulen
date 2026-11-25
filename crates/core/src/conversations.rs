@@ -275,10 +275,12 @@ impl Conversations {
         origin: impl Fn(i64) -> Option<i64>,
     ) -> anyhow::Result<Vec<String>> {
         Ok(match &input.source {
-            Source::Console {
-                reply_to: Some(to), ..
-            } => vec![message_key(to.thread), message_key(to.message)],
             // One the owner chose the conversation of is linked already.
+            Source::Console {
+                message,
+                reply_to: Some(to),
+                ..
+            } => [*message, to.thread, to.message].map(message_key).into(),
             Source::Console { message, .. } => vec![message_key(*message)],
             Source::Slack {
                 workspace,
@@ -556,6 +558,74 @@ impl Conversations {
         found.sort_by_key(|m| m.id);
         found.dedup_by_key(|m| m.id);
         Ok(found)
+    }
+
+    /// The conversation a request to the owner was made in: the secretary's
+    /// own, or the one that ordered the delegated task it is of. `origin`
+    /// gives the input it was made in.
+    pub fn of_request(
+        &self,
+        request: i64,
+        session: Option<&str>,
+        origin: impl Fn(i64) -> Option<i64>,
+    ) -> anyhow::Result<Option<i64>> {
+        if let Some(input) = origin(request)
+            && let Some(of) = self.of(&input_key(input))?
+        {
+            return Ok(Some(of));
+        }
+        let task: Option<String> = self
+            .store
+            .conn()
+            .query_row(
+                "SELECT task FROM worker_runs WHERE ticket = ?1 OR (?2 != '' AND session = ?2)
+                 ORDER BY id DESC LIMIT 1",
+                params![request, session.unwrap_or_default()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        task.map_or(Ok(None), |task| self.of(&task_key(&task)))
+    }
+
+    /// The conversation an input is of, once it is settled.
+    pub fn of_input(&self, input: i64) -> anyhow::Result<Option<i64>> {
+        self.of(&input_key(input))
+    }
+
+    /// The owner was shown what is said in a conversation, up to `message`.
+    /// Whether that was more than before is returned.
+    pub fn read(&self, id: i64, message: i64) -> anyhow::Result<bool> {
+        let changed = self.store.conn().execute(
+            "INSERT INTO conversation_reads (conversation, message) VALUES (?1, ?2)
+             ON CONFLICT (conversation) DO UPDATE SET message = ?2 WHERE message < ?2",
+            params![id, message],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// The newest of `said` in a conversation the owner has read, or 0. What
+    /// they spoke after, they have.
+    pub fn read_to(&self, id: i64, said: &[Message]) -> anyhow::Result<i64> {
+        let read: Option<i64> = self
+            .store
+            .conn()
+            .query_row(
+                "SELECT message FROM conversation_reads WHERE conversation = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let spoke = said.iter().rfind(|m| m.who == Who::Owner).map(|m| m.id);
+        Ok(read.max(spoke).unwrap_or_default())
+    }
+
+    /// How many of `said` in a conversation the owner has not read.
+    pub fn unread(&self, id: i64, said: &[Message]) -> anyhow::Result<usize> {
+        let after = self.read_to(id, said)?;
+        Ok(said
+            .iter()
+            .filter(|m| m.who == Who::Aide && m.id > after)
+            .count())
     }
 
     /// The session of a conversation, as its process tells it.
