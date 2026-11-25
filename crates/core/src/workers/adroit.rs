@@ -2,12 +2,17 @@
 //! the gateway as everything outside is: every start is judged, and held for
 //! the owner, as their permissions say.
 
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use futures_util::future::join_all;
 use serde_json::{Value, json};
 
 use super::WORKER;
 use super::order::Order;
 use super::runners::{Began, Looked};
-use super::runs::{Run, State};
+use super::runs::{Outcome as Ended, Run, State};
 use super::sight::Sight;
 use crate::app::App;
 use crate::approvals::Answer;
@@ -24,14 +29,25 @@ pub const START: &str = "start_session";
 pub const LAUNCH: &[&str] = &[START, "resume_session"];
 /// Its tools that answer what a session waits on the owner for.
 const PUT_QUESTION: &str = "put_question";
+/// Its tool that asks a session to go on.
+const SEND: &str = "send_to_session";
 const ANSWER_PERMISSION: &str = "answer_permission";
 /// How much of a session's answer is kept.
 const RESULT_CHARS: usize = 6000;
 /// How long a session just started may look as if it had ended its turn
 /// before it took up its first prompt.
 const TAKES_UP_SECS: i64 = 180;
-/// How many turns are read for whoever watches a session.
+/// How many turns are read for whoever watches a session, or to tell whether
+/// an ended run's session went on: the most Adroit tells.
 const WATCHED_TURNS: u32 = 20;
+/// How long one answer is waited for that tells whether ended runs went on.
+const LOOKS_BACK_FOR: Duration = Duration::from_secs(10);
+/// What a session is asked after a passing fault.
+const GO_ON: &str = "Your last turn was cut off by a passing fault of the model's service. \
+Go on with your work from where it stopped, and check what was done before you do it again. \
+If it was finished already, say so and report on it.";
+/// How a session was when it was read: its state, and when it was last active.
+pub(super) type Trace = (String, i64);
 
 pub fn is_adroit(c: &Connection) -> bool {
     matches!(&c.transport, Transport::Defined { definition, .. } if definition == ADROIT)
@@ -215,7 +231,12 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
     match session {
         Ok(session) => {
             take_in(app, run, &session, &held)?;
-            let age = crate::store::now() - run.started_at.unwrap_or_default();
+            let now = crate::store::now();
+            let age = now - run.started_at.unwrap_or_default();
+            let asked = app.workers.runs.again(run.id)?.continued_at;
+            if taking_up(&session, asked, now) {
+                return Ok(Looked::Working);
+            }
             Ok(read_standing(&session, age))
         }
         Err(error) => {
@@ -233,6 +254,250 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
             )))
         }
     }
+}
+
+/// Those of these ended runs whose sessions went on since, by their ids. One
+/// that cannot be read is left for the next time, and an Adroit that does not
+/// answer holds up no other for long.
+pub(super) async fn went_on(
+    app: &App,
+    ended: &[(Run, bool)],
+    read_before: &Mutex<HashMap<i64, Trace>>,
+) -> Vec<i64> {
+    let mut of: BTreeMap<String, Vec<&(Run, bool)>> = BTreeMap::new();
+    for one in ended {
+        match connection_kept(app, &one.0) {
+            Ok(connection) if !connection.is_empty() => of.entry(connection).or_default().push(one),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(run = one.0.id, %error, "could not tell where a run was"),
+        }
+    }
+    join_all(
+        of.iter()
+            .map(|(connection, runs)| went_on_in(app, connection, runs, read_before)),
+    )
+    .await
+    .concat()
+}
+
+async fn went_on_in(
+    app: &App,
+    connection: &str,
+    runs: &[&(Run, bool)],
+    read_before: &Mutex<HashMap<i64, Trace>>,
+) -> Vec<i64> {
+    let mut went = Vec::new();
+    if !matches!(app.connections.get(connection), Ok(Some(_))) {
+        return went;
+    }
+    let ask = async |tool, input| {
+        tokio::time::timeout(LOOKS_BACK_FOR, read(app, connection, tool, input))
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("{tool} did not answer")))
+    };
+    let listed = match ask("list_sessions", json!({})).await {
+        Ok(listed) => listed,
+        Err(error) => {
+            tracing::debug!(%error, "could not list the sessions of ended runs");
+            // One that is closed is not listed: that it was told of is all
+            // that leads to it.
+            for (run, _) in runs.iter().filter(|(_, heard)| *heard) {
+                app.workers.hear_again(&run.session);
+            }
+            return went;
+        }
+    };
+    for (run, heard) in runs {
+        let trace = traced(&listed, &run.session);
+        let before = read_before
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&run.id)
+            .cloned();
+        let may_have = trace.as_ref().is_some_and(|t| {
+            before.as_ref() != Some(t)
+                && (t.1 / 1000 >= run.ended_at.unwrap_or_default() || works(&t.0))
+        });
+        if !heard && !may_have {
+            continue;
+        }
+        let input = json!({ "session": run.session, "turns": WATCHED_TURNS });
+        match ask("read_session", input).await {
+            Ok(session) if has_gone_on(&session, run) => went.push(run.id),
+            Ok(_) => {
+                if let Some(trace) = trace {
+                    read_before
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(run.id, trace);
+                }
+            }
+            Err(error) => {
+                tracing::debug!(run = run.id, %error, "could not read an ended run's session");
+            }
+        }
+    }
+    went
+}
+
+fn traced(listed: &Value, session: &str) -> Option<Trace> {
+    let found = listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|s| s["id"] == session)?;
+    Some((
+        found["state"].as_str().unwrap_or_default().to_owned(),
+        found["last_active_ms"].as_i64().unwrap_or_default(),
+    ))
+}
+
+/// Whether the session of a run that ended went on with its work. One that was
+/// done only takes in what other sessions tell it.
+fn has_gone_on(session: &Value, run: &Run) -> bool {
+    let ended_at = run.ended_at.unwrap_or_default();
+    let at_work = works(session["state"].as_str().unwrap_or_default());
+    // One begun in the very second the run ended is another turn than the one
+    // that ended it when it is under way, or was active after that second.
+    let mut later = turns(session).filter(|t| {
+        let last = t["last_ms"].as_i64().unwrap_or_default() / 1000;
+        began(t) > ended_at || began(t) == ended_at && (at_work || last > ended_at)
+    });
+    match run.outcome {
+        Some(Ended::Failed) => at_work || later.next().is_some(),
+        Some(Ended::Done) => later.any(|t| !only_tells(t["prompt"].as_str().unwrap_or_default())),
+        _ => false,
+    }
+}
+
+/// Whether a session in this state is in a turn.
+fn works(state: &str) -> bool {
+    matches!(state, "working" | "background" | "waiting")
+}
+
+fn turns(session: &Value) -> impl Iterator<Item = &Value> {
+    session["turns"].as_array().into_iter().flatten()
+}
+
+/// When a turn began, in Unix seconds.
+fn began(turn: &Value) -> i64 {
+    turn["began_ms"].as_i64().unwrap_or_default() / 1000
+}
+
+/// Whether a prompt is only what another session tells, with nothing asked.
+fn only_tells(prompt: &str) -> bool {
+    prompt.starts_with("[message]")
+        && !prompt
+            .lines()
+            .any(|l| l.starts_with("[request]") || l.starts_with("[user]"))
+}
+
+/// Ask a run's session to go on. The owner let it work when it was started,
+/// so they are not asked again; what they forbid stays so.
+pub(super) async fn go_on(app: &App, run: &Run) -> anyhow::Result<()> {
+    let call = Call {
+        waive: true,
+        never_ask: true,
+        ..Call::new(
+            WORKER,
+            connection(app, run)?,
+            SEND,
+            json!({ "session": run.session, "prompt": GO_ON }),
+        )
+    };
+    match app.gateway.call(&call).await? {
+        Outcome::Done(answer) if !answer.is_error => Ok(()),
+        Outcome::Done(answer) => anyhow::bail!("{SEND}: {}", answer.text),
+        Outcome::Held(_) => anyhow::bail!("{SEND} was held"),
+    }
+}
+
+/// Whether a session that failed has yet to take up what it was asked at
+/// `asked`.
+fn taking_up(session: &Value, asked: i64, now: i64) -> bool {
+    if session["state"] != "failed" {
+        return false;
+    }
+    // Who else asked it, and when, is not told: it counts from its last sign.
+    let active = session["last_active_ms"].as_i64().unwrap_or_default() / 1000;
+    let undelivered = session["undelivered"].as_u64().unwrap_or(0) > 0;
+    undelivered && now - asked.max(active) <= TAKES_UP_SECS
+        || now - asked <= TAKES_UP_SECS && turns(session).last().is_none_or(|t| began(t) < asked)
+}
+
+/// Whether a turn that failed saying this was cut off by a fault that passes
+/// by itself. What it is not known to be, it is not: a session whose allowance
+/// is used up or that is logged out would fail again.
+fn passes(why: &str) -> bool {
+    let why = why.to_lowercase();
+    if why.contains("not your usage limit") {
+        return true;
+    }
+    let stays = [
+        "usage limit",
+        "session limit",
+        "weekly limit",
+        "hit your limit",
+        "reached your limit",
+        "spend limit",
+        "quota",
+        "out of extra usage",
+        "credit",
+        "billing",
+        "/login",
+        "log in",
+        "logged out",
+        "not logged in",
+        "api key",
+        "oauth",
+        "authenticat",
+        "unauthorized",
+        "permission_error",
+        "error: 400",
+        "error: 401",
+        "error: 403",
+    ];
+    let passing = [
+        "the response stopped arriving",
+        "response stalled",
+        "stream disconnected",
+        "stream closed",
+        "stream ended",
+        "stream idle timeout",
+        "connection error",
+        "connection closed",
+        "connection lost",
+        "connection reset",
+        "unable to connect",
+        "econnreset",
+        "etimedout",
+        "econnrefused",
+        "enotfound",
+        "epipe",
+        "socket",
+        "fetch failed",
+        "network error",
+        "request timed out",
+        "request timeout",
+        "overloaded",
+        "temporarily limiting requests",
+        "temporarily unavailable",
+        "service unavailable",
+        "internal server error",
+        "bad gateway",
+        "gateway timeout",
+        "rate_limit_error",
+        "error: 429",
+        "error: 500",
+        "error: 502",
+        "error: 503",
+        "error: 504",
+        "error: 520",
+        "error: 522",
+        "error: 524",
+        "error: 529",
+    ];
+    !stays.iter().any(|s| why.contains(s)) && passing.iter().any(|p| why.contains(p))
 }
 
 /// Read what a run's session wrote, for whoever watches it.
@@ -460,10 +725,15 @@ fn read_standing(session: &Value, age: i64) -> Looked {
     match session["state"].as_str().unwrap_or_default() {
         "waiting" => Looked::Waiting,
         "done" | "idle" if answered || delivered && age > TAKES_UP_SECS => Looked::Done(result),
-        "failed" => Looked::Failed(format!(
-            "the session's turn failed: {}",
-            session["message"].as_str().unwrap_or(&result)
-        )),
+        "failed" => {
+            let said = session["message"].as_str().unwrap_or(&result);
+            let why = format!("the session's turn failed: {said}");
+            if passes(said) {
+                Looked::Stumbled(why)
+            } else {
+                Looked::Failed(why)
+            }
+        }
         "ended" if answered => Looked::Done(result),
         "ended" => Looked::Failed("the session was ended before it answered".into()),
         _ => Looked::Working,
@@ -498,6 +768,113 @@ mod tests {
             ("always_allowed", false),
         ] {
             assert_eq!(was_asked(status), asked, "{status}");
+        }
+    }
+
+    fn ended(outcome: Ended, ended_at: i64) -> Run {
+        let runs = super::super::Runs::new(crate::store::Store::open_in_memory().unwrap());
+        let order = super::super::runs::tests::order(super::super::Runner::Adroit);
+        Run {
+            outcome: Some(outcome),
+            ended_at: Some(ended_at),
+            ..runs.begin("t", &order).unwrap()
+        }
+    }
+
+    #[test]
+    fn an_ended_run_goes_on_with_a_turn_of_its_session_begun_since() {
+        let turn =
+            |began: i64, prompt: &str| json!({ "began_ms": began * 1000 + 999, "prompt": prompt });
+        let told = "[message] from another\nmain moved";
+        let asked = "[request] from Famulen\ngo on";
+        for (state, turns, outcome, expected) in [
+            ("working", json!([turn(9, "p")]), Ended::Failed, true),
+            ("waiting", json!([turn(9, "p")]), Ended::Failed, true),
+            ("failed", json!([turn(9, "p")]), Ended::Failed, false),
+            ("failed", json!([turn(10, "p")]), Ended::Failed, false),
+            ("failed", json!([turn(11, "p")]), Ended::Failed, true),
+            ("idle", json!([turn(11, told)]), Ended::Failed, true),
+            ("done", json!([turn(9, asked)]), Ended::Done, false),
+            ("done", json!([turn(11, asked)]), Ended::Done, true),
+            ("done", json!([turn(10, asked)]), Ended::Done, false),
+            ("working", json!([turn(10, asked)]), Ended::Done, true),
+            (
+                "done",
+                json!([{ "began_ms": 10_500, "last_ms": 14_000, "prompt": asked }]),
+                Ended::Done,
+                true,
+            ),
+            ("working", json!([turn(11, "直して")]), Ended::Done, true),
+            ("working", json!([turn(11, told)]), Ended::Done, false),
+            (
+                "idle",
+                json!([turn(11, asked), turn(12, told)]),
+                Ended::Done,
+                true,
+            ),
+            (
+                "working",
+                json!([turn(11, &format!("{told}\n{asked}"))]),
+                Ended::Done,
+                true,
+            ),
+            ("working", json!([turn(11, "p")]), Ended::Stopped, false),
+        ] {
+            let session = json!({ "state": state, "turns": turns });
+            assert_eq!(
+                has_gone_on(&session, &ended(outcome, 10)),
+                expected,
+                "{session} {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_passing_fault_is_told_from_a_limit_reached_and_a_lost_login() {
+        for why in [
+            "API Error: The response stopped arriving. The response above may be incomplete.",
+            "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}",
+            "API Error: 500 Internal server error",
+            "API Error: Connection closed mid-response.",
+            "Request timed out",
+            "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited",
+            "stream disconnected before completion",
+        ] {
+            assert!(passes(why), "{why}");
+        }
+        for why in [
+            "Claude AI usage limit reached|1795627053",
+            "You've hit your limit · resets 3pm",
+            "You've hit your session limit · resets 3pm (API Error: 429)",
+            "Credit balance is too low",
+            "Not logged in · Please run /login",
+            "API Error: 401 OAuth token has expired",
+            "API Error: 400 invalid_request_error",
+            "Prompt is too long",
+            "",
+        ] {
+            assert!(!passes(why), "{why}");
+        }
+    }
+
+    #[test]
+    fn a_session_asked_to_go_on_is_not_taken_for_failed_before_it_takes_that_up() {
+        let failed = |began: i64, undelivered: u64| json!({ "state": "failed", "last_active_ms": began * 1000, "turns": [{ "began_ms": began * 1000 }], "undelivered": undelivered });
+        let late = 100 + TAKES_UP_SECS + 1;
+        for (session, asked, now, expected) in [
+            (failed(90, 0), 0, 200, false),
+            (failed(90, 1), 0, 200, true),
+            (failed(90, 1), 0, 9999, false),
+            (failed(90, 1), 100, late, false),
+            (failed(90, 0), 100, 101, true),
+            (failed(100, 0), 100, 101, false),
+            (failed(90, 0), 100, late, false),
+        ] {
+            assert_eq!(
+                taking_up(&session, asked, now),
+                expected,
+                "{session} {asked} {now}"
+            );
         }
     }
 

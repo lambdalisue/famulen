@@ -29,6 +29,8 @@ pub enum Looked {
     Waiting,
     Done(String),
     Failed(String),
+    /// A passing fault of the model's service cut its turn off.
+    Stumbled(String),
     /// It is gone with the process that held it.
     Lost,
 }
@@ -39,6 +41,11 @@ pub trait Runners: Send + Sync + 'static {
     /// says that it cannot be told.
     fn find<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<Option<Began>>>;
     fn look<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<Looked>>;
+    /// Those of these ended runs whose sessions went on since, by their ids;
+    /// with each, whether something was told of its session.
+    fn went_on<'a>(&'a self, ended: &'a [(Run, bool)]) -> BoxFuture<'a, Vec<i64>>;
+    /// Ask a run's session to go on after a passing fault.
+    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>>;
     /// Stop what Famulen itself runs. An Adroit session is the owner's to end.
     fn stop(&self, run: &Run);
 }
@@ -52,6 +59,8 @@ struct Working {
 pub(super) struct Real {
     app: App,
     agents: Mutex<HashMap<i64, Working>>,
+    /// What an ended run's session was like when it was last read.
+    read: Mutex<HashMap<i64, adroit::Trace>>,
 }
 
 impl Real {
@@ -59,6 +68,7 @@ impl Real {
         Self {
             app,
             agents: Mutex::default(),
+            read: Mutex::default(),
         }
     }
 
@@ -131,6 +141,19 @@ impl Runners for Real {
             match run.order.runner {
                 Runner::Adroit => adroit::look(&self.app, run).await,
                 Runner::Agent => Ok(self.look_at_agent(run)),
+            }
+        })
+    }
+
+    fn went_on<'a>(&'a self, ended: &'a [(Run, bool)]) -> BoxFuture<'a, Vec<i64>> {
+        Box::pin(adroit::went_on(&self.app, ended, &self.read))
+    }
+
+    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            match run.order.runner {
+                Runner::Adroit => adroit::go_on(&self.app, run).await,
+                Runner::Agent => anyhow::bail!("an agent has no session to go on"),
             }
         })
     }

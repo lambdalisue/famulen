@@ -30,6 +30,10 @@ struct Fake {
     meanwhile: Mutex<Option<Meanwhile>>,
     /// How each run stands, by title; `Working` when not said.
     looks: Mutex<HashMap<String, Looked>>,
+    /// The titles of ended runs whose sessions went on.
+    went_on: Mutex<Vec<String>>,
+    /// The titles of those asked to go on.
+    asked_on: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -97,6 +101,28 @@ impl Runners for Fake {
                 .get(&run.order.title)
                 .cloned()
                 .unwrap_or(Looked::Working))
+        })
+    }
+
+    fn went_on<'a>(&'a self, ended: &'a [(Run, bool)]) -> BoxFuture<'a, Vec<i64>> {
+        Box::pin(async move {
+            let went = self.went_on.lock().unwrap();
+            ended
+                .iter()
+                .filter(|(r, _)| went.contains(&r.order.title))
+                .map(|(r, _)| r.id)
+                .collect()
+        })
+    }
+
+    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>> {
+        Box::pin(async move {
+            self.asked_on.lock().unwrap().push(run.order.title.clone());
+            anyhow::ensure!(
+                !self.fails.load(std::sync::atomic::Ordering::SeqCst),
+                "no answer"
+            );
+            Ok(())
         })
     }
 
@@ -168,6 +194,32 @@ impl Bench {
             .execute("UPDATE worker_runs SET retry_at = 0", [])
             .unwrap();
         self.pool.looked.lock().unwrap().clear();
+    }
+
+    /// The session `s<run>` ends its turn so.
+    async fn turn_ends(&self, session: &str, title: &str, looked: Looked) {
+        self.fake.look_as(title, looked);
+        self.app.workers.heard_of(session).unwrap();
+        self.pool.tick().await.unwrap();
+    }
+
+    /// The sessions of ended runs with these titles go on.
+    async fn go_on(&self, titles: &[&str]) {
+        *self.fake.went_on.lock().unwrap() = titles.iter().map(|t| (*t).to_owned()).collect();
+        *self.pool.looked_back.lock().unwrap() = None;
+        self.pool.tick().await.unwrap();
+        self.fake.went_on.lock().unwrap().clear();
+    }
+
+    /// What was to wait until now has waited.
+    async fn due(&self) {
+        self.app
+            .store
+            .conn()
+            .execute("UPDATE worker_again SET due_at = 1 WHERE due_at != 0", [])
+            .unwrap();
+        self.pool.looked.lock().unwrap().clear();
+        self.pool.tick().await.unwrap();
     }
 
     fn task(&self, id: &str) -> Record {
@@ -1678,4 +1730,345 @@ async fn a_request_about_what_a_session_asks_no_more_is_taken_back() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn an_ended_run_whose_session_goes_on_is_under_way_again_and_its_end_is_told_anew() {
+    for (outcome, status) in [
+        (Looked::Failed("broke".into()), "waiting"),
+        (Looked::Done("half".into()), "done"),
+    ] {
+        let b = bench(&format!("pool-goes-on-{status}"), Fake::default());
+        let id = b.adroit("直す");
+        b.pool.tick().await.unwrap();
+        b.turn_ends("s1", "直す", outcome).await;
+        assert_eq!(b.status(&id), status);
+
+        b.fake.look_as("直す", Looked::Working);
+        b.go_on(&["直す"]).await;
+        assert_eq!(b.status(&id), "in_progress");
+        let task = b.task(&id);
+        assert_eq!(task.body.value("Finished").unwrap_or_default(), "");
+        assert_eq!(task.body.value("Waiting for").unwrap_or_default(), "");
+        assert_eq!(b.runs().len(), 1, "no second run");
+        assert_eq!(b.runs()[0].state, State::Running);
+        assert_eq!(b.told().len(), 1);
+
+        b.turn_ends("s1", "直す", Looked::Done("直した".into()))
+            .await;
+        b.pool.tick().await.unwrap();
+        assert_eq!(b.status(&id), "done");
+        let told = b.told();
+        assert_eq!(told.len(), 2);
+        assert!(told[1].text.contains("went on since"), "{}", told[1].text);
+        assert!(told[1].text.contains("直した"));
+
+        b.fake.look_as("直す", Looked::Working);
+        b.go_on(&["直す"]).await;
+        b.turn_ends("s1", "直す", Looked::Failed("broke".into()))
+            .await;
+        assert_eq!(b.status(&id), "waiting");
+        assert_eq!(b.told().len(), 3);
+        assert_eq!(b.fake.begun(), ["直す"]);
+    }
+}
+
+#[tokio::test]
+async fn a_task_put_back_cancelled_or_taken_back_is_not_taken_up_by_its_old_session() {
+    for (field, value) in [
+        ("Status", "cancelled"),
+        ("Status", "pending"),
+        ("Assignee", "owner"),
+    ] {
+        let b = bench(&format!("pool-not-taken-up-{value}"), Fake::default());
+        b.pause(false);
+        let id = b.adroit("直す");
+        b.pool.tick().await.unwrap();
+        b.turn_ends("s1", "直す", Looked::Failed("broke".into()))
+            .await;
+        b.pause(true);
+        b.set(&id, field, value);
+        b.go_on(&["直す"]).await;
+        assert_eq!(b.runs()[0].state, State::Ended, "{value}");
+        assert_eq!(b.task(&id).body.value(field).as_deref(), Some(value));
+    }
+}
+
+#[tokio::test]
+async fn a_task_run_anew_is_not_run_by_its_old_session_too() {
+    let b = bench("pool-run-anew", Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    b.turn_ends("s1", "直す", Looked::Failed("broke".into()))
+        .await;
+    b.set(&id, "Status", "pending");
+    b.fake.look_as("直す", Looked::Working);
+    b.go_on(&["直す"]).await;
+    let states: Vec<State> = b.runs().iter().map(|r| r.state).collect();
+    assert_eq!(states, [State::Ended, State::Running]);
+    b.turn_ends("s2", "直す", Looked::Done("ok".into())).await;
+    b.fake.look_as("直す", Looked::Working);
+    b.go_on(&["直す"]).await;
+    assert_eq!(b.runs()[0].state, State::Ended);
+    assert_eq!(
+        b.runs()[1].state,
+        State::Running,
+        "the newer session went on"
+    );
+}
+
+#[tokio::test]
+async fn a_done_task_whose_session_goes_on_does_not_stop_what_waited_for_it() {
+    let b = bench("pool-goes-on-blocker", Fake::default());
+    let first = b.adroit("先");
+    let next = b.adroit("後");
+    let link = b.task(&first).link();
+    b.app
+        .records
+        .change(
+            Writer::Owner,
+            TASKS,
+            &next,
+            Patch {
+                fields: vec![crate::records::Field {
+                    name: "Blocked by".into(),
+                    value: String::new(),
+                    values: vec![link],
+                }],
+                ..Patch::default()
+            },
+        )
+        .unwrap();
+    b.pool.tick().await.unwrap();
+    b.turn_ends("s1", "先", Looked::Done("ok".into())).await;
+    assert_eq!(b.status(&next), "in_progress");
+    b.go_on(&["先"]).await;
+    b.pool.tick().await.unwrap();
+    assert_eq!(b.status(&first), "done");
+    assert_eq!(b.runs()[1].state, State::Running);
+}
+
+#[tokio::test]
+async fn a_passing_fault_has_the_session_go_on_a_few_times_with_time_between_then_fails() {
+    let b = bench("pool-stumbles", Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    let asked = || b.fake.asked_on.lock().unwrap().len();
+    let stumble = async || {
+        b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+            .await;
+    };
+    for times in 1..=GO_ON_AFTER_SECS.len() {
+        stumble().await;
+        stumble().await;
+        assert_eq!(asked(), times - 1, "not at once");
+        b.due().await;
+        assert_eq!(asked(), times);
+        assert_eq!(b.status(&id), "in_progress");
+        assert!(b.told().is_empty());
+        b.turn_ends("s1", "直す", Looked::Working).await;
+    }
+    stumble().await;
+    assert_eq!(b.status(&id), "waiting");
+    assert_eq!(b.told().len(), 1);
+    assert_eq!(asked(), GO_ON_AFTER_SECS.len());
+    assert_eq!(b.fake.begun(), ["直す"]);
+}
+
+#[tokio::test]
+async fn faults_far_apart_are_not_counted_together() {
+    let b = bench("pool-stumbles-apart", Fake::default());
+    b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    for times in 1..=GO_ON_AFTER_SECS.len() + 2 {
+        b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+            .await;
+        b.due().await;
+        assert_eq!(b.fake.asked_on.lock().unwrap().len(), times);
+        b.turn_ends("s1", "直す", Looked::Working).await;
+        b.app
+            .store
+            .conn()
+            .execute(
+                "UPDATE worker_again SET continued_at = continued_at - ?1",
+                [IN_A_ROW_SECS + 1],
+            )
+            .unwrap();
+    }
+    assert!(b.told().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_that_went_on_by_itself_before_it_was_asked_is_not_asked() {
+    let b = bench("pool-stumbles-itself", Fake::default());
+    b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+        .await;
+    b.turn_ends("s1", "直す", Looked::Working).await;
+    b.due().await;
+    b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+        .await;
+    assert!(b.fake.asked_on.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_that_cannot_be_asked_to_go_on_is_tried_no_more_often() {
+    let b = bench("pool-stumbles-unasked", Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    b.fake
+        .fails
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    for _ in GO_ON_AFTER_SECS {
+        b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+            .await;
+        b.due().await;
+    }
+    b.turn_ends("s1", "直す", Looked::Stumbled("overloaded".into()))
+        .await;
+    assert_eq!(b.status(&id), "waiting");
+    assert_eq!(
+        b.fake.asked_on.lock().unwrap().len(),
+        GO_ON_AFTER_SECS.len()
+    );
+}
+
+/// Adroit as far as it starts a session, lists and reads it from a file, and
+/// keeps what it is asked.
+const GOING_ADROIT: &str = r#"
+format = 1
+id = "adroit"
+name = "Adroit"
+
+[account]
+shows = { label = "Shows" }
+
+[transport.command]
+program = "perl"
+
+[[commands]]
+name = "start_session"
+description = "Start one."
+args = ["-e", "print qq({{\"id\":\"s1\"}})"]
+
+[[commands]]
+name = "read_session"
+description = "Read it."
+args = ["-e", "open my $f, '<', shift or die; print <$f>", "--", "{account.shows}"]
+read_only = true
+
+[[commands]]
+name = "list_sessions"
+description = "List them."
+args = ["-e", "open my $f, '<', shift or die; print '[', <$f>, ']'", "--", "{account.shows}"]
+read_only = true
+
+[[commands]]
+name = "send_to_session"
+description = "Ask it."
+args = ["-e", "my ($p, $s, $t) = @ARGV; open my $f, '>>', \"$p.sent\" or die; print $f \"$s: $t\\n\"; print '{{}}'", "--", "{account.shows}", "{args.session}", "{args.prompt}"]
+
+[commands.input]
+type = "object"
+required = ["session", "prompt"]
+
+[commands.input.properties]
+session = { type = "string" }
+prompt = { type = "string" }
+
+[permissions]
+start_session = "allow"
+read_session = "allow"
+list_sessions = "allow"
+send_to_session = "confirm"
+"#;
+
+#[tokio::test]
+async fn a_session_in_adroit_is_asked_to_go_on_unless_forbidden_and_seen_going_on_after_its_end() {
+    let dir = TempDir::new("pool-real-goes-on");
+    let services = dir.path().join("gateway/services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(services.join("adroit.toml"), GOING_ADROIT).unwrap();
+    let app = crate::runtime::testing::app(dir.path());
+    let shows = dir.path().join("shows");
+    let sent = || std::fs::read_to_string(dir.path().join("shows.sent")).unwrap_or_default();
+    let show = |state: &str, began: i64| {
+        let session = json!({
+            "id": "s1", "state": state, "message": "API Error: 529 overloaded_error",
+            "last_active_ms": began * 1000,
+            "turns": [{ "turn": 1, "prompt": "p", "reply": "ok", "began_ms": began * 1000 }],
+            "undelivered": 0,
+        });
+        std::fs::write(&shows, session.to_string()).unwrap();
+    };
+    let values = [("shows".to_owned(), shows.to_str().unwrap().to_owned())];
+    app.gateway
+        .add_defined("adroit", values.into(), None)
+        .unwrap();
+    app.gateway.read_tools("adroit").await.unwrap();
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    let directory = at("/src/api");
+    let order = [("Runner", "adroit"), ("Directory", directory.as_str())];
+    let task = app
+        .records
+        .add(Writer::Secretary, TASKS, delegated("直す", &order))
+        .unwrap()
+        .id;
+    let run = {
+        let order = Order::of(&app.records.need(TASKS, &task).unwrap(), "task-x").unwrap();
+        let run = app.workers.runs.begin(&task, &order).unwrap();
+        app.workers.runs.through(run.id, "adroit").unwrap();
+        app.workers.runs.running(run.id, "s1").unwrap();
+        run.id
+    };
+    let status = || {
+        let task = app.records.need(TASKS, &task).unwrap();
+        task.body.value("Status").unwrap_or_default()
+    };
+    let state = || app.workers.runs.get(run).unwrap().unwrap().state;
+    let look = async || {
+        app.workers.heard_of("s1").unwrap();
+        pool.tick().await.unwrap();
+    };
+    let due = |run| app.workers.runs.due(run, 1).unwrap();
+    let now = crate::store::now();
+
+    show("failed", now - 60);
+    look().await;
+    due(run);
+    look().await;
+    assert!(
+        sent().starts_with("s1: "),
+        "confirmed at its start: {}",
+        sent()
+    );
+    assert!(app.gateway.held_tickets().unwrap().is_empty());
+    look().await;
+    assert_eq!(sent().lines().count(), 1, "it has yet to take it up");
+    assert_eq!(state(), State::Running);
+
+    app.gateway
+        .set_permission(
+            "owner",
+            "conn:adroit",
+            "send_to_session",
+            Some(crate::gateway::permissions::Permission::Forbid),
+        )
+        .unwrap();
+    show("failed", now + 1);
+    look().await;
+    due(run);
+    look().await;
+    assert_eq!(sent().lines().count(), 1, "forbidden");
+
+    show("done", now - 30);
+    look().await;
+    assert_eq!(state(), State::Ended);
+    look().await;
+    assert_eq!(state(), State::Ended, "it did nothing since");
+    show("working", now + 9999);
+    look().await;
+    assert_eq!(state(), State::Running);
+    assert_ne!(status(), "done");
 }

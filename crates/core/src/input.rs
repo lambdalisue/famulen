@@ -157,7 +157,14 @@ pub enum Source {
         /// How it ended: done, failed or refused.
         outcome: String,
         workgroup: String,
+        /// How often the run had gone on after an end before this one.
+        #[serde(default, skip_serializing_if = "is_first")]
+        again: u32,
     },
+}
+
+fn is_first(again: &u32) -> bool {
+    *again == 0
 }
 
 /// A message on Slack, as what answers it is sent there.
@@ -221,7 +228,8 @@ impl Input {
             } => format!("arrival:{connection}:{receiver}:{id}"),
             Source::Lookout { item, .. } => format!("lookout:{item}"),
             Source::Asked { request, .. } => format!("asked:{request}"),
-            Source::Worker { run, .. } => format!("worker:{run}"),
+            Source::Worker { run, again: 0, .. } => format!("worker:{run}"),
+            Source::Worker { run, again, .. } => format!("worker:{run}:{again}"),
         }
     }
 
@@ -535,6 +543,7 @@ mod tests {
                 task: "task-7w1hbn".into(),
                 outcome: "done".into(),
                 workgroup: "work".into(),
+                again: 0,
             },
             text: "fixed".into(),
         };
@@ -543,6 +552,26 @@ mod tests {
             "[worker] task: task-7w1hbn run: #4 outcome: done\nfixed"
         );
         assert_eq!(input.dedup_key(), "worker:4");
+    }
+
+    #[test]
+    fn each_end_of_a_run_that_went_on_is_an_input_of_its_own() {
+        let ended = |again: u32| {
+            let input = Input {
+                sender: Sender::System,
+                source: Source::Worker {
+                    run: 4,
+                    task: "t".into(),
+                    outcome: "done".into(),
+                    workgroup: "all".into(),
+                    again,
+                },
+                text: String::new(),
+            };
+            input.dedup_key()
+        };
+        assert_eq!(ended(0), "worker:4");
+        assert_eq!(ended(1), "worker:4:1");
     }
 
     #[test]

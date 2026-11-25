@@ -124,6 +124,21 @@ pub struct Run {
     pub ended_at: Option<i64>,
 }
 
+/// What became of a run after a turn of its session ended.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Again {
+    /// How often it went on after it had ended.
+    pub reopened: u32,
+    /// How often it was asked to go on after a passing fault.
+    pub continued: u32,
+    /// Of these, how often in a row.
+    pub in_a_row: u32,
+    /// When it was last asked to go on, or 0.
+    pub continued_at: i64,
+    /// When it is asked next, or 0.
+    pub due_at: i64,
+}
+
 const COLUMNS: &str = "id, task, state, attempt, tries, spec, session, ticket, outcome, result, note, created_at, started_at, ended_at, asks, retry_at, connection";
 
 fn read(row: &Row<'_>) -> rusqlite::Result<Run> {
@@ -377,6 +392,73 @@ impl Runs {
     pub fn ended(&self, id: i64) -> anyhow::Result<()> {
         self.set(id, "state = 'ended'", &[])
     }
+
+    pub fn again(&self, id: i64) -> anyhow::Result<Again> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT reopened, continued, in_a_row, continued_at, due_at
+                 FROM worker_again WHERE run = ?1",
+                [id],
+                |r| {
+                    Ok(Again {
+                        reopened: r.get(0)?,
+                        continued: r.get(1)?,
+                        in_a_row: r.get(2)?,
+                        continued_at: r.get(3)?,
+                        due_at: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
+    /// Its session went on after it had ended. It stays ended once a later
+    /// run of its task was made. Whether it is open now.
+    pub fn reopen(&self, id: i64) -> anyhow::Result<bool> {
+        let conn = self.store.conn();
+        let both = conn.unchecked_transaction()?;
+        let changed = both.execute(
+            "UPDATE worker_runs
+             SET state = 'running', outcome = '', result = '', note = '', ended_at = NULL
+             WHERE id = ?1 AND state = 'ended' AND NOT EXISTS (
+                 SELECT 1 FROM worker_runs l WHERE l.task = worker_runs.task AND l.id > ?1)",
+            [id],
+        )?;
+        if changed == 1 {
+            both.execute(
+                "INSERT INTO worker_again (run, reopened) VALUES (?1, 1)
+                 ON CONFLICT (run) DO UPDATE SET reopened = reopened + 1",
+                [id],
+            )?;
+        }
+        both.commit()?;
+        Ok(changed == 1)
+    }
+
+    /// When it is asked to go on after a passing fault; 0 when it is not.
+    pub fn due(&self, id: i64, at: i64) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "INSERT INTO worker_again (run, due_at) VALUES (?1, ?2)
+             ON CONFLICT (run) DO UPDATE SET due_at = ?2 WHERE due_at != ?2",
+            [id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Count that it is asked to go on, before it is.
+    pub fn continuing(&self, id: i64, in_a_row: u32) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "INSERT INTO worker_again (run, continued, in_a_row, continued_at)
+             VALUES (?1, 1, ?2, ?3)
+             ON CONFLICT (run) DO UPDATE SET
+                 continued = continued + 1, in_a_row = ?2, continued_at = ?3, due_at = 0",
+            params![id, in_a_row, now()],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +498,30 @@ pub(super) mod tests {
         assert!(runs.begin("t", &order).is_err(), "its end is not told yet");
         runs.ended(run.id).unwrap();
         assert!(runs.begin("t", &order).is_ok());
+    }
+
+    #[test]
+    fn a_run_is_opened_again_only_while_it_is_the_last_of_its_task() {
+        let runs = Runs::new(Store::open_in_memory().unwrap());
+        let order = order(Runner::Adroit);
+        let end = |id| {
+            runs.ending(id, Outcome::Failed, "broke").unwrap();
+            runs.ended(id).unwrap();
+        };
+        let first = runs.begin("t", &order).unwrap();
+        assert!(!runs.reopen(first.id).unwrap(), "it has not ended");
+        end(first.id);
+        assert!(runs.reopen(first.id).unwrap());
+        let open = runs.get(first.id).unwrap().unwrap();
+        assert_eq!((open.state, open.outcome), (State::Running, None));
+        assert_eq!((open.result.as_str(), open.ended_at), ("", None));
+        assert!(!runs.reopen(first.id).unwrap(), "it is open");
+        end(first.id);
+        let second = runs.begin("t", &order).unwrap();
+        assert!(!runs.reopen(first.id).unwrap());
+        end(second.id);
+        assert!(!runs.reopen(first.id).unwrap());
+        assert_eq!(runs.again(first.id).unwrap().reopened, 1);
     }
 
     #[test]
