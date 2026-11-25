@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::app::App;
 use crate::console_log::Event;
+use crate::dream_settings::DreamSettings;
 use crate::dreaming;
 use crate::input::{Input, Sender, Source};
 use crate::memory;
@@ -88,6 +89,18 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
         }
         Err(error) => tracing::warn!(%error, "could not check the working memory"),
     }
+    match keep_people_seen(app, today) {
+        Ok(None) => {}
+        Ok(Some(status)) => {
+            outcome.status = format!("{}。{status}", outcome.status);
+            if let Err(error) =
+                dreaming::add_to_night(&app.store, outcome.night, Vec::new(), &status)
+            {
+                tracing::warn!(%error, "what was done of parties was not added to its night");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not keep when parties were last seen"),
+    }
     match ask_about_people(app, today) {
         Ok(None) => {}
         Ok(Some(status)) => {
@@ -152,6 +165,14 @@ fn ask_about_working(app: &App, today: NaiveDate) -> anyhow::Result<Option<Strin
         "作業記憶 {} 件を、閉じるか秘書に尋ねた",
         found.len()
     )))
+}
+
+/// Keep when parties were last seen, before the notes of this night are
+/// handed over. What came of it, if anyone rests from now.
+fn keep_people_seen(app: &App, today: NaiveDate) -> anyhow::Result<Option<String>> {
+    let rest_after = DreamSettings::load(&app.store)?.rest_after;
+    let (_, rested) = people::keep_seen(&app.records, &app.memory_dir, today, rest_after)?;
+    Ok((rested > 0).then(|| format!("長く出てこない相手 {rested} 人を休みにした")))
 }
 
 /// Have the secretary bring the parties up to date with the people noted, once
@@ -244,6 +265,26 @@ mod tests {
                 .iter()
                 .all(|(i, ..)| i.input.sender == Sender::System)
         );
+    }
+
+    #[test]
+    fn a_night_that_has_people_rest_says_how_many() {
+        let dir = TempDir::new("dream-rest");
+        let app = crate::runtime::testing::app(dir.path());
+        ensure(&app.memory_dir).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+        assert_eq!(keep_people_seen(&app, today).unwrap(), None);
+        app.records
+            .add(
+                crate::notebook::Writer::Secretary,
+                crate::records::PARTIES,
+                crate::records::Patch::titled("田中").with("Last seen", "2026-08-01"),
+            )
+            .unwrap();
+
+        let status = keep_people_seen(&app, today).unwrap().unwrap();
+
+        assert!(status.contains("1 人"), "{status}");
     }
 
     #[test]

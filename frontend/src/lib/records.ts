@@ -169,6 +169,8 @@ const NAMES: { [name: string]: string } = {
   Kind: "種別",
   Aliases: "ほかの名前",
   Birthday: "誕生日",
+  "Last seen": "最後に出た日",
+  "Added by": "足した人",
   "Member of": "属するところ",
   To: "相手",
   Role: "役目",
@@ -248,6 +250,8 @@ const CHOICES: { [value: string]: string } = {
   lost: "なくした",
   planned: "これから",
   active: "契約中",
+  current: "いま",
+  resting: "休み",
   ended: "終わった",
   monthly: "毎月",
   yearly: "毎年",
@@ -294,6 +298,9 @@ export function assigneeOf(r: Rec, aide: string): string {
 
 /** Whether a thing was let go, or a contract is over: its deadlines no longer matter. */
 export const isPast = (r: Rec) => ["released", "ended"].includes(valueOf(r, "Status"));
+
+/** Whether a party was not seen for long, and is put away. */
+export const isResting = (r: Rec) => valueOf(r, "Status") === "resting";
 
 /** Text of Markdown on one line, as a list shows it. */
 export function excerptOf(markdown: string, length = 160): string {

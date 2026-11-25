@@ -9,7 +9,7 @@ import { CalendarMode } from "~/gen/famulen/v1/calendar_pb";
 import { Speaker } from "~/gen/famulen/v1/console_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf } from "~/lib/records";
+import { isResting, itemsOf, linkOf, type Rec, recordsQuery, valueOf, valuesOf } from "~/lib/records";
 import { usePicked } from "~/lib/picked";
 import { useOwner } from "~/lib/owner";
 import { byName } from "~/lib/words";
@@ -134,14 +134,15 @@ function Guessed(props: { party: Rec }) {
   );
 }
 
-/** People, companies and groups, each by name. */
+/** People, companies and groups, each by name, and whoever rests put away below. */
 function groups(records: Rec[]): Group[] {
   const sorted = [...records].sort((a, b) => byName(a.title, b.title));
-  const of = (k: string) => sorted.filter((r) => (valueOf(r, "Kind") || "person") === k);
+  const of = (k: string) => sorted.filter((r) => !isResting(r) && (valueOf(r, "Kind") || "person") === k);
   return [
     { name: "人", records: of("person") },
     { name: "会社・チーム", records: of("org") },
     { name: "グループ", records: of("group") },
+    { name: "休み", records: sorted.filter(isResting), folded: true },
   ];
 }
 
@@ -185,7 +186,7 @@ export default function Parties() {
         <RecordDetail kind="parties" id={id} back="/parties" top={(r) => <Guessed party={r} />} extra={(r) => <Around party={r} />} />
       )}
       add={{ label: "グループを足す", titleLabel: "名前", fields: [], preset: { Kind: "group" } }}
-      hint="人と会社・チームは、秘書がやりとりの中で覚えていく。"
+      hint="人と会社・チームは、秘書がやりとりの中で覚えていく。長く出てこない人は休みになり、また出ると戻る。"
       empty="相手はまだいない"
     />
   );

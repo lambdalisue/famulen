@@ -74,10 +74,10 @@ pub fn relevance_profile(app: &App) -> String {
             prefs.join("; ")
         ));
     }
-    let parties: Vec<String> = app
-        .records
-        .list(records::PARTIES)
-        .unwrap_or_default()
+    let mut parties = app.records.list(records::PARTIES).unwrap_or_default();
+    // Only so many fit, and whom the owner deals with now come first.
+    parties.sort_by_key(records::is_resting);
+    let parties: Vec<String> = parties
         .iter()
         .map(|p| {
             let aliases = p.body.values("Aliases");

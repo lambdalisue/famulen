@@ -23,8 +23,8 @@ use crate::dreaming;
 use crate::memory::{self, Change, Op};
 use crate::notebook::Writer;
 use crate::records::{
-    CALENDARS, CONFIRM_SOURCE, CONTRACTS, EVENTS, HOLDINGS, Held, MEMOS, PARTIES, Patch, ROUTINES,
-    Record, Records, TASKS, is_delegated, is_over, linked,
+    CALENDARS, CONFIRM_SOURCE, CONTRACTS, EVENTS, HOLDINGS, Held, LAST_SEEN, MEMOS, PARTIES, Patch,
+    RESTING, ROUTINES, Record, Records, TASKS, is_delegated, is_over, linked,
 };
 use crate::store::Store;
 
@@ -145,6 +145,15 @@ fn fingerprint(record: &Record) -> String {
         }
     }
     said.push_str(text[at..].trim_end());
+    if record.kind == PARTIES {
+        // That someone was seen changes nothing of what their record says.
+        let seen = format!("- {LAST_SEEN}:");
+        said = said
+            .lines()
+            .filter(|l| !l.starts_with(&seen))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
     let mut hash = Sha256::new();
     for part in [
         said,
@@ -273,7 +282,7 @@ fn may_look(record: &Record) -> bool {
         && !asks
         && !(record.kind == TASKS && is_over(record))
         && !is_delegated(record)
-        && !matches!(status.as_deref(), Some("released" | "ended"))
+        && !matches!(status.as_deref(), Some("released" | "ended" | RESTING))
 }
 
 /// A record to show the model, and why it is worth a look.
@@ -1276,5 +1285,18 @@ mod tests {
         .save(&b.store)
         .unwrap();
         assert!(b.tidy(later(900), answer(&[])).await.is_none());
+    }
+
+    #[test]
+    fn that_a_party_was_seen_changes_nothing_of_what_it_says() {
+        let (_tmp, r) = crate::records::testing::records("tidying-seen");
+        let add = |patch| r.add(Writer::Secretary, PARTIES, patch).unwrap();
+        let p = add(Patch::titled("田中").with("Birthday", "2000-01-01"));
+        let change = |name, value| {
+            let patch = Patch::default().with(name, value);
+            fingerprint(&r.change(Writer::Secretary, PARTIES, &p.id, patch).unwrap())
+        };
+        assert_eq!(fingerprint(&p), change(LAST_SEEN, "2026-11-25"));
+        assert_ne!(fingerprint(&p), change("Birthday", "2000-01-02"));
     }
 }

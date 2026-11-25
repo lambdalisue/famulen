@@ -184,6 +184,7 @@ updated: 2026-11-24T12:00:00+09:00
 | `created`・`updated` | 作った日時と、最後に道具が書いた日時（[RFC 3339](https://www.rfc-editor.org/rfc/rfc3339)） |
 | `google`・`url` | Google のカレンダーにあるものの在りかと、人が開く URL |
 | `obsolete`・`obsolete_reason` | 古くなったかもしれない印を付けた日（`YYYY-MM-DD`）と、そのわけ |
+| `rested` | 持ち主が相手を休みにした日（`YYYY-MM-DD`） |
 | `moved` | この記録の中身を移した先の記録。`records/<種類>/<id>` と書く |
 
 ほかの欄を書いてもよく、道具はその欄を消さない。
@@ -391,6 +392,9 @@ Google のカレンダーなら、メタデータの `google` に `<つなぎ先
 | `Kind` | `person`（人）・`org`（会社・チーム）・`group`（ゆるい集まり） |
 | `Aliases` | 題名のほかの名前や愛称の並び |
 | `Birthday` | 誕生日 |
+| `Status` | `current`（いま）・`resting`（長く出てこないので休み）。なければ `current` |
+| `Last seen` | 最後に出た日 |
+| `Added by` | 足した人。`owner` か `secretary` |
 
 | 節 | 項目の文 | 欄 |
 | --- | --- | --- |

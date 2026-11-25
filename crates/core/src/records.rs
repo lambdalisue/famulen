@@ -356,9 +356,13 @@ impl Records {
                 patch.default_field("Managed by", name_of(writer));
                 patch.default_field("Enabled", "yes");
             }
+            PARTIES => patch.default_field(ADDED_BY, name_of(writer)),
             _ => {}
         }
         self.apply(writer, &mut record, patch)?;
+        if kind == PARTIES {
+            self.refuse_same_party(writer, &record, None)?;
+        }
         Ok(record)
     }
 
@@ -416,6 +420,8 @@ impl Records {
     fn apply(&self, writer: Writer, record: &mut Record, patch: Patch) -> anyhow::Result<()> {
         let status_before = record.body.value("Status");
         let assignee_before = record.body.value("Assignee");
+        let seen_before = last_seen(record);
+        let was_resting = is_resting(record);
         let kind = self.notebook.kind(&record.kind)?;
         if let Some(title) = &patch.title {
             record.body.set_title(title)?;
@@ -515,6 +521,17 @@ impl Records {
                     .body
                     .log(&at, who, &format!("担当 {before} → {now}"))?;
             }
+        }
+        if record.kind == PARTIES
+            && parties::note_seen(
+                record,
+                seen_before,
+                writer,
+                patch.given("Status").is_some(),
+                was_resting,
+            )?
+        {
+            record.body.log(&at, who, "また出たので、休みをやめた")?;
         }
         for line in patch.log.iter().filter(|l| !l.trim().is_empty()) {
             record.body.log(&at, who, line)?;
@@ -638,8 +655,12 @@ impl Held<'_> {
         let r = self.records;
         let mut record = r.need(kind, id)?;
         r.may_change(writer, &record)?;
+        parties::may_set_added_by(writer, &record, &patch)?;
         let before = record.clone();
         r.apply(writer, &mut record, patch)?;
+        if kind == PARTIES {
+            r.refuse_same_party(writer, &record, Some(&before))?;
+        }
         if record != before {
             let subject = format!("{} を直した", record.title());
             r.notebook.write(&writer.signature(), &record, &subject)?;

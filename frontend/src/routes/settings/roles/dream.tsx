@@ -25,7 +25,7 @@ const TIMES = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).
 /** How a time reads on the page: 4:00, not 04:00. */
 const shownTime = (at: string) => at.replace(/^0(\d)/, "$1");
 
-type Change = Partial<Pick<DreamSettings, "at" | "frequency" | "weekday" | "earlyAt" | "coreLines" | "tidyRecords">>;
+type Change = Partial<Pick<DreamSettings, "at" | "frequency" | "weekday" | "earlyAt" | "coreLines" | "tidyRecords" | "restAfter">>;
 
 function When(props: { plan: DreamSettings; save: (c: Change) => void }) {
   const p = () => props.plan;
@@ -108,6 +108,15 @@ function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
       <Switch checked={props.plan.tidyRecords ?? true} onChange={(tidyRecords) => props.save({ tidyRecords })}>
         記録も整える
       </Switch>
+      <NumberField
+        label="相手を休みにする"
+        unit="日出てこなければ"
+        value={props.plan.restAfter ?? 60}
+        min={0}
+        max={3650}
+        onSave={(restAfter) => props.save({ restAfter })}
+        hint="秘書が足した人のうち、家族と勤め先の人を除いて、この日数出てこない人を相手の一覧の下に畳む。消さず、また出ると戻る。0 にすると休みにしない。"
+      />
     </Section>
   );
 }
@@ -120,8 +129,8 @@ export default function Dream() {
   // ago may not have come back to the page yet.
   const save = (change: Change) =>
     void act(async () => {
-      const { at, frequency, weekday, earlyAt, coreLines, tidyRecords } = await api.memory.getDreamSettings({});
-      return api.memory.setDreamSettings({ at, frequency, weekday, earlyAt, coreLines, tidyRecords, ...change });
+      const { at, frequency, weekday, earlyAt, coreLines, tidyRecords, restAfter } = await api.memory.getDreamSettings({});
+      return api.memory.setDreamSettings({ at, frequency, weekday, earlyAt, coreLines, tidyRecords, restAfter, ...change });
     });
   return (
     <>
