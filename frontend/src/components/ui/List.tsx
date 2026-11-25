@@ -46,7 +46,7 @@ export function ListRow(props: {
       onClick={(e) => {
         // What ends at the end of a selection is no press.
         const selecting = window.getSelection()?.isCollapsed === false;
-        if (props.onPick && !selecting && e.target instanceof Element && !e.target.closest("a, button, input, label")) props.onPick();
+        if (props.onPick && !selecting && e.target instanceof Element && !e.target.closest("a, button, input, label, textarea, .md-link")) props.onPick();
       }}
     >
       <Show when={props.icon}>{(svg) => <Icon svg={svg()} size={18} />}</Show>

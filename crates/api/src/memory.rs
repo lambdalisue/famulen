@@ -4,12 +4,15 @@ use chrono::Utc;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::dream_settings::{self as ds, DreamSettings as Plan, Frequency};
 use famulen_core::dreaming;
+use famulen_core::judging;
 use famulen_core::memory::{self as m, Entry, EpisodeState, Src};
+use famulen_core::memory::{Layer as Place, Snapshot};
 use famulen_core::note_origin::{Origin, Told};
-use famulen_core::notebook;
+use famulen_core::notebook::{self, CommitInfo, Writer};
 use famulen_core::workgroups::ALL;
 
 use crate::pb::*;
+use crate::records::Names;
 use crate::{Api, OrFail, changed, fail, given, writer};
 
 const LAYERS: [(&str, &str, &str); 7] = [
@@ -66,6 +69,80 @@ fn origin(told: Told) -> NoteOrigin {
     }
 }
 
+fn notebook_path(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// The memories an item names, and those that replaced it.
+fn related(all: &Snapshot, entry: &Entry) -> Vec<RelatedMemory> {
+    let id = entry.id().unwrap_or_default();
+    let named = entry
+        .list("supersedes")
+        .into_iter()
+        .map(|id| ("supersedes", id))
+        .chain(entry.against().into_iter().map(|id| ("against", id)));
+    let replaced = all
+        .entries
+        .iter()
+        .filter(|(_, at)| !id.is_empty() && at.entry.list("supersedes").iter().any(|s| s == id))
+        .map(|(id, _)| ("superseded", id.clone()));
+    named
+        .chain(replaced)
+        .filter_map(|(how, id)| {
+            let at = all.entries.get(&id)?;
+            Some(RelatedMemory {
+                how: how.into(),
+                item: item(&at.entry, &notebook_path(&at.file)).into(),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+/// How many commits of an item or a file are shown.
+const HISTORY: usize = 30;
+/// How far back the commit that made an item is looked for.
+const LONGEST: usize = 2000;
+
+fn file_change(c: CommitInfo) -> FileChange {
+    FileChange {
+        commit: c.id.chars().take(8).collect(),
+        at: c.time.timestamp(),
+        author: c.author.name,
+        message: c.message,
+        ..Default::default()
+    }
+}
+
+/// What a line of the history holding an item's id looks like, be it in an
+/// item's attributes or in the frontmatter of a file.
+fn line_of(id: &str) -> String {
+    let id: String = id
+        .chars()
+        .flat_map(|c| {
+            let plain = c.is_alphanumeric() || c == '-' || c == '_';
+            (!plain).then_some('\\').into_iter().chain([c])
+        })
+        .collect();
+    format!(r#"(^|[{{ ,])"?id"?: *"?{id}"?([,}} ]|$)"#)
+}
+
+fn op_name(op: m::Op) -> String {
+    serde_json::to_value(op)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// Refuse anyone but the owner.
+fn owner_only(ctx: &RequestContext) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        writer(ctx) == Writer::Owner,
+        "only the owner decides on a pending judgment"
+    );
+    Ok(())
+}
+
 pub(crate) fn dream(n: famulen_core::dreaming::Night) -> Dream {
     let c = &n.summary.counts;
     Dream {
@@ -87,10 +164,7 @@ pub(crate) fn dream(n: famulen_core::dreaming::Night) -> Dream {
             .changes
             .iter()
             .map(|ch| DreamChange {
-                op: serde_json::to_value(ch.op)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_owned))
-                    .unwrap_or_default(),
+                op: op_name(ch.op),
                 id: ch.id.clone(),
                 file: ch.file.clone(),
                 text: ch.text.clone(),
@@ -153,6 +227,194 @@ impl Api {
         })
     }
 
+    /// A pending judgment, with the answer on it that waits.
+    fn pending_item(&self, e: &Entry) -> anyhow::Result<MemoryItem> {
+        let mut out = item(e, m::PENDING);
+        let waiting = match e.id() {
+            Some(id) => judging::waiting_answer(&self.app.memory_dir, id)?,
+            None => None,
+        };
+        if let Some((date, note)) = waiting {
+            let shown = item(&note, "");
+            out.answer = PendingAnswer {
+                adopted: note.get(judging::VERDICT) == Some(judging::ADOPTED),
+                words: judging::words(e, &note).to_owned(),
+                note: shown.id,
+                date: date.to_string(),
+                time: shown.time,
+                ..Default::default()
+            }
+            .into();
+        }
+        Ok(out)
+    }
+
+    fn memory_detail(&self, id: &str, path: &str) -> anyhow::Result<MemoryDetail> {
+        let dir = &self.app.memory_dir;
+        let file = std::path::Path::new(path);
+        let found = Snapshot::take(dir)?;
+        let (file, entry) = match found.entries.get(id) {
+            Some(at) => (at.file.clone(), at.entry.clone()),
+            None => {
+                anyhow::ensure!(
+                    id.is_empty() && matches!(Place::of(file), Some(Place::Long(_))),
+                    "no memory {id}{path}"
+                );
+                // A missing file reads as an empty one.
+                m::read_file(dir, file)?;
+                let entry = m::read_doc(dir, file)?.entries().next().cloned();
+                (file.to_owned(), entry.unwrap_or_else(|| Entry::new("")))
+            }
+        };
+        let rel = notebook_path(&file);
+        let place = Place::of(&file);
+        let (layer, group) = match place {
+            Some(Place::Long(group)) => ("long", group.dir_name()),
+            Some(Place::Core) => ("core", ""),
+            Some(Place::Pending) => ("pending", ""),
+            _ => ("forgotten", ""),
+        };
+        let prose = m::read_doc(dir, &file)?
+            .long_text()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let id = entry.id().unwrap_or_default();
+        let history = self.history_of(id, (layer == "long").then_some(rel.as_str()))?;
+        Ok(MemoryDetail {
+            item: match place {
+                Some(Place::Pending) => self.pending_item(&entry)?,
+                _ => item(&entry, &rel),
+            }
+            .into(),
+            layer: layer.into(),
+            group: group.into(),
+            nights: self.nights_of(id)?,
+            created: history.last().cloned().into(),
+            history: history.into_iter().take(HISTORY).collect(),
+            related: related(&found, &entry),
+            links: self.links_of(&entry, &prose),
+            prose,
+            ..Default::default()
+        })
+    }
+
+    /// What the dreams did with an item, newest first.
+    fn nights_of(&self, id: &str) -> anyhow::Result<Vec<MemoryNight>> {
+        let nights = match id {
+            "" => Vec::new(),
+            _ => dreaming::dreams_of(&self.app.store, id)?,
+        };
+        Ok(nights
+            .into_iter()
+            .flat_map(|night| {
+                let (dream, at) = (night.id, night.at);
+                night
+                    .summary
+                    .changes
+                    .into_iter()
+                    .filter(|c| c.id == id)
+                    .map(move |c| MemoryNight {
+                        dream,
+                        at,
+                        op: op_name(c.op),
+                        reason: c.reason.unwrap_or_default(),
+                        previous: c.previous.unwrap_or_default(),
+                        basis: c
+                            .basis
+                            .into_iter()
+                            .map(|b| MemoryBasis {
+                                id: b.id,
+                                date: b.date,
+                                time: b.time,
+                                text: b.text,
+                                src: b.src,
+                                origin: b.origin,
+                                ..Default::default()
+                            })
+                            .collect(),
+                        ..Default::default()
+                    })
+            })
+            .collect())
+    }
+
+    /// The commits that changed an item, wherever it was kept, and those that
+    /// changed the file it is.
+    fn history_of(&self, id: &str, file: Option<&str>) -> anyhow::Result<Vec<FileChange>> {
+        let dir = &self.app.memory_dir;
+        let mut commits = match file {
+            Some(file) => notebook::file_log(dir, file, LONGEST)?,
+            None => Vec::new(),
+        };
+        if !id.is_empty() {
+            let kept = [m::CORE, m::PENDING, m::LONG, m::FORGOTTEN];
+            for c in notebook::line_log(dir, &line_of(id), &kept, LONGEST)? {
+                if commits.iter().all(|known| known.id != c.id) {
+                    commits.push(c);
+                }
+            }
+        }
+        commits.sort_by_key(|c| std::cmp::Reverse(c.time));
+        Ok(commits.into_iter().map(file_change).collect())
+    }
+
+    /// The records a memory links to or is tagged with, each once.
+    fn links_of(&self, entry: &Entry, prose: &str) -> Vec<RecordLink> {
+        let mut targets = m::links(entry.text());
+        targets.extend(m::links(prose));
+        if let Some(party) = entry.get("party") {
+            targets.push(format!("records/parties/{party}"));
+        }
+        let mut names = Names::default();
+        let mut seen = std::collections::BTreeSet::new();
+        targets
+            .into_iter()
+            .filter(|t| seen.insert(t.clone()))
+            .filter_map(|target| {
+                let (kind, id) = target.strip_prefix("records/")?.split_once('/')?;
+                let records = &self.app.records;
+                let link = names.link(records, kind, id, String::new());
+                Some(link.unwrap_or_else(|| RecordLink {
+                    kind: kind.into(),
+                    id: id.into(),
+                    missing: true,
+                    ..Default::default()
+                }))
+            })
+            .collect()
+    }
+
+    /// Refuse to take back what a running dream may have read.
+    fn not_dreaming(&self) -> anyhow::Result<()> {
+        let dreaming = self.app.store.state(famulen_core::runtime::DREAMING_KEY)?;
+        anyhow::ensure!(
+            dreaming.is_none(),
+            "a dream is reading the answer now; try again once it is over"
+        );
+        Ok(())
+    }
+
+    /// Commit what others wrote before the owner's decision is written.
+    fn commit_others(&self) -> anyhow::Result<()> {
+        let dir = &self.app.memory_dir;
+        notebook::commit_all(dir, &notebook::famulen(), "その日の記憶")?;
+        Ok(())
+    }
+
+    /// Commit what the owner decided.
+    fn commit_judged(&self, message: &str, days: &[chrono::NaiveDate]) -> anyhow::Result<()> {
+        let mut paths = vec![
+            m::PENDING.to_owned(),
+            m::CORE.to_owned(),
+            m::FORGOTTEN.to_owned(),
+        ];
+        paths.extend(days.iter().map(|d| format!("{}/{d}.md", m::EPISODIC)));
+        notebook::commit_paths(&self.app.memory_dir, &notebook::owner(), message, &paths)?;
+        changed(self);
+        Ok(())
+    }
+
     fn memory_layer(&self, id: &str) -> anyhow::Result<MemoryLayer> {
         let (id, label, help) = LAYERS
             .iter()
@@ -201,8 +463,9 @@ impl MemoryService for Api {
                 out.items = m::pending_entries(dir)
                     .or_fail()?
                     .iter()
-                    .map(|e| item(e, "pending.md"))
-                    .collect();
+                    .map(|e| self.pending_item(e))
+                    .collect::<anyhow::Result<_>>()
+                    .or_fail()?;
             }
             "core" => {
                 out.items = m::core_entries(dir)
@@ -280,6 +543,9 @@ impl MemoryService for Api {
         request: ServiceRequest<'_, ByName>,
     ) -> ServiceResult<NoteOrigin> {
         let id = request.id.to_owned();
+        if id.contains('/') {
+            return Response::ok(origin(self.app.told_of_source(&id).await.or_fail()?));
+        }
         let notes = dreaming::waiting_notes(&self.app.memory_dir).or_fail()?;
         let Some((_, note)) = notes.iter().find(|(_, n)| n.id() == Some(id.as_str())) else {
             return Err(fail(format!("no note {id} waits in the inbox")));
@@ -291,6 +557,97 @@ impl MemoryService for Api {
         Response::ok(origin(told))
     }
 
+    async fn get_memory(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, GetMemoryRequest>,
+    ) -> ServiceResult<MemoryDetail> {
+        Response::ok(self.memory_detail(request.id, request.path).or_fail()?)
+    }
+
+    async fn answer_pending(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, AnswerPendingRequest>,
+    ) -> ServiceResult<MemoryItem> {
+        owner_only(&ctx).or_fail()?;
+        let r = request.to_owned_message();
+        let dir = &self.app.memory_dir;
+        let at = Utc::now().with_timezone(&self.app.tz()).naive_local();
+        let _hold = self.app.notebook.hold().or_fail()?;
+        if judging::waiting_answer(dir, &r.id).or_fail()?.is_some() {
+            self.not_dreaming().or_fail()?;
+        }
+        self.commit_others().or_fail()?;
+        let words = self.app.records.names().canonical_text(&r.words, "");
+        let (_, mut days) =
+            judging::answer(dir, at, &r.id, r.adopt, &words.or_fail()?).or_fail()?;
+        days.push(at.date());
+        let message = if r.adopt {
+            "あなたが保留中の判断を採用した"
+        } else {
+            "あなたが保留中の判断に答えた"
+        };
+        self.commit_judged(message, &days).or_fail()?;
+        let judged = m::pending_entries(dir).or_fail()?;
+        let judged = judged.iter().find(|e| e.id() == Some(r.id.as_str()));
+        let judged = judged.ok_or_else(|| fail("the judgment is gone"))?;
+        Response::ok(self.pending_item(judged).or_fail()?)
+    }
+
+    async fn withdraw_answer(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<Empty> {
+        owner_only(&ctx).or_fail()?;
+        let _hold = self.app.notebook.hold().or_fail()?;
+        self.not_dreaming().or_fail()?;
+        self.commit_others().or_fail()?;
+        let days = judging::withdraw(&self.app.memory_dir, request.id).or_fail()?;
+        if days.is_empty() {
+            return Err(fail("no answer waits for the dream"));
+        }
+        self.commit_judged("あなたが保留中の判断への答えを取り消した", &days)
+            .or_fail()?;
+        Response::ok(Empty::default())
+    }
+
+    async fn reject_pending(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, RejectPendingRequest>,
+    ) -> ServiceResult<Empty> {
+        owner_only(&ctx).or_fail()?;
+        let r = request.to_owned_message();
+        let dir = &self.app.memory_dir;
+        let today = Utc::now().with_timezone(&self.app.tz()).date_naive();
+        let _hold = self.app.notebook.hold().or_fail()?;
+        if judging::waiting_answer(dir, &r.id).or_fail()?.is_some() {
+            self.not_dreaming().or_fail()?;
+        }
+        self.commit_others().or_fail()?;
+        let reason = self.app.records.names().canonical_text(&r.reason, "");
+        let days = judging::reject(dir, today, &r.id, &reason.or_fail()?).or_fail()?;
+        self.commit_judged("あなたが保留中の判断を却下した", &days)
+            .or_fail()?;
+        Response::ok(Empty::default())
+    }
+
+    async fn restore_memory(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<Empty> {
+        owner_only(&ctx).or_fail()?;
+        let _hold = self.app.notebook.hold().or_fail()?;
+        self.commit_others().or_fail()?;
+        judging::restore(&self.app.memory_dir, request.id).or_fail()?;
+        self.commit_judged("あなたが忘れた記憶を戻した", &[])
+            .or_fail()?;
+        Response::ok(Empty::default())
+    }
+
     async fn read_file(
         &self,
         _ctx: RequestContext,
@@ -299,24 +656,11 @@ impl MemoryService for Api {
         let path = request.path.to_owned();
         let dir = &self.app.memory_dir;
         let text = m::read_file(dir, &path).or_fail()?;
-        let mut history = Vec::new();
-        for c in notebook::log(dir, 200).or_fail()? {
-            if history.len() >= 30 {
-                break;
-            }
-            let touched = notebook::diff_stat(dir, &c.id)
-                .map(|s| s.iter().any(|f| f.path == path))
-                .unwrap_or(false);
-            if touched {
-                history.push(FileChange {
-                    commit: c.id.chars().take(8).collect(),
-                    at: c.time.timestamp(),
-                    author: c.author.name.clone(),
-                    message: c.message.clone(),
-                    ..Default::default()
-                });
-            }
-        }
+        let history = notebook::file_log(dir, &path, HISTORY)
+            .or_fail()?
+            .into_iter()
+            .map(file_change)
+            .collect();
         Response::ok(FileContent {
             path,
             text,

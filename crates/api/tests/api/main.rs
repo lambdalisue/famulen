@@ -13,6 +13,7 @@ mod keyless;
 mod link_previews;
 mod logs;
 mod lookout;
+mod memory;
 mod obsolete;
 mod persona;
 mod pictures;

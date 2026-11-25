@@ -1,13 +1,12 @@
 import { createAsync, useBeforeLeave } from "@solidjs/router";
-import { createEffect, createSignal, For, Match, on, Show, Switch } from "solid-js";
+import { createEffect, createSignal, Match, on, Show, Switch } from "solid-js";
 import Markdown from "~/components/Markdown";
-import { Button, Callout, confirmed, EmptyState, List, ListRow, Loading, PageHeader, SegmentedLinks, Tag, TextArea } from "~/components/ui";
+import MemoryDetail, { History } from "~/components/MemoryDetail";
+import { Button, Callout, confirmed, EmptyState, Loading, PageHeader, SegmentedLinks, TextArea } from "~/components/ui";
 import type { FileContent } from "~/gen/famulen/v1/memory_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { dateTimeText } from "~/lib/dates";
-import { layerHref, layerOfFile, memoryFileQuery } from "~/lib/memory";
-import { useOwner } from "~/lib/owner";
+import { layerHref, layerOfFile, memoryFileQuery, memoryQuery } from "~/lib/memory";
 import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
 
@@ -84,7 +83,8 @@ export default function MemoryFile() {
   const asked = useParam("mode");
   const mode = () => asked() || "read";
   const file = createAsync(async () => (path() ? memoryFileQuery(path()) : undefined));
-  const owner = useOwner();
+  const long = () => path().startsWith("long/") && mode() === "read";
+  const detail = createAsync(async () => (long() ? memoryQuery("", path()) : undefined));
   createEffect(() => setView("記憶", path()));
 
   return (
@@ -110,30 +110,22 @@ export default function MemoryFile() {
               </div>
             }
           >
+            <Match when={long()}>
+              <Show when={detail()} fallback={<Loading />}>
+                {(d) => (
+                  <div class="card">
+                    <MemoryDetail detail={d()} />
+                  </div>
+                )}
+              </Show>
+            </Match>
             <Match when={mode() === "write"}>
               <Show when={f().path} keyed>
                 {(written) => <Write path={written} file={f()} />}
               </Show>
             </Match>
             <Match when={mode() === "history"}>
-              <List>
-                <For each={f().history} fallback={<EmptyState>まだ経緯はない</EmptyState>}>
-                  {(c) => {
-                    const aides = c.author === "Famulen";
-                    return (
-                      <ListRow
-                        title={<span class="memory-change">{c.message}</span>}
-                        sub={
-                          <>
-                            <Tag tone={aides ? "aide" : "said"}>{aides ? owner.aide() : "あなた"}</Tag>
-                            <span>{dateTimeText(c.at, owner.tz())}</span>
-                          </>
-                        }
-                      />
-                    );
-                  }}
-                </For>
-              </List>
+              <History changes={f().history} />
             </Match>
           </Switch>
         )}

@@ -311,6 +311,11 @@ mod tests {
             "answer_approval",
             "connect_known",
             "get_note_origin",
+            "get_memory",
+            "answer_pending",
+            "withdraw_answer",
+            "reject_pending",
+            "restore_memory",
         ] {
             assert!(
                 tools.iter().all(|t| t.def.name != console_only),

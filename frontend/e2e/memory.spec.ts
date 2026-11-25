@@ -1,7 +1,7 @@
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { expect, test } from "@playwright/test";
-import { call, detail, record, row, toast, visit } from "./support";
+import { type APIRequestContext, expect, test } from "@playwright/test";
+import { agree, call, detail, record, row, toast, visit } from "./support";
 
 type Models = { roles: { role: string; model?: string; effort?: string; choices: string[] }[] };
 type Dreams = { dreams?: { id: string }[] };
@@ -239,7 +239,7 @@ test.describe("memory drawn as Markdown", () => {
     await expect(page.getByLabel("core.md を書く")).toHaveValue(text);
   });
 
-  test("a long-term memory file keeps its frontmatter folded apart from the memory", async ({ page, request }) => {
+  test("a long-term memory file tells its summary and its fields apart from the memory", async ({ page, request }) => {
     await call(request, "MemoryService", "WriteFile", {
       path: "long/semantic/e2e-folded.md",
       text: "---\nid: e2e-md3\nsummary: 朝は \`お茶\`\nsrc: said\n---\n\n朝は *お茶* 。\n",
@@ -247,14 +247,13 @@ test.describe("memory drawn as Markdown", () => {
     await visit(page, "/memory/file?path=long/semantic/e2e-folded.md", /^記憶/);
     const body = page.locator("#pane article.markdown-body");
     await expect(body.locator("em")).toHaveText("お茶");
-    await expect(body.getByText("e2e-md3")).toBeHidden();
-    await body.getByText("属性", { exact: true }).click();
-    await expect(body.getByText("e2e-md3")).toBeVisible();
+    await expect(body.getByText("e2e-md3")).toHaveCount(0);
+    await expect(page.locator("#pane .memory-summary")).toHaveText("朝は お茶");
+    await expect(page.locator("#pane .memory-detail dd code").first()).toHaveText("e2e-md3");
 
     await visit(page, "/memory/long", "記憶 · 長期記憶");
-    const card = page.locator("section.pref").filter({ hasText: "朝は お茶" }).first();
-    await expect(card.locator("h2 code")).toHaveText("お茶");
-    await expect(card.locator(".item code")).toHaveText("お茶");
+    const card = page.locator(".item").filter({ hasText: "朝は お茶" });
+    await expect(card.locator("code")).toHaveText("お茶");
   });
 
   test("an item and a file open the record and the memory they link to, and the item is not picked", async ({
@@ -347,6 +346,115 @@ test.describe("memory drawn as Markdown", () => {
     await write("pending.md", "");
     await write("episodic/2026-01-02.md", "");
     await write("core.md", "# 心得\n");
+  });
+});
+
+test.describe("the details of a memory", () => {
+  const write = (request: APIRequestContext, path: string, text: string) => call(request, "MemoryService", "WriteFile", { path, text });
+
+  test("a long-term memory opens from its row, says what it stands on and leads back to where the list was", async ({ page, request }) => {
+    const party = await record(request, "parties", "e2e 詳細さん");
+    for (let i = 0; i < 30; i++)
+      await write(request, `long/semantic/e2e-many-${i}.md`, `---\nid: e2e-many-${i}\nsummary: 数合わせ ${i}\nsrc: inferred\n---\n`);
+    await write(
+      request,
+      "long/semantic/e2e-zz-detail.md",
+      `---\nid: e2e-d1\nsummary: 蕎麦が好きで家族も好き\nsrc: said\nfrom: 2026-11-21\nev: 3\nworkgroup: [personal]\n---\n\n[[records/parties/${party.id}|詳細さん]] とよく行く。\n\n出どころ：slack:C1/1795190434.955039, AI との会話 e2e\n`,
+    );
+    await visit(page, "/memory/long", "記憶 · 長期記憶");
+    const item = page.locator(".item").filter({ hasText: "蕎麦が好きで家族も好き" });
+    await item.scrollIntoViewIfNeeded();
+    const detail = page.locator("#pane .memory-detail");
+    const y = async () => (await item.boundingBox())?.y ?? 0;
+    const before = await y();
+
+    await item.locator(".item-title").click();
+    await expect(page).toHaveURL(/\/memory\/file\?path=long%2Fsemantic%2Fe2e-zz-detail\.md$/);
+    await expect(detail.locator(".memory-summary")).toHaveText("蕎麦が好きで家族も好き");
+    await expect(detail).toContainText("2026-11-21 から今も");
+    await expect(detail.locator(".tag.wg")).toHaveText(/./);
+    await expect(detail.locator(".rec-prose")).not.toContainText("出どころ");
+    await expect(detail.locator(".memory-sources li")).toHaveText([/slack:C1/, "AI との会話 e2e"]);
+    await expect(detail.getByRole("link", { name: "e2e 詳細さん" })).toHaveAttribute("href", `/parties?id=${party.id}`);
+    await expect(page.getByRole("link", { name: "経緯", exact: true })).toBeVisible();
+
+    await page.goBack();
+    await expect(item).toBeInViewport();
+    await expect.poll(async () => Math.abs((await y()) - before)).toBeLessThan(60);
+  });
+
+  test("a line of core opens over its list, and the way back closes it", async ({ page, request }) => {
+    await write(request, "core.md", "# 心得\n\n- e2e 返事は短く {id: e2e-d2, src: said, from: 2026-11-01}\n");
+    await visit(page, "/memory/core", "記憶 · 心得");
+    const sheet = page.getByRole("dialog", { name: "心得の詳細" });
+    await page.locator(".item").filter({ hasText: "e2e 返事は短く" }).locator(".item-title").click();
+    await expect(sheet.locator(".memory-summary")).toHaveText("e2e 返事は短く");
+    await expect(sheet).toContainText("e2e-d2");
+    await expect(sheet.getByRole("list", { name: "更新の履歴" })).toContainText("あなたが core.md を直した");
+    await page.goBack();
+    await expect(sheet).toHaveCount(0);
+    await expect(page).toHaveURL(/\/memory\/core$/);
+    await write(request, "core.md", "# 心得\n");
+  });
+
+  test("a pending judgment is answered, taken back, rejected and put back where it is read", async ({ page, request }) => {
+    await write(request, "pending.md", "- e2e 朝が好き {id: e2e-p1, src: inferred, ev: 1}\n- e2e 猫派 {id: e2e-p2, src: inferred, ev: 1}\n");
+    await visit(page, "/memory/pending", "記憶 · 保留中の判断");
+    const item = page.locator(".item").filter({ hasText: "e2e 朝が好き" });
+
+    await item.getByRole("button", { name: "判断を書く" }).click();
+    const words = item.getByLabel("e2e 朝が好き への判断");
+    await words.fill("休みの日だけ");
+    const read = page.waitForResponse((r) => r.url().includes("MemoryService/GetLayer"));
+    await record(request, "memos", "e2e 判断の間に足した");
+    await read;
+    await expect(words).toHaveValue("休みの日だけ");
+    await expect(words).toBeFocused();
+    await item.getByRole("button", { name: "判断を送る" }).click();
+    await expect(toast(page)).toHaveText("判断を送った");
+    await expect(item.locator(".callout")).toContainText("休みの日だけ");
+    await item.getByRole("button", { name: "保留に戻す" }).click();
+    await expect(item.locator(".callout")).toHaveCount(0);
+
+    await item.getByRole("button", { name: "採用", exact: true }).click();
+    await expect(item.locator(".callout")).toContainText("採用した");
+    await item.getByRole("button", { name: "保留に戻す" }).click();
+    await expect(item.locator(".callout")).toHaveCount(0);
+
+    await item.locator(".item-title").click();
+    const sheet = page.getByRole("dialog", { name: "保留中の判断の詳細" });
+    await sheet.getByRole("button", { name: "却下" }).click();
+    await agree(page, "却下する");
+    await expect(sheet).toHaveCount(0);
+    await expect(item).toHaveCount(0);
+    await expect(page.locator(".item").filter({ hasText: "e2e 猫派" })).toBeVisible();
+
+    await visit(page, "/memory/forgotten", "記憶 · 忘却");
+    await page.locator(".item").filter({ hasText: "e2e 朝が好き" }).locator(".item-title").click();
+    const gone = page.getByRole("dialog", { name: "忘却の詳細" });
+    await expect(gone).toContainText("主人が却下した");
+    await gone.getByRole("button", { name: "保留に戻す" }).click();
+    await expect(toast(page)).toHaveText("保留に戻した");
+    await visit(page, "/memory/pending", "記憶 · 保留中の判断");
+    await expect(item).toBeVisible();
+    await write(request, "pending.md", "");
+  });
+
+  test("a pending judgment is decided on a phone without overflow", async ({ page, request }) => {
+    await page.setViewportSize({ width: 375, height: 700 });
+    await write(request, "pending.md", `- e2e ${"長い判断".repeat(30)} {id: e2e-p3, src: inferred, ev: 1}\n`);
+    await visit(page, "/memory/pending", /^記憶/);
+    const item = page.locator(".item").filter({ hasText: "長い判断" });
+    await item.getByRole("button", { name: "判断を書く" }).click();
+    for (const name of ["判断を送る", "採用", "却下", "書くのをやめる"])
+      await expect(item.getByRole("button", { name, exact: true })).toBeVisible();
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(wide).toBe(false);
+    await item.locator(".item-title").click();
+    const sheet = page.getByRole("dialog", { name: "保留中の判断の詳細" });
+    await expect(sheet.getByRole("button", { name: "採用", exact: true })).toBeVisible();
+    expect(await sheet.evaluate((el) => [...el.querySelectorAll("*")].some((c) => c.getBoundingClientRect().right > window.innerWidth + 1))).toBe(false);
+    await write(request, "pending.md", "");
   });
 });
 

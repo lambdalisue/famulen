@@ -8,8 +8,8 @@ pub(crate) mod testing;
 use crate::store::Store;
 
 pub use famulen_notebook::{
-    Author, Hold, MEMORY, Notebook, Page, README, RECORDS, Signature, commit_all, commit_paths,
-    diff_stat, link_target, log, revert_to,
+    Author, CommitInfo, Hold, MEMORY, Notebook, Page, README, RECORDS, Signature, commit_all,
+    commit_paths, diff_stat, file_log, line_log, link_target, log, revert_to,
 };
 
 /// Famulen itself, the author of what the secretary writes.

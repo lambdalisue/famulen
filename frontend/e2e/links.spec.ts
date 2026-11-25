@@ -78,7 +78,7 @@ test("a memory that links to a record shows on it, and leads back", async ({ pag
   await visit(page, `/memos?id=${memo.id}`, "メモ · 記憶が触れるメモ");
   await back(page, "触れている記憶").getByRole("link", { name: "メモの覚え" }).click();
   await expect(page).toHaveURL(/\/memory\/file/);
-  await page.getByRole("link", { name: "記憶が触れるメモ" }).click();
+  await page.locator("#pane .rec-prose").getByRole("link", { name: "記憶が触れるメモ" }).click();
   await expect(page).toHaveURL(new RegExp(`id=${memo.id}`));
 });
 
