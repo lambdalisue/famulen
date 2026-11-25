@@ -603,3 +603,52 @@ test("on a phone a message is replied to, and its thread is laid over the conver
   await expect(thread).toHaveCount(0);
   await expect.poll(() => said.isVisible()).toBe(true);
 });
+
+/** What is pressed, and is given less than 44px by 44px for a finger. Links within a text are as large as the text. */
+function tight(page: Page) {
+  return page.evaluate(() => {
+    const found = new Set<string>();
+    const least = 43.5;
+    for (const el of document.querySelectorAll<HTMLElement>("button, a, input, select, textarea, summary")) {
+      if (!el.checkVisibility({ visibilityProperty: true }) || el.closest("[hidden], .md, p, .sub, .callout, .item-sub:not(:has(> button)), .topbar, .tabs, .sr")) continue;
+      // An event is as tall as it is long, and a mark of a chart as it is much.
+      if (el.matches(".ev, .allday, .month-date, .week-date, .night, .usage-column, [data-part=hidden-input], [type=hidden], [type=file], .sr")) continue;
+      let { width, height } = el.getBoundingClientRect();
+      if (width <= 1 || height <= 1) continue;
+      const around = el.closest("label")?.getBoundingClientRect();
+      if (around) [width, height] = [Math.max(width, around.width), Math.max(height, around.height)];
+      const row = el.matches(".item-pick") ? el.closest(".item, .home-ev")?.getBoundingClientRect() : undefined;
+      if (row) [width, height] = [row.width, row.height];
+      const more = getComputedStyle(el, "::after");
+      if (more.content !== "none" && more.position === "absolute") {
+        width -= Math.min(0, Number.parseFloat(more.left)) + Math.min(0, Number.parseFloat(more.right));
+        height -= Math.min(0, Number.parseFloat(more.top)) + Math.min(0, Number.parseFloat(more.bottom));
+      }
+      if (width < least || height < least) found.add(`${Math.round(width)}x${Math.round(height)} .${el.className} ${(el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 16)}`);
+    }
+    return [...found];
+  });
+}
+
+test("what is pressed is large enough for a finger", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const task = await record(request, "tasks", "指で押す仕事", { labels: ["指"], fields: { Priority: "high", Due: "2026-12-01" } });
+  await record(request, "holdings", "指で押す物", { labels: ["指"], fields: { Category: "機器" } });
+  const faults: { [path: string]: string[] } = {};
+  for (const path of ["/", "/calendar", "/tasks", `/tasks?id=${task.id}`, "/tasks?tab=delegated", "/memos", "/parties", "/things", "/memory", "/memory/core", "/more", "/settings/menu", "/settings/look", "/settings", "/settings/workgroups", "/settings/services"]) {
+    await page.goto(path);
+    await expect(page.locator("#composer .view")).not.toBeEmpty();
+    const found = await tight(page);
+    if (found.length > 0) faults[path] = found;
+  }
+  await call(request, "ConsoleService", "Send", { text: "指で押す話 e2e-bash", workgroup: "all" });
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const card = page.getByTestId("approval");
+  await expect(card).toBeVisible();
+  const found = await tight(page);
+  if (found.length > 0) faults.conversation = found;
+  await card.getByRole("button", { name: "却下" }).click();
+  await expect(card).toHaveCount(0);
+  expect(faults).toEqual({});
+});

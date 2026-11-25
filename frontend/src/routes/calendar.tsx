@@ -248,7 +248,7 @@ export default function Calendar() {
                 items={[
                   ...d().calendars.map((c) => ({ text: c.name, style: { background: own(c.color) } })),
                   { text: "ワークグループの外（予定あり）", style: { background: "var(--faint-event)" } },
-                  { text: `${owner.aide()}の仮押さえ`, style: { border: "1.5px dashed var(--workgroup)" } },
+                  { text: `${owner.aide()}の仮押さえ`, style: { border: "1.5px dashed var(--control)" } },
                 ]}
               />
             </SplitPane>

@@ -1,35 +1,36 @@
 :root { --faint-event: repeating-linear-gradient(135deg, var(--pressed) 0 4px, var(--sunken) 4px 8px); }
-.hours-scroll { flex: 1 1 auto; min-height: 320px; overflow: auto; position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.hours-scroll { flex: 1 1 auto; min-height: 320px; overflow: auto; position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
 .week { display: grid; grid-template-columns: 48px repeat(var(--days), minmax(0, 1fr)); }
 .week-corner, .week .head { position: sticky; top: 0; z-index: 2; min-width: 0; background: var(--card); border-bottom: 1px solid var(--line); }
 .week .head { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 2px 4px; border-left: 1px solid var(--line2); }
 .week-date { display: flex; flex-direction: column; align-items: center; padding-bottom: 2px; font-size: var(--t-sm); color: var(--muted); text-decoration: none; border-radius: var(--r-sm); line-height: 1.3; }
-.week-date b { font-size: var(--t-lg); color: var(--ink); }
-.week .head.today .week-date, .week .head.today b { color: var(--workgroup-ink); }
-.week .head.today { box-shadow: inset 0 3px 0 var(--workgroup); }
+.week-date b { font-size: var(--t-lg); font-weight: 500; line-height: 30px; color: var(--ink); }
+.week .head.today .week-date { color: var(--accent-ink); }
+.week .head.today b { width: 30px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 600; text-align: center; }
 .week .col { position: relative; border-left: 1px solid var(--line2); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hour) - 1px), var(--line2) calc(var(--hour) - 1px), var(--line2) var(--hour)); }
 .week .hours span { height: var(--hour); display: block; font-size: var(--t-xs); color: var(--muted); text-align: right; padding: 2px 8px 0 0; }
-.ev { --ev: var(--c, var(--accent)); position: absolute; border: 0; border-left: 3px solid var(--ev); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 2px 6px; box-shadow: 0 0 0 1px var(--card); overflow: hidden; font-size: var(--t-xs); line-height: 1.4; background: color-mix(in srgb, var(--ev) 9%, var(--card)); display: flex; flex-direction: column; text-align: left; cursor: pointer; color: var(--ink); }
-.ev b { font-size: var(--t-sm); overflow: hidden; display: -webkit-box; -webkit-line-clamp: var(--lines, 2); -webkit-box-orient: vertical; overflow-wrap: anywhere; flex-shrink: 0; }
+.ev { --ev: var(--c, var(--accent)); position: absolute; border: 0; border-radius: var(--r-sm); padding: 2px 7px; box-shadow: 0 0 0 1px var(--card); overflow: hidden; font-size: var(--t-xs); line-height: 1.4; background: color-mix(in oklab, var(--ev) 16%, var(--card)); display: flex; flex-direction: column; text-align: left; cursor: pointer; color: var(--ink); }
+.ev:not(.faint, .hold)::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--ev); }
+.ev b { font-size: var(--t-xs); overflow: hidden; display: -webkit-box; -webkit-line-clamp: var(--lines, 2); -webkit-box-orient: vertical; overflow-wrap: anywhere; flex-shrink: 0; }
 .ev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink2); }
 .ev.short { flex-direction: row; gap: 6px; align-items: center; padding-block: 0; }
 .ev.short b { display: block; flex: 0 0 auto; max-width: 100%; white-space: nowrap; text-overflow: ellipsis; }
 .ev.short span { flex: 0 1 auto; min-width: 0; }
-.ev.faint { background: var(--faint-event); border-left-color: var(--line-strong); color: var(--muted); cursor: default; }
+.ev.faint { background: var(--faint-event); color: var(--muted); cursor: default; }
 .ev.quiet { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
-.ev.hold { background: var(--card); border: 1.5px dashed var(--workgroup); }
-.ev.picked, .allday.picked { outline: 2px solid var(--workgroup); outline-offset: 0; z-index: 1; }
+.ev.hold { background: var(--card); border: 1.5px dashed var(--control); }
+.ev.picked, .allday.picked { outline: 2px solid var(--accent); outline-offset: 0; z-index: 1; }
 .ev-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--danger); z-index: 1; pointer-events: none; }
 .ev-now::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
-.allday { --ev: var(--c, var(--accent)); display: block; width: 100%; min-width: 0; margin: 0; border: 0; border-left: 3px solid var(--ev); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 1px 5px; background: color-mix(in srgb, var(--ev) 9%, var(--card)); color: var(--ink); font-size: var(--t-xs); line-height: 1.5; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.allday { --ev: var(--c, var(--accent)); display: block; width: 100%; min-width: 0; margin: 0; border: 0; border-left: 3px solid var(--ev); border-radius: var(--r-sm); padding: 1px 5px; background: color-mix(in oklab, var(--ev) 16%, var(--card)); color: var(--ink); font-size: var(--t-xs); line-height: 1.5; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A whole day has room for a second line. */
 .week .head .allday > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
 .allday.due { border: 1px dashed var(--line-strong); border-radius: var(--r-sm); background: transparent; }
 .allday.due::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border: 1.2px solid var(--muted); border-radius: 2px; }
-.allday.hold { background: var(--card); border: 1.5px dashed var(--workgroup); border-radius: var(--r-sm); }
+.allday.hold { background: var(--card); border: 1.5px dashed var(--control); border-radius: var(--r-sm); }
 .allday.faint { background: var(--faint-event); color: var(--muted); cursor: default; border-left-color: var(--line-strong); }
 .allday.quiet { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
-.month { flex: 1 0 auto; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(104px, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.month { flex: 1 0 auto; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(104px, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-1); overflow: hidden; }
 .month-day { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px; border-top: 1px solid var(--line2); border-left: 1px solid var(--line2); }
 .month-day:nth-child(7n + 1) { border-left: 0; }
 .month-day:nth-child(-n + 7) { border-top: 0; }

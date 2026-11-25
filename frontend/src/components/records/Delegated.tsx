@@ -25,14 +25,15 @@ import { hrefOf, isOver, type Rec, recordsQuery, valueOf, WORKER } from "~/lib/r
 import {
   type DelegatedTask,
   delegatedQuery,
-  isBad,
-  isBadOutcome,
+  outcomeLook,
   outcomeText,
   placeOf,
   runHref,
   runnerText,
+  stageLook,
   stageOf,
   STAGES,
+  standingLook,
   standingText,
   type WorkerRun,
 } from "~/lib/workers";
@@ -62,9 +63,12 @@ function Watch(props: { run: WorkerRun; title: string }) {
 }
 
 function Standing(props: { of: DelegatedTask }) {
-  const tone = () =>
-    isBad(props.of) ? "danger" : stageOf(props.of) === "owner" ? "warn" : props.of.state === "running" ? "aide" : undefined;
-  return <Tag tone={tone()}>{standingText(props.of)}</Tag>;
+  const look = () => standingLook(props.of);
+  return (
+    <Tag tone={look().tone} icon={look().icon}>
+      {standingText(props.of)}
+    </Tag>
+  );
 }
 
 /** What a delegated task that may not start yet waits for. */
@@ -147,7 +151,7 @@ export function DelegatedSummary() {
         <span>委ねた仕事 {queue().length} 件</span>
         <For each={STAGES.filter(([s]) => on(s) > 0)}>
           {([s, name]) => (
-            <Tag tone={s === "owner" ? "warn" : s === "running" ? "aide" : undefined}>
+            <Tag tone={stageLook(s).tone} icon={stageLook(s).icon}>
               {name} {on(s)}
             </Tag>
           )}
@@ -257,7 +261,9 @@ export function RunResult(props: { run: WorkerRun; href?: string }) {
           )}
         </Show>
         <div class="item-sub">
-          <Tag tone={isBadOutcome(r().outcome) ? "danger" : "ok"}>{outcomeText(r().outcome)}</Tag>
+          <Tag tone={outcomeLook(r().outcome).tone} icon={outcomeLook(r().outcome).icon}>
+            {outcomeText(r().outcome)}
+          </Tag>
           <span class="mono">#{String(r().id)}</span>
           <span>{runnerText(r().runner)}</span>
           <Show when={r().attempt > 1}>

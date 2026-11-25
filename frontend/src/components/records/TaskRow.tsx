@@ -66,6 +66,8 @@ function Assignee(props: { task: Rec }) {
   );
 }
 
+const STATUS_ICONS: { [status: string]: string } = { in_progress: icons.refresh, waiting: icons.clock, cancelled: icons.playerStop };
+
 /** One task in a list: finish it, hand it over, or open it. */
 export function taskParts(t: () => Rec): RowParts {
   const status = () => valueOf(t(), "Status");
@@ -75,7 +77,9 @@ export function taskParts(t: () => Rec): RowParts {
     sub: () => (
       <>
         <Show when={valueOf(t(), "Priority") === "high" && !isOver(t())}>
-          <Tag tone="warn">優先</Tag>
+          <Tag tone="warn" icon={icons.flag}>
+            優先
+          </Tag>
         </Show>
         <Show when={t().blockers.length > 0}>
           <Tag
@@ -88,7 +92,9 @@ export function taskParts(t: () => Rec): RowParts {
           </Tag>
         </Show>
         <Show when={["in_progress", "waiting", "cancelled"].includes(status())}>
-          <Tag>{choiceOf(status())}</Tag>
+          <Tag tone={status() === "in_progress" ? "info" : undefined} icon={STATUS_ICONS[status()]}>
+            {choiceOf(status())}
+          </Tag>
         </Show>
         <Show when={valueOf(t(), "Waiting for")}>{(w) => <span>{plainText(w())}</span>}</Show>
       </>

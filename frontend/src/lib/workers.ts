@@ -1,6 +1,7 @@
 import { query } from "@solidjs/router";
 import type { DelegatedTask, LeftBehind, WorkerRun, WorkerStep } from "~/gen/famulen/v1/workers_pb";
 import { api } from "./api";
+import * as icons from "./icons";
 
 export type { DelegatedTask, WorkerRun, WorkerStep };
 
@@ -106,6 +107,27 @@ export function stageOf(t: DelegatedTask): Stage {
   if (["queued", "approved"].includes(t.state)) return "next";
   return ["asking", "waiting", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "held";
 }
+
+type Look = { tone?: "warn" | "danger" | "info" | "ok" | "plan"; icon: string };
+
+const STAGE_LOOKS: { [S in Stage]: Look } = {
+  owner: { tone: "warn", icon: icons.handStop },
+  running: { tone: "info", icon: icons.refresh },
+  soon: { icon: icons.clock },
+  next: { icon: icons.clock },
+  held: { tone: "plan", icon: icons.lock },
+};
+
+/** The shape and the color that say how far a stage of the queue is. */
+export const stageLook = (stage: Stage) => STAGE_LOOKS[stage];
+
+/** The same of one task, which may be held up by something that went wrong. */
+export const standingLook = (t: DelegatedTask): Look => (isBad(t) ? { tone: "danger", icon: icons.alertTriangle } : stageLook(stageOf(t)));
+
+const OUTCOME_LOOKS: { [outcome: string]: Look } = { done: { tone: "ok", icon: icons.check }, interrupted: { icon: icons.plugConnectedX } };
+
+export const outcomeLook = (outcome: string): Look =>
+  isBadOutcome(outcome) ? { tone: "danger", icon: icons.alertTriangle } : OUTCOME_LOOKS[outcome] ?? { icon: icons.playerStop };
 
 /** Its place among those that wait for a free slot; 0 when it does not. */
 export const placeOf = (queue: DelegatedTask[] | undefined, task: string) =>
