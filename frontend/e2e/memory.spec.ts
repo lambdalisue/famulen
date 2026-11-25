@@ -84,6 +84,42 @@ test("an episodic note shows the time it was written apart from its text", async
   await expect(row.locator(".tag")).toHaveText("あなたが言った");
 });
 
+test("the count of episodic memory is the notes its days show as waiting for the dream", async ({ page, request }) => {
+  const item = page.getByRole("navigation", { name: "記憶の層" }).getByRole("link", { name: /^エピソード記憶/ });
+  const waiting = async () => Number(/^待ち (\d+)$/.exec((await item.locator(".mono").textContent()) ?? "")?.[1]);
+
+  await visit(page, "/memory/episodic", "記憶 · エピソード記憶");
+  await expect(item.locator(".mono")).toHaveText(/^待ち \d+$/);
+  const before = await waiting();
+
+  await call(request, "MemoryService", "WriteFile", {
+    path: "episodic/2026-01-05.md",
+    text: [
+      "- 09:15 夢が読む前 {id: e2e-w1, src: said, state: waiting}",
+      "- 09:20 夢が読んだ {id: e2e-w2, src: said, workgroup: [work], state: waiting, dreamt: 2026-01-06}",
+      "- 09:25 すぐに入れた {id: e2e-w3, src: said, state: applied}",
+      "",
+    ].join("\n"),
+  });
+  try {
+    await visit(page, "/memory/episodic?at=2026-01-05", "記憶 · エピソード記憶");
+    await expect(item.locator(".mono")).toHaveText(`待ち ${before + 1}`);
+    await expect(page.getByText("この日の 3 件のうち、夢を待つ 1 件")).toBeVisible();
+    await expect(page.locator(".list .item", { hasText: "夢が読む前" }).locator(".item-sub")).toContainText("夢を待つ");
+    const settled = page.locator(".list .item", { hasText: "夢が読んだ" }).locator(".item-sub");
+    await expect(settled).toContainText("夢が済んだ");
+    await expect(settled).not.toContainText("夢を待つ");
+
+    await page.evaluate(() => {
+      document.cookie = "famulen_workgroup=personal; path=/";
+    });
+    await page.reload();
+    await expect(page.getByText("この日の 3 件のうち、夢を待つ 1 件。ほかのワークグループの 1 件は出ていない")).toBeVisible();
+  } finally {
+    await call(request, "MemoryService", "WriteFile", { path: "episodic/2026-01-05.md", text: "" });
+  }
+});
+
 test("a working memory shows the title its file was given", async ({ page, request }) => {
   await call(request, "MemoryService", "WriteFile", {
     path: "working/e2e-invoice.md",

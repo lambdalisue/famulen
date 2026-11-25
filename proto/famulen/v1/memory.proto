@@ -26,7 +26,8 @@ message MemoryLayer {
   string id = 1;
   string label = 2;
   string help = 3;
-  // How many items or files it holds, in words.
+  // How many items or files it holds, in words; of episodic, only the notes
+  // waiting for the dream.
   string count = 4;
 }
 

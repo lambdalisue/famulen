@@ -468,13 +468,17 @@ fn apply_one(dir: &Path, edit: &Edit, today: NaiveDate) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The episodic notes a dream reads, with their days: written and not yet
-/// dreamt of.
+/// Whether an episodic note waits for a dream: written and not yet dreamt of.
+pub fn waits(note: &Entry) -> bool {
+    note.get("dreamt").is_none() && note.state() == Some(EpisodeState::Waiting)
+}
+
+/// The episodic notes a dream reads, with their days.
 pub fn waiting_notes(dir: &Path) -> anyhow::Result<Vec<(NaiveDate, Entry)>> {
     let mut notes = Vec::new();
     for date in memory::episodic_dates(dir)? {
         for e in memory::episodes(dir, date)? {
-            if e.get("dreamt").is_none() && e.state() == Some(EpisodeState::Waiting) {
+            if waits(&e) {
                 notes.push((date, e));
             }
         }

@@ -3,6 +3,7 @@
 use chrono::{NaiveDate, Utc};
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::dream_settings::{self as ds, DreamSettings as Plan, Frequency};
+use famulen_core::dreaming;
 use famulen_core::memory::{self as m, Entry, EpisodeState, Src};
 use famulen_core::notebook;
 use famulen_core::workgroups::ALL;
@@ -16,7 +17,7 @@ const LAYERS: [(&str, &str, &str); 7] = [
     (
         "episodic",
         "エピソード記憶",
-        "その日の出来事と気づき。夢を待っている",
+        "その日の出来事と気づき。夢が整理する",
     ),
     ("working", "作業記憶", "いま進めている仕事の途中経過"),
     ("core", "心得", "毎回の会話で必ず読む"),
@@ -82,10 +83,6 @@ pub(crate) fn dream(n: famulen_core::dreaming::Night) -> Dream {
     }
 }
 
-fn waiting(e: &Entry) -> bool {
-    e.get("dreamt").is_none() && e.state() == Some(EpisodeState::Waiting)
-}
-
 impl Api {
     fn dream_settings(&self) -> anyhow::Result<DreamSettings> {
         let plan = Plan::load(&self.app.store)?;
@@ -120,7 +117,7 @@ impl Api {
             .unwrap_or_default()
             .into_iter()
             .flat_map(|d| m::episodes(dir, d).unwrap_or_default())
-            .filter(waiting)
+            .filter(dreaming::waits)
             .count()
     }
 
@@ -128,7 +125,7 @@ impl Api {
         let dir = &self.app.memory_dir;
         Ok(match id {
             "pending" => m::pending_entries(dir)?.len().to_string(),
-            "episodic" => self.waiting_notes().to_string(),
+            "episodic" => format!("待ち {}", self.waiting_notes()),
             "working" => m::working_memories(dir)?.len().to_string(),
             "core" => format!(
                 "{} / {} 行",
