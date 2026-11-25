@@ -63,6 +63,7 @@
   .item:has(> .item-end > .permission-seg) > .item-end, .item:has(> .item-end .segs) > .item-end, .item:has(> .item-end > .select) > .item-end { max-width: 100%; flex: 1 1 100%; justify-content: flex-start; }
   .permission-seg { align-items: flex-start; }
   .list > .item.wraps-phone { flex-wrap: wrap; }
+  .list > .item.wraps-phone > .grow { flex-basis: 70%; }
   .pref { padding: 16px; }
   table.table th, table.table td { white-space: nowrap; }
 

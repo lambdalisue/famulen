@@ -1,14 +1,14 @@
 import { shortTime } from "~/lib/dates";
 import { createAsync, query } from "@solidjs/router";
 import { For, Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import { type LookoutDecision, LookoutOutcome } from "~/gen/famulen/v1/lookout_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
-import { setSelection } from "~/lib/view";
 import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
-import { EmptyState, IconButton, List, PickName, Tag } from "~/components/ui";
+import { EmptyState, IconButton, List, Tag } from "~/components/ui";
 
 const lookoutLogQuery = query(async (before: number) => {
   const page = await api.log.listLookoutLog({ before: BigInt(before), limit: PAGE });
@@ -32,15 +32,16 @@ export default function LookoutLog() {
       <List>
         <For each={pages.rows()}>
           {(d) => (
-            <div class="item" role="listitem">
+            <div class="item wraps-phone" role="listitem">
               <span class="mono sub when">{shortTime(d.at, owner.tz())}</span>
               <Tag tone={d.passedOn ? "aide" : undefined}>{d.outcome}</Tag>
               <div class="grow">
-                <PickName text={d.title} onPick={() => setSelection(`見張りの判断「${d.title}」（${d.outcome}）`)} />
+                <div class="item-title">{d.title}</div>
                 <Show when={d.reason}>
                   <div class="sub">{d.reason}</div>
                 </Show>
               </div>
+              <AskAbout framed what={`見張りの判断「${d.title}」（${d.outcome}）`} />
               <Show when={d.feedback === 0} fallback={<span class="sub">{d.feedback > 0 ? "拾ってほしかった" : "要らなかった"}</span>}>
                 <Show
                   when={passedOn(d)}

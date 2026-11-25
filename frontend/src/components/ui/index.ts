@@ -27,7 +27,7 @@ export { default as Icon } from "./Icon";
 export { Checkbox, Field, NumberField, SearchBox, Select, Switch, TextArea, TextField } from "./inputs";
 export { default as Keyed } from "./Keyed";
 export { Disclosure, Legend, PageHeader, Pager, Section, SubSection } from "./layout";
-export { List, ListRow, PickName } from "./List";
+export { List, ListRow } from "./List";
 export { RadioCards } from "./RadioCards";
 export { Segmented, SegmentedLinks, SegmentedOf } from "./Segmented";
 export { default as SideSheet } from "./SideSheet";

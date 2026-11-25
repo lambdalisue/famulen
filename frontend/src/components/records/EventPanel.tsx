@@ -1,6 +1,7 @@
 import { addDays, dateLabel, hm, localDate } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
 import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import { withParams } from "~/lib/params";
@@ -205,6 +206,7 @@ function FromGoogle(props: { event: CalendarEvent; back: string }) {
               書き足したものを開く
             </LinkButton>
           </Show>
+          <AskAbout framed what={`予定：${whenOf(e())} ${e().title || "（題名なし）"}`} />
           <Button small onClick={() => ask(`「${e().title}」（${whenOf(e())}）を`)}>
             変更を頼む
           </Button>

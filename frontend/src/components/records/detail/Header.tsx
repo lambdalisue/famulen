@@ -1,10 +1,11 @@
 import { createAsync } from "@solidjs/router";
 import { createEffect, For, onCleanup, onMount } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import { Icon, IconButton, Segmented, Tag, TextField } from "~/components/ui";
 import { say } from "~/lib/act";
 import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
-import type { Rec } from "~/lib/records";
+import { KIND_NAMES, type Rec } from "~/lib/records";
 import type { SaveRecord } from "./useRecordEdit";
 
 export const copy = (text: string, what: string) => void navigator.clipboard?.writeText(text).then(() => say(`${what}を写した`));
@@ -135,6 +136,7 @@ export default function Header(props: { record: Rec; view: string; onView: (v: s
           value={props.view}
           onChoose={props.onView}
         />
+        <AskAbout framed what={`${KIND_NAMES[r().kind] ?? r().kind}：${r().title}（${r().code}）`} />
         <IconButton variant="danger" icon={icons.trash} label={`${r().title}を消す`} onClick={() => props.onRemove()} />
       </div>
       <Title title={r().title} onSave={(title) => void props.save({ title })} />

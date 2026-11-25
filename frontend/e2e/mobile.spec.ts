@@ -315,3 +315,23 @@ test("the categories of things are within reach of the thumb, and scroll beside 
   await add.tap();
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+
+test("a lookout keeps its name readable beside its buttons, and goes along with what is said once told to", async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const r = await call<{ connection: { id: string } }>(request, "ConnectionService", "AddConnection", {
+    target: "e2e-hook",
+    how: "definition",
+    env: "token=e2e",
+  });
+  const added = await call<{ id: string }>(request, "LookoutService", "AddLookout", { name: "会社の受信箱を見る", connection: r.connection.id });
+  try {
+    await visit(page, "/settings/lookout", "設定 · 見張り");
+    const source = page.getByRole("listitem").filter({ hasText: "会社の受信箱を見る" });
+    expect((await source.locator(".lookout-source").boundingBox())?.width ?? 0).toBeGreaterThan(180);
+    await source.getByRole("button", { name: "会話に添える" }).tap();
+    await expect(page.locator("#selection")).toContainText("見張り 会社の受信箱を見る");
+  } finally {
+    await call(request, "LookoutService", "RemoveLookout", { id: added.id });
+    await call(request, "ConnectionService", "DeleteConnection", { id: r.connection.id });
+  }
+});

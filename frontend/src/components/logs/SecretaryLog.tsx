@@ -1,10 +1,10 @@
 import { createAsync, query } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import type { LogEvent, LogItem, LogTurn } from "~/gen/famulen/v1/settings_pb";
 import { clock, dayLabel } from "~/lib/dates";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
-import { setSelection } from "~/lib/view";
 import { useOwner } from "~/lib/owner";
 import { createPages, PAGE, PageNav } from "./Pages";
 import { EmptyState, Icon, SegmentedOf, Tag } from "~/components/ui";
@@ -90,52 +90,52 @@ function Turn(props: { turn: LogTurn; tz: string }) {
   const t = () => props.turn;
   const stopped = () => t().steps.filter((s) => s.outcome !== "");
   const reply = () => t().reply.replaceAll("**", "");
-  const toggle = () => {
-    const next = !open();
-    setOpen(next);
-    if (next) setSelection([...`ログ · ${clock(t().at, props.tz)} ${t().asked || reply()}`].slice(0, 120).join(""));
-  };
+  const toggle = () => setOpen(!open());
 
   return (
     <section
       class={`card log-turn${open() ? " open" : ""}`}
-      role="button"
-      tabindex="0"
-      aria-expanded={open()}
       onClick={(e) => {
         if (window.getSelection()?.toString()) return;
-        if (e.target instanceof HTMLElement && e.target.closest("a")) return;
+        if (e.target instanceof Element && e.target.closest("a, button")) return;
         toggle();
       }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggle();
-        }
-      }}
     >
-      <div class="row">
-        <span class="sub mono">{clock(t().at, props.tz)}</span>
-        <Show when={t().origin}>
-          <Tag>{t().origin}から</Tag>
+      <div
+        class="log-turn-head"
+        role="button"
+        tabindex="0"
+        aria-expanded={open()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <div class="row">
+          <span class="sub mono">{clock(t().at, props.tz)}</span>
+          <Show when={t().origin}>
+            <Tag>{t().origin}から</Tag>
+          </Show>
+          <Show when={t().steps.length > 0}>
+            <Tag>道具 {t().steps.length} 回</Tag>
+          </Show>
+          <For each={stopped()}>
+            {(s) => (
+              <Tag tone="warn">
+                {s.tool} · {s.outcome}
+              </Tag>
+            )}
+          </For>
+          <span class="sub push">
+            <Icon svg={open() ? icons.chevronDown : icons.chevronRight} size={14} />
+          </span>
+        </div>
+        <Show when={t().asked}>
+          <div class="asked">{t().asked}</div>
         </Show>
-        <Show when={t().steps.length > 0}>
-          <Tag>道具 {t().steps.length} 回</Tag>
-        </Show>
-        <For each={stopped()}>
-          {(s) => (
-            <Tag tone="warn">
-              {s.tool} · {s.outcome}
-            </Tag>
-          )}
-        </For>
-        <span class="sub push">
-          <Icon svg={open() ? icons.chevronDown : icons.chevronRight} size={14} />
-        </span>
       </div>
-      <Show when={t().asked}>
-        <div class="asked">{t().asked}</div>
-      </Show>
       <Show when={!open() && t().steps.length > 0}>
         <div class="log-steps">
           <For each={t().steps}>
@@ -172,6 +172,12 @@ function Turn(props: { turn: LogTurn; tz: string }) {
       </Show>
       <Show when={reply()}>
         <div class="reply">{reply()}</div>
+      </Show>
+      <Show when={open()}>
+        <div class="row">
+          <span class="grow" />
+          <AskAbout what={[...`ログ · ${clock(t().at, props.tz)} ${t().asked || reply()}`].slice(0, 120).join("")} />
+        </div>
       </Show>
     </section>
   );

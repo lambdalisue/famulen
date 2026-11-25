@@ -249,9 +249,12 @@ test("deleting a task asks first and then takes it off the list", async ({ page,
   await expect(row(page, "古い下書きを捨てる")).toHaveCount(0);
 });
 
-test("opening a task puts it beside the composer until removed", async ({ page, request }) => {
+test("a task goes beside the composer only once told to, until removed", async ({ page, request }) => {
   const t = await record(request, "tasks", "会話に渡すタスク");
   await visit(page, `/tasks?id=${t.id}`, "タスク · 会話に渡すタスク");
+  await expect(detail(page).getByLabel("題名")).toHaveValue("会話に渡すタスク");
+  await expect(page.locator("#selection")).toHaveCount(0);
+  await detail(page).getByRole("button", { name: "会話に添える" }).click();
   await expect(page.locator("#selection")).toContainText(`タスク：会話に渡すタスク（${t.code}）`);
   await page.locator("#selection").getByRole("button", { name: "外す" }).click();
   await expect(page.locator("#selection")).toHaveCount(0);

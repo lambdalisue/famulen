@@ -16,11 +16,10 @@ export function List(props: { label?: string; class?: string; children: JSX.Elem
  * stands at its end. With `href` its title is a link that takes presses
  * anywhere on the row, so it is reached and opened from the keyboard, opened
  * in a tab of its own, and read out as a link; controls in the row stay above
- * it. With `onPick` it is a button in the same way.
+ * it.
  */
 export function ListRow(props: {
   href?: string;
-  onPick?: () => void;
   /** It is what is open beside the list. */
   current?: boolean;
   icon?: string;
@@ -39,7 +38,7 @@ export function ListRow(props: {
   return (
     <div
       class={`item ${props.class ?? ""}`}
-      classList={{ picks: !!props.href || !!props.onPick, current: props.current, ...props.classList }}
+      classList={{ picks: !!props.href, current: props.current, ...props.classList }}
       role="listitem"
       data-record={props.record}
     >
@@ -48,13 +47,7 @@ export function ListRow(props: {
       <div class="item-main">
         <Show
           when={props.href}
-          fallback={
-            <Show when={props.onPick} fallback={<div class="item-title">{props.title}</div>}>
-              <button type="button" class="item-title item-pick" onClick={() => props.onPick?.()}>
-                {props.title}
-              </button>
-            </Show>
-          }
+          fallback={<div class="item-title">{props.title}</div>}
         >
           {(href) => (
             <a class="item-title item-pick" href={href()} aria-current={props.current ? "true" : undefined}>
@@ -74,14 +67,5 @@ export function ListRow(props: {
       </Show>
       {props.children}
     </div>
-  );
-}
-
-/** The name of a row that is laid out by itself, pressed to put it beside what the owner says. */
-export function PickName(props: { text: JSX.Element; onPick: () => void }) {
-  return (
-    <button type="button" class="item-title name-pick" onClick={() => props.onPick()}>
-      {props.text}
-    </button>
   );
 }
