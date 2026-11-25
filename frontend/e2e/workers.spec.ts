@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { agree, call, dayFromToday, detail, expectView, record, toast, visit } from "./support";
+import { agree, call, dayFromToday, detail, expectView, letOn, record, toast, visit } from "./support";
 
 const queued = (page: Page, title: string) => page.locator(".delegated-row").filter({ hasText: title });
 
@@ -263,6 +263,7 @@ test("how far a delegated task got and what its worker writes are seen as it goe
   const output = page.getByRole("region", { name: "出力" });
   await expect(output).toContainText("まず読む");
   const first = await output.getByRole("listitem").first().elementHandle();
+  letOn("written");
   // It goes on without the page being opened again.
   await expect(output).toContainText("書き終えた", { timeout: 15_000 });
   await expect(page.locator(".run-page .tag")).toHaveText("済んだ", { timeout: 15_000 });

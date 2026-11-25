@@ -2,9 +2,9 @@
 # A stand-in for Claude Code in the browser tests: each message the owner
 # sends becomes one short turn that ends without calling a tool, except that a
 # message holding `e2e-bash` first asks to run Bash, one holding
-# `e2e-work` searches the web for some seconds, one holding
+# `e2e-work` searches the web as the test lets it, one holding
 # `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
-# tells of a plan and writes for some seconds, and one holding `e2e-hold` goes
+# tells of a plan and writes until the test lets it end, and one holding `e2e-hold` goes
 # on until it is stopped.
 #
 # Asked once for a dream plan (--json-schema with the dream's prompt), it
@@ -15,6 +15,16 @@
 use strict;
 use warnings;
 $| = 1;
+
+# Go on once a test lets it, or after a while when none does.
+sub gate {
+    my $file = "$ENV{E2E_GATES}/$_[0]";
+    for (1 .. 1000) {
+        return if unlink $file;
+        select undef, undef, undef, 0.02;
+    }
+}
+
 if (grep { $_ eq "--json-schema" } @ARGV) {
     my $prompt = do { local $/; <STDIN> } // "";
     if ($prompt =~ /^Records to look at/) {
@@ -52,17 +62,17 @@ while (my $line = <STDIN>) {
     print qq({"type":"control_request","request_id":"e2e-long-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"), "ls\\n" x 60, qq(rm e2e-last"}}}\n)
       if $line =~ /e2e-long-bash/;
     if ($line =~ /e2e-work/) {
-        sleep 2;
+        gate("search");
         print qq({"type":"assistant","message":{"id":"w","content":[{"type":"tool_use","id":"w1","name":"WebSearch","input":{"query":"x"}}]}}\n);
-        sleep 4;
+        gate("found");
         print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"x"}]}}\n);
-        sleep 2;
+        gate("end");
     }
     sleep 600 if $line =~ /e2e-hold/;
     if ($line =~ /e2e-plan/) {
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"まず読む"}]}}\n);
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"},{"content":"書く","status":"in_progress"}]}}]}}\n);
-        sleep 6;
+        gate("written");
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"書き終えた"}]}}\n);
     }
     print qq({"type":"result","subtype":"success","is_error":false,"session_id":"e2e","usage":{"input_tokens":1,"output_tokens":1}}\n);

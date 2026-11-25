@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { type APIRequestContext, expect, type Locator, type Page } from "@playwright/test";
 
 const BACKEND = "http://127.0.0.1:17790";
@@ -58,6 +60,11 @@ export async function openLog(page: Page, path: string, view: string | RegExp, t
 export async function onFrame<T>(page: Page, look: () => Promise<T>): Promise<T> {
   await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(drawn)));
   return look();
+}
+
+/** Let the stand-in for Claude Code go on past where it waits; see fake-claude.pl. */
+export function letOn(...gates: ("search" | "found" | "end" | "written")[]) {
+  for (const gate of gates) writeFileSync(join(process.env.E2E_GATES ?? "", gate), "");
 }
 
 /** The note at the bottom of the screen after a change. */

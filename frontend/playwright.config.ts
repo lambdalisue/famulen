@@ -11,6 +11,9 @@ writeFileSync(config, `[claude]\nbin = ${JSON.stringify(resolve("e2e/fake-claude
 cpSync(resolve("e2e/services"), join(data, "data", "gateway", "services"), { recursive: true });
 const adroit = join(data, "adroit");
 mkdirSync(adroit);
+// Set here, as the workers that run the tests take it over.
+process.env.E2E_GATES ??= join(data, "gates");
+mkdirSync(process.env.E2E_GATES, { recursive: true });
 
 const api = "127.0.0.1:17790";
 const console = "http://127.0.0.1:13000";
@@ -43,6 +46,7 @@ export default defineConfig({
         // The programs tests stand in for come before any on this machine.
         PATH: `${resolve("e2e/bin")}${delimiter}${process.env.PATH ?? ""}`,
         E2E_ADROIT_DIR: adroit,
+        E2E_GATES: process.env.E2E_GATES,
       },
       reuseExistingServer: false,
       timeout: 60_000,
