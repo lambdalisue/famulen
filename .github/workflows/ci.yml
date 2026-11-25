@@ -129,7 +129,7 @@ jobs:
   # The one check to require of a pull request: a job skipped because of the
   # scope is as good as a passed one, and nothing else is.
   passed:
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [scope, ci, e2e]
     runs-on: ubuntu-slim
     steps:
