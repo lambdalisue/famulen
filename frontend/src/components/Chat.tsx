@@ -53,7 +53,7 @@ function Inbox(props: { aide: string }) {
               が止まったとき、外への呼び出しがまだ終わっていなかった。もう一度やると、送信などが二重になるかもしれない。済んでいたかを確かめてから選ぶ。
             </p>
             <div class="row">
-              <Button variant="go" small onClick={() => held(h.id, true)}>
+              <Button variant="primary" small onClick={() => held(h.id, true)}>
                 続ける
               </Button>
               <Button small onClick={() => held(h.id, false)}>

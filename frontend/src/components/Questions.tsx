@@ -70,7 +70,7 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
         )}
       </For>
       <Show when={!quick() || words()[0]?.trim()}>
-        <Button variant="go" small type="submit" disabled={!replies().every((r) => r)}>
+        <Button variant="primary" small type="submit" disabled={!replies().every((r) => r)}>
           答える
         </Button>
       </Show>

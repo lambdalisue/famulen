@@ -49,7 +49,7 @@ function Finish(props: { task: Rec }) {
   const over = () => isOver(props.task);
   return (
     <div>
-      <Button variant={over() ? undefined : "go"} icon={over() ? icons.arrowBackUp : icons.check} onClick={() => void finish(props.task)}>
+      <Button variant={over() ? undefined : "primary"} icon={over() ? icons.arrowBackUp : icons.check} onClick={() => void finish(props.task)}>
         {over() ? "まだに戻す" : "済にする"}
       </Button>
     </div>

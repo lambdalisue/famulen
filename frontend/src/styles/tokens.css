@@ -1,0 +1,127 @@
+/*
+ * Every color, size and shadow the console is drawn with. A rule takes them
+ * from here and names none of its own, except the colors that mean something
+ * only where they are used (a chart's series). A color names both themes at once
+ * (light, dark) and `color-scheme` picks which one, so the system's choice
+ * needs no script and the owner's only sets data-scheme.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Text. Night ink on light, the brand's cream on dark. */
+  --ink: light-dark(#171A25, #ECE7DC);
+  --ink2: light-dark(#434958, #C6C4BF);
+  --muted: light-dark(#5B6172, #A0A2AC);
+  /* What stands out by being the other way round: a note over everything. */
+  --inverse: light-dark(#1B1F2C, #ECE7DC);
+  --on-inverse: light-dark(#F7F4EC, #171A25);
+
+  /* Ground and surfaces, from the back to the front. */
+  --bg: light-dark(#F3F4F7, #0D0F16);
+  --panel: light-dark(#FAFAFC, #10131B);
+  --sunken: light-dark(#F0F1F5, #11141C);
+  --card: light-dark(#FFFFFF, #171A24);
+  --raised: light-dark(#FFFFFF, #1F2330);
+  --hover: light-dark(#F5F6F9, #1D212D);
+  --pressed: light-dark(#E7E9EF, #282D3B);
+  --shade: light-dark(rgb(13 15 22 / .38), rgb(0 0 0 / .6));
+  /* Laid over whatever is under it. */
+  --veil: light-dark(rgb(13 15 22 / .06), rgb(255 255 255 / .08));
+  /* What is picked out of a few, lying on --pressed. */
+  --thumb: light-dark(#FFFFFF, #3A4052);
+  /* Behind a picture, whatever the theme: pictures come with white grounds. */
+  --picture: #FFFFFF;
+  --dim: rgb(13 15 22 / .9);
+  --dim-hover: rgb(255 255 255 / .16);
+  --on-dim: #F7F4EC;
+
+  /* Lines: around a card, between rows, around a control. */
+  --line: light-dark(#DFE2E9, #2B3040);
+  --line2: light-dark(#ECEEF2, #222634);
+  --control: light-dark(#7C8292, #767D90);
+  --line-strong: light-dark(#C5CAD5, #424960);
+
+  /* What can be pressed, what is picked. */
+  --accent: light-dark(#14665C, #63C2B1);
+  --accent-hover: light-dark(#0E5249, #7BD0C1);
+  --on-accent: light-dark(#FFFFFF, #06231E);
+  --accent-ink: light-dark(#0F5F55, #7BD0C1);
+  --accent-soft: light-dark(#E6F2EF, #12302C);
+  --selection: light-dark(#B2DED5, #245C53);
+  --accent-line: light-dark(#B4D5CE, #265049);
+
+  /* Cream is the secretary's: what they wrote up, and what they ask. */
+  --aide: light-dark(#FFFAF0, #201E1B);
+  --aide-line: light-dark(#EADFC8, #3D382F);
+  --aide-ink: light-dark(#665433, #D9C8A4);
+
+  /* What a state means, never only by color. */
+  --info: light-dark(#1B5BA7, #8DBBF2);
+  --info-soft: light-dark(#E9F1FB, #16263B);
+  --info-line: light-dark(#BFD6F1, #2A4568);
+  --ok: light-dark(#23703C, #86CF9B);
+  --ok-soft: light-dark(#E8F4EB, #152B1E);
+  --ok-line: light-dark(#BDDDC6, #28503A);
+  --warn: light-dark(#85500A, #EBB868);
+  --warn-soft: light-dark(#FDF3E0, #30240F);
+  --warn-line: light-dark(#EBCF9D, #5A431C);
+  --danger: light-dark(#AC2B26, #F2998F);
+  --danger-soft: light-dark(#FCEDEB, #381B1B);
+  --danger-line: light-dark(#F0C6C1, #683130);
+  --danger-solid: light-dark(#B3312B, #F2998F);
+  --on-danger: light-dark(#FFFFFF, #2E0B09);
+
+  /* The workgroup's own, set by the shell: where one is, and never what can be pressed. */
+  --workgroup: var(--accent);
+
+  /* Type: the device's own Japanese face, nothing is downloaded. */
+  --sans: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono", monospace;
+  --heading: var(--sans);
+  --heading-weight: 650;
+  --t-xs: .75rem;
+  --t-sm: .8125rem;
+  --t-base: .875rem;
+  --t-md: .9375rem;
+  --t-lg: 1.0625rem;
+  --t-xl: 1.375rem;
+  --t-2xl: 1.625rem;
+  --lh-ui: 1.5;
+  --lh-prose: 1.8;
+  /* How wide a line of text to be read through may run. */
+  --measure: 44em;
+
+  /* Room: between parts of one thing, between things, between groups. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* Corners, all from one size: a control's. */
+  --r: 8px;
+  --r-sm: calc(var(--r) * .75);
+  --r-lg: calc(var(--r) * 1.5);
+  --r-full: 999px;
+
+  /* Density: a control's height, and the room above and below in a row. */
+  --ctl: 36px;
+  --ctl-sm: 32px;
+  --row-pad: 8px;
+  /* The least a finger is given. */
+  --hit: 44px;
+
+  /* How far above the page: lying on it, floating, over everything. */
+  --shadow-1: 0 1px 2px light-dark(rgb(16 20 36 / .07), rgb(0 0 0 / .4));
+  --shadow-2: 0 2px 4px light-dark(rgb(16 20 36 / .05), rgb(0 0 0 / .3)), 0 8px 20px light-dark(rgb(16 20 36 / .09), rgb(0 0 0 / .4));
+  --shadow-3: 0 4px 8px light-dark(rgb(16 20 36 / .06), rgb(0 0 0 / .3)), 0 20px 48px light-dark(rgb(16 20 36 / .18), rgb(0 0 0 / .55));
+
+  --fast: 120ms ease-out;
+  --slow: 200ms cubic-bezier(.2, .8, .2, 1);
+
+  --chat: 460px;
+  --side: 220px;
+}
+:root[data-scheme="light"] { color-scheme: light; }
+:root[data-scheme="dark"] { color-scheme: dark; }

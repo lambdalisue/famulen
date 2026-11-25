@@ -114,7 +114,7 @@ export function SessionAsk(props: { approval: Approval; disabled: boolean; onAns
         <>
           <Given approval={props.approval} />
           <div class="row">
-            <Button variant="go" small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
+            <Button variant="primary" small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
               承認
             </Button>
             <Button small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
@@ -174,7 +174,7 @@ export default function ApprovalCard(props: { approval: Approval; onAnswer: (ans
       </Show>
       <div class="row">
         <Show when={!asks()}>
-          <Button variant="go" small onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
+          <Button variant="primary" small onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
             {change() ? "許す" : "承認"}
           </Button>
         </Show>

@@ -2,6 +2,7 @@ import { createAsync } from "@solidjs/router";
 import { createEffect, For, type JSX, onCleanup, onMount } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import { Icon, IconButton, Segmented, Tag, TextField } from "~/components/ui";
+import { own } from "~/lib/colors";
 import { say } from "~/lib/act";
 import { workgroupsQuery } from "~/lib/data";
 import * as icons from "~/lib/icons";
@@ -100,7 +101,7 @@ function Workgroups(props: { record: Rec; save: SaveRecord }) {
                 }))
               }
             >
-              <span class="dot" style={{ background: on() ? w.color : "var(--line-strong)" }} />
+              <span class="dot" style={{ background: on() ? own(w.color) : "var(--line-strong)" }} />
               {w.name}
             </button>
           );

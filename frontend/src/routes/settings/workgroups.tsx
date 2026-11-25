@@ -4,6 +4,7 @@ import { For, Show, createSignal } from "solid-js";
 import ZoneSection from "~/components/ZoneSection";
 import { CalendarMode } from "~/gen/famulen/v1/calendar_pb";
 import { type AccountSetting, type Member, MemberKind } from "~/gen/famulen/v1/workgroups_pb";
+import { own } from "~/lib/colors";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { workgroupsQuery } from "~/lib/data";
@@ -78,7 +79,7 @@ function WorkgroupForm(props: { name: string; color: string; submit: string; onS
           <For each={COLORS}>
             {([label, c]) => (
               <RadioGroup.Item value={c} class="swatch" aria-label={label}>
-                <RadioGroup.ItemControl class="swatch-dot" style={{ background: c }} />
+                <RadioGroup.ItemControl class="swatch-dot" style={{ background: own(c), color: own(c) }} />
                 <RadioGroup.ItemText class="swatch-label">{label}</RadioGroup.ItemText>
                 <RadioGroup.ItemHiddenInput />
               </RadioGroup.Item>
@@ -216,7 +217,7 @@ export default function Workgroups() {
                 aria-pressed={c.id === currentId()}
                 onClick={() => setParams({ id: c.id })}
               >
-                <span class="dot" style={{ background: c.color }} />
+                <span class="dot" style={{ background: own(c.color) }} />
                 {c.name}
               </button>
             )}
@@ -232,7 +233,7 @@ export default function Workgroups() {
             const id = () => workgroup()?.id ?? "";
             return (
               <div class="wg-detail">
-                <header class="wg-title" style={{ "--c": workgroup()?.color ?? "var(--ink)" }}>
+                <header class="wg-title" style={{ "--c": own(workgroup()?.color || "var(--ink)") }}>
                   <span class="wg-swatch" />
                   <h2>{workgroup()?.name}</h2>
                   <div class="row wg-title-actions">

@@ -89,7 +89,7 @@ export default function PendingActions(props: { item: MemoryItem; onGone?: () =>
           </Button>
         </Show>
         <Show when={!props.item.answer}>
-          <Button small variant="go" icon={icons.check} disabled={busy()} onClick={() => void answer(true)}>
+          <Button small variant="primary" icon={icons.check} disabled={busy()} onClick={() => void answer(true)}>
             採用
           </Button>
         </Show>

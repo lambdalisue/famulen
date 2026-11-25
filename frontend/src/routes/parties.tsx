@@ -16,7 +16,8 @@ import { byName } from "~/lib/words";
 import { workgroup } from "~/lib/workgroup";
 import { Button, Callout, EmptyState, List, Tag } from "~/components/ui";
 
-const PALETTE = ["#0F6E68", "#B4610E", "#5B5FA8", "#8A5A7A", "#3B3A36"];
+/** The hues of what stands for a picture. */
+const HUES = [170, 30, 236, 318, 222];
 
 const partyMemoriesQuery = query(async (id: string) => (await api.memory.listPartyMemories({ id })).items, "partyMemories");
 
@@ -59,7 +60,7 @@ function Avatar(props: { party: Rec; index: number }) {
   return (
     <span
       class={`avatar${valueOf(props.party, "Kind") === "person" || !valueOf(props.party, "Kind") ? "" : " org"}`}
-      style={{ background: PALETTE[props.index % PALETTE.length] }}
+      style={{ "--h": HUES[props.index % HUES.length] }}
     >
       <Show when={shown()} fallback={Array.from(props.party.title)[0] ?? "?"}>
         <img
@@ -136,7 +137,7 @@ function Guessed(props: { party: Rec }) {
             <span class="grow">
               {a.text} の <b class="mono">{valueOf(a, "Handle")}</b> は同じ相手か（{valueOf(a, "How")}）
             </span>
-            <Button variant="go" small onClick={() => act(() => api.records.answerAccount({ account: id(), same: true }), "同じ人にした")}>
+            <Button variant="primary" small onClick={() => act(() => api.records.answerAccount({ account: id(), same: true }), "同じ人にした")}>
               同じ人
             </Button>
             <Button small onClick={() => act(() => api.records.answerAccount({ account: id(), same: false }), "外した")}>

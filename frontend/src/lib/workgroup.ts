@@ -31,11 +31,3 @@ export const COLORS: [string, string][] = [
   ["紫", "#6250d6"],
   ["緑", "#008300"],
 ];
-
-/** A theme color mixed into a pale background. */
-export function tint(color: string): string {
-  const hex = color.replace("#", "");
-  const ch = (i: number) => Number.parseInt(hex.slice(i, i + 2) || "ff", 16);
-  const mix = (c: number) => Math.round((c * 6) / 100 + (255 * 94) / 100);
-  return `#${[0, 2, 4].map((i) => mix(ch(i)).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
-}

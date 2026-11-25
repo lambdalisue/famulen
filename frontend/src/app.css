@@ -1,3 +1,4 @@
+@import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/ui.css";
 @import "./styles/shell.css";
@@ -11,85 +12,6 @@
 @import "./styles/usage.css";
 @import "./styles/log.css";
 @import "./styles/phone.css";
-
-/*
- * Every color, size and width the console is drawn with. A rule takes them
- * from here and names none of its own, except the colors that mean something
- * only where they are used (a chart's series, a calendar's own color).
- */
-:root {
-  /* Ink on paper. */
-  --ink: #1B1B19;
-  --ink2: #3B3A36;
-  --muted: #5F5E58;
-  --on-ink: #F7F6F2;
-  --bg: #F4F3EE;
-  --panel: #FBFAF7;
-  --card: #FFFFFF;
-  --soft: #F1F0EB;
-  --pressed: #E8E6DE;
-  --shade: rgba(27, 27, 25, .35);
-
-  /* Lines: around a card, between rows, around a control. */
-  --line: #E1DFD6;
-  --line2: #EEECE5;
-  --control: #8F8C82;
-  --line-strong: #CFCCC2;
-
-  /* What agrees, what is the secretary's, what is picked. */
-  --accent: #0F6E68;
-  --accent-ink: #0B5650;
-  --accent-soft: #EEF6F5;
-  --accent-line: #BFDCD7;
-
-  --warn: #7A4108;
-  --warn-soft: #FDF6EC;
-  --warn-line: #E8C99E;
-  --danger: #8F2D14;
-  --danger-strong: #B42318;
-  --danger-soft: #FBEDE9;
-  --danger-line: #E8C2B8;
-  --label: #5B4A1E;
-  --label-soft: #F3EFE3;
-  --label-line: #E6DCC0;
-  --busy: #2a78d6;
-
-  /* The workgroup's own, set by the shell. */
-  --workgroup: #0F6E68;
-  --wg-tint: #FBFAF7;
-
-  /* Type. */
-  --sans: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
-  --t-xs: 11px;
-  --t-sm: 12px;
-  --t-base: 13px;
-  --t-md: 14px;
-  --t-lg: 16px;
-  --t-xl: 20px;
-  --t-2xl: 26px;
-  /* How wide a line of text to be read through may run. */
-  --measure: 72ch;
-
-  /* Room: between parts of one thing, between things, between groups. */
-  --s1: 4px;
-  --s2: 8px;
-  --s3: 12px;
-  --s4: 16px;
-  --s5: 24px;
-  --s6: 32px;
-
-  --r-sm: 6px;
-  --r: 8px;
-  --r-lg: 12px;
-  --r-full: 999px;
-  --shadow: 0 8px 24px rgba(27, 27, 25, .08);
-  --shadow-lg: 0 20px 50px rgba(27, 27, 25, .2);
-  --ring: 0 0 0 2px var(--card), 0 0 0 4px var(--accent);
-
-  --chat: 460px;
-  --side: 220px;
-}
 
 /*
  * Where the layout changes: a phone has one column and its controls at the
