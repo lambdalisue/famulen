@@ -171,6 +171,8 @@ test("a file that cannot be taken says why, and nothing goes without it until it
   await page.getByRole("button", { name: "送る" }).click();
   await expect(page.locator("#composer")).toContainText("届いていないファイルがある");
   await page.getByRole("button", { name: "e2e.zip を外す" }).click();
+  // The console sends nothing while a file is still on its way.
+  await expect(page.getByTestId("draft")).toHaveText(["e2e-空.png"]);
   await page.getByRole("button", { name: "送る" }).click();
   await expect(page.getByTestId("message").last().getByRole("img", { name: "e2e-空.png" })).toBeVisible();
 });
