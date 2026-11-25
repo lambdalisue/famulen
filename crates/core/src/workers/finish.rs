@@ -155,14 +155,29 @@ fn repository_name(address: &str) -> Option<String> {
 
 /// What a session is asked: the request, then how it is finished.
 pub(super) fn prompt(order: &Order) -> String {
+    let request = with_vms(order);
     if order.finish.is_empty() {
+        return request;
+    }
+    format!(
+        "{request}\n\n---\n\n\
+         # How this work is finished\n\n\
+         The owner's standing steps, for every piece of work that changes code here. Take them in order once the work above is done, all of them, by yourself: the owner has decided on them, so do not stop in between to ask whether to go on. They stand over what the request says about finishing (a commit, a pull request, whether to merge), unless it says the owner asked otherwise for this work. Put right what fails on the way. Leave out what a change of nothing has no use for. Your turn ends when they are all done, or when one cannot be: then say which, and why. Say in your last answer how each of them went.\n\n{}",
+        order.finish
+    )
+}
+
+/// The request, and how VMs are named so that they are known to be this
+/// work's when it is cleared away.
+fn with_vms(order: &Order) -> String {
+    if !order.worktree {
         return order.request.clone();
     }
     format!(
         "{}\n\n---\n\n\
-         # How this work is finished\n\n\
-         The owner's standing steps, for every piece of work that changes code here. Take them in order once the work above is done, all of them, by yourself: the owner has decided on them, so do not stop in between to ask whether to go on. They stand over what the request says about finishing (a commit, a pull request, whether to merge), unless it says the owner asked otherwise for this work. Put right what fails on the way. Leave out what a change of nothing has no use for. Your turn ends when they are all done, or when one cannot be: then say which, and why. Say in your last answer how each of them went.\n\n{}",
-        order.request, order.finish
+         Name every disposable vitro VM you start for this work `{code}`, or `{code}-` and a word, and give no other VM such a name: once the work is over and this session is closed, Famulen destroys the VMs so named and removes this worktree.",
+        order.request,
+        code = order.code
     )
 }
 
@@ -291,6 +306,18 @@ mod tests {
         order.finish = "1. Merge it.".into();
         let prompt = prompt(&order);
         assert!(prompt.starts_with("Do it.\n"), "{prompt}");
+        assert!(prompt.ends_with("\n1. Merge it."), "{prompt}");
+    }
+
+    #[test]
+    fn a_session_in_a_worktree_is_told_how_to_name_its_vms() {
+        let mut order = order(&at("/src"));
+        order.code = "task-abc123".into();
+        order.worktree = true;
+        assert!(prompt(&order).contains("`task-abc123-`"));
+        order.finish = "1. Merge it.".into();
+        let prompt = prompt(&order);
+        assert!(prompt.contains("`task-abc123-`"), "{prompt}");
         assert!(prompt.ends_with("\n1. Merge it."), "{prompt}");
     }
 

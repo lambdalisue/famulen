@@ -519,6 +519,7 @@ impl Pool {
             }
         }
         self.app.workers.runs.ended(run.id)?;
+        self.app.workers.closed.notify_one();
         self.app.journal.record(
             "worker",
             format!(

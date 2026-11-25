@@ -13,6 +13,7 @@ mod queue;
 mod runners;
 mod runs;
 mod sight;
+mod tidy;
 
 pub use dispatch::*;
 pub use finish::*;
@@ -22,6 +23,7 @@ pub use queue::*;
 pub use runners::{Began, Looked, Runners};
 pub use runs::*;
 pub use sight::*;
+pub use tidy::{Fate, How, Kind, Left, keep_tidy, tidy};
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -94,6 +96,10 @@ pub struct Workers {
     poke: Arc<Notify>,
     /// Adroit sessions something was told of, to be looked at at once.
     heard: Arc<Mutex<HashSet<String>>>,
+    /// Told when a session may have been closed.
+    closed: Arc<Notify>,
+    /// Held while what delegated work left is cleared away.
+    tidying: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Workers {
@@ -105,6 +111,8 @@ impl Workers {
             sealed,
             poke: Arc::default(),
             heard: Arc::default(),
+            closed: Arc::default(),
+            tidying: Arc::default(),
         }
     }
 
@@ -127,6 +135,9 @@ impl Workers {
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(session.to_owned());
             self.poke();
+        }
+        if run == Some(false) {
+            self.closed.notify_one();
         }
         Ok(run.is_some())
     }

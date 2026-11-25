@@ -204,6 +204,29 @@ message WorkerSettings {
   repeated WorkerFinish bundled_finishes = 4;
 }
 
+// Something delegated work left on this machine.
+message LeftBehind {
+  // worktree or vm.
+  string kind = 1;
+  // The worktree's path, or the VM's name.
+  string name = 2;
+  // The task's id, code and title.
+  string task = 3;
+  string code = 4;
+  string title = 5;
+  // removed, removable (it would be removed), in_use (or it may be again) or
+  // kept (its work is over, and yet it was not removed).
+  string fate = 6;
+  // Why it is in use or kept.
+  string why = 7;
+  // What a worktree takes on the disk; 0 when not known.
+  int64 bytes = 8;
+}
+
+message LeftBehindList {
+  repeated LeftBehind left = 1;
+}
+
 // Delegated tasks: work put on the task list that a pool of workers picks up.
 service WorkerService {
   // Delegate work to another agent: a task is added, and a worker picks it up
@@ -231,6 +254,15 @@ service WorkerService {
   }
   // Put what a run's session waits for to the owner anew, as a request.
   rpc AskRunAgain(AskRunAgainRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // What tidying would remove of what delegated work left, and what it would
+  // not. Nothing is removed.
+  rpc PreviewTidying(Empty) returns (LeftBehindList) {
+    option (console_only) = true;
+  }
+  // Remove what delegated work left and is of no more use.
+  rpc TidyUp(Empty) returns (LeftBehindList) {
     option (console_only) = true;
   }
   rpc GetWorkerSettings(Empty) returns (WorkerSettings) {
