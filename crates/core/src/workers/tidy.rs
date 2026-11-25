@@ -479,38 +479,15 @@ impl<'a> Tidy<'a> {
 
     /// Everything `path` stands on and holds is in the trunk.
     async fn holds_nothing(&self, checkout: &Checkout, path: &Path) -> Result<(), Fate> {
+        // What is in the files is taken into `@` first, so that it is among
+        // the changes asked about below.
         let status = self
             .jj(path, &["status"])
             .await
             .map_err(|error| unsure("未保存の変更", error))?;
-        if !is_clean(&status) {
+        let Some(held) = all_taken_in(&status) else {
             return Err(kept("未保存の変更がある"));
-        }
-        // A second judge, which reads the files in a way of its own.
-        if path.join(".git").symlink_metadata().is_ok() {
-            let git = self
-                .ground
-                .run(
-                    path,
-                    "git",
-                    &[
-                        "--no-optional-locks",
-                        "status",
-                        "--porcelain",
-                        "--untracked-files=all",
-                        "--ignore-submodules=none",
-                    ],
-                )
-                .await
-                .and_then(|ran| {
-                    anyhow::ensure!(ran.ok, "git status: {}", ran.why());
-                    Ok(ran)
-                })
-                .map_err(|error| unsure("未保存の変更", error))?;
-            if !git.out.trim().is_empty() {
-                return Err(kept("未保存の変更がある"));
-            }
-        }
+        };
         let trunk = match &checkout.trunk {
             Some(Ok(trunk)) => trunk,
             Some(Err(error)) => return Err(unsure("リモートの本流", error)),
@@ -520,6 +497,7 @@ impl<'a> Tidy<'a> {
             .jj(
                 path,
                 &[
+                    "--ignore-working-copy",
                     "log",
                     "--no-graph",
                     "-r",
@@ -531,14 +509,67 @@ impl<'a> Tidy<'a> {
             .await
             .map_err(|error| unsure("本流に入っていない変更", error))?;
         let apart: Vec<&str> = apart.out.split_whitespace().collect();
-        if apart.is_empty() {
-            return Ok(());
+        if !apart.is_empty() && held {
+            return Err(kept("未保存の変更がある"));
         }
-        Err(kept(format!(
-            "本流（{}）に入っていない変更がある: {}",
-            trunk.replace('"', ""),
-            apart.into_iter().take(5).collect::<Vec<_>>().join("、")
-        )))
+        if !apart.is_empty() {
+            return Err(kept(format!(
+                "本流（{}）に入っていない変更がある: {}",
+                trunk.replace('"', ""),
+                apart.into_iter().take(5).collect::<Vec<_>>().join("、")
+            )));
+        }
+        self.agrees_with_git(path)
+            .await
+            .map_err(|error| unsure("未保存の変更", error))?
+            .then_some(())
+            .ok_or_else(|| kept("未保存の変更がある"))
+    }
+
+    /// Whether Git, which reads the files in a way of its own, finds nothing
+    /// in `path` that `@` does not hold. Its own head is left out: it may stand
+    /// before `@`, or have been left behind.
+    async fn agrees_with_git(&self, path: &Path) -> anyhow::Result<bool> {
+        if path.join(".git").symlink_metadata().is_err() {
+            return Ok(true);
+        }
+        let args = [
+            "--ignore-working-copy",
+            "log",
+            "--no-graph",
+            "-r",
+            "@",
+            "-T",
+            "commit_id",
+        ];
+        let commit = self.jj(path, &args).await?.out;
+        let commit = commit.trim();
+        anyhow::ensure!(
+            commit.len() >= 40 && commit.chars().all(|c| c.is_ascii_hexdigit()),
+            "no commit is known by {commit:?}"
+        );
+        let changed = [
+            "--no-optional-locks",
+            "diff",
+            "--name-only",
+            "--no-ext-diff",
+            "--ignore-submodules=none",
+            commit,
+        ];
+        let new = [
+            "--no-optional-locks",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+        ];
+        for args in [&changed[..], &new[..]] {
+            let git = self.ground.run(path, "git", args).await?;
+            anyhow::ensure!(git.ok, "git {}: {}", args.join(" "), git.why());
+            if !git.out.trim().is_empty() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Fetch the trunk, and nothing else: a branch deleted on the remote would
@@ -849,14 +880,21 @@ fn counts(_meta: &std::fs::Metadata, _counted: &mut HashSet<(u64, u64)>) -> bool
     true
 }
 
-/// Whether `jj status` told of a working copy that holds nothing of its own.
-fn is_clean(status: &Ran) -> bool {
-    status
-        .out
-        .lines()
-        .any(|l| l == "The working copy has no changes.")
-        && !status.out.contains("Untracked paths")
-        && !status.err.contains("Refused to snapshot")
+/// Whether `@` holds a change of its own, when `jj status` told that all there
+/// is in the files was taken into it.
+fn all_taken_in(status: &Ran) -> Option<bool> {
+    let line = |text: &str| status.out.lines().any(|l| l == text);
+    if line("Untracked paths:") || status.err.contains("Refused to snapshot") {
+        return None;
+    }
+    match (
+        line("The working copy has no changes."),
+        line("Working copy changes:"),
+    ) {
+        (true, false) => Some(false),
+        (false, true) => Some(true),
+        _ => None,
+    }
 }
 
 /// The branch and remote that are the trunk, of those that name it.
