@@ -16,11 +16,47 @@ permissions:
   contents: read
 
 jobs:
+  # What a pull request has to be checked for. Only prose and the console are
+  # told apart; whatever else it changes, and anything on main, is checked in
+  # full.
+  scope:
+    runs-on: ubuntu-slim
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      os: ${{ steps.scope.outputs.os }}
+    steps:
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILES: ${{ github.event_name == 'pull_request' && format('repos/{0}/pulls/{1}/files', github.repository, github.event.number) || '' }}
+        run: |
+          code=true os='["ubuntu-latest","macos-latest"]'
+          # A list that could not be read, or was cut off, leaves the full check.
+          if [ -n "$FILES" ] \
+            && files=$(gh api --paginate "$FILES?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)') \
+            && [ -n "$files" ] && [ "$(wc -l <<< "$files")" -lt 3000 ]; then
+            # No test reads the prose.
+            rest=$(grep -vE '^(docs/|[^/]+\.md$)' <<< "$files" || true)
+            if [ -z "$rest" ]; then
+              code=false
+            # The console is built and driven on Linux; it has nothing the
+            # Rust tests read.
+            elif ! grep -qv '^frontend/' <<< "$rest"; then
+              os='["ubuntu-latest"]'
+            fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+          echo "os=$os" | tee -a "$GITHUB_OUTPUT"
+
   ci:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.scope.outputs.os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -56,6 +92,8 @@ jobs:
   # runners rather than run side by side on one: each has a backend and a
   # processor to itself, as locally.
   e2e:
+    needs: scope
+    if: needs.scope.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +119,22 @@ jobs:
       - run: just e2e --shard=${{ matrix.shard }}
         env:
           CI: "1"
+
+  # The one check to require of a pull request: a job skipped because of the
+  # scope is as good as a passed one, and nothing else is.
+  passed:
+    if: always()
+    needs: [scope, ci, e2e]
+    runs-on: ubuntu-slim
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e '
+            .scope.result == "success"
+            and ((if .scope.outputs.code == "true" then "success" else "skipped" end) as $due
+              | .ci.result == $due and .e2e.result == $due)
+          ' <<< "$RESULTS"
 
   # The package `nix profile install github:lambdalisue/famulen` installs,
   # built on each system the flake lists from the archive GitHub serves — the
