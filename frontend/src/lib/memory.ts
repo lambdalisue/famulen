@@ -28,11 +28,6 @@ export function visible(item: MemoryItem, workgroup: string): boolean {
   return workgroup === "all" || marked.length === 0 || marked.includes(workgroup);
 }
 
-/** Whether an episodic note is still to be read by a dream. */
-export function waitsForDream(item: MemoryItem): boolean {
-  return item.attrs.state === "waiting" && item.attrs.dreamt === undefined;
-}
-
 /** Where a wiki link to a memory file opens. */
 export function memoryHref(target: string): string | undefined {
   const m = /^(?:\.?\/)?memory\/(.+?)(?:\.md)?(?:#.*)?$/.exec(target);

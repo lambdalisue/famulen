@@ -34,7 +34,7 @@ impl Src {
     }
 }
 
-/// What became of an episodic memory.
+/// What became of a note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EpisodeState {
     /// It waits to be consolidated.
@@ -159,7 +159,7 @@ impl Entry {
         line
     }
 
-    /// The text before the attributes, including an episodic item's time.
+    /// The text before the attributes, including a note's time.
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -250,7 +250,7 @@ impl Entry {
         self.list("workgroup")
     }
 
-    /// An episodic item's leading `HH:MM`.
+    /// A note's leading `HH:MM`.
     pub fn time(&self) -> Option<NaiveTime> {
         let head = self.text.get(..5)?;
         let after = &self.text[5..];

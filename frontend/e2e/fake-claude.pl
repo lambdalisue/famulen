@@ -26,7 +26,7 @@ if (grep { $_ eq "--json-schema" } @ARGV) {
         print qq({"type":"result","subtype":"success","is_error":false,"result":"","structured_output":$answer,"usage":{"input_tokens":1,"output_tokens":1}}\n);
         exit 0;
     }
-    exit 0 unless $prompt =~ /^Episodic notes:/;
+    exit 0 unless $prompt =~ /^Notes in the inbox:/;
     my @edits = map { qq({"op":"forget","id":"$_","reason":"e2eで済んだ"}) } ($prompt =~ /\{id: (e2e-done[\w-]*)/g);
     my $plan = '{"edits":[' . join(",", @edits) . '],"settled":[]}';
     print qq({"type":"result","subtype":"success","is_error":false,"result":"","structured_output":$plan,"usage":{"input_tokens":1,"output_tokens":1}}\n);

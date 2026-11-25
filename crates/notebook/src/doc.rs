@@ -142,6 +142,17 @@ impl Doc {
         Some(f(entry))
     }
 
+    /// Keep only the items `keep` says to, and every other line. How many
+    /// items went.
+    pub fn retain(&mut self, keep: impl Fn(&Entry) -> bool) -> usize {
+        let before = self.lines.len();
+        self.lines.retain(|line| match line {
+            Line::Entry(entry) => keep(entry),
+            Line::Other(_) => true,
+        });
+        before - self.lines.len()
+    }
+
     pub fn remove(&mut self, id: &str) -> Option<Entry> {
         let at = self
             .lines

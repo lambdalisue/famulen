@@ -137,7 +137,7 @@ pub enum Command {
         #[arg(long, default_value = "owner")]
         who: String,
     },
-    /// Write down a memory: in core, pending or the day's episodic memory.
+    /// Write down a memory: in core, pending or the inbox of notes (episodic).
     Remember {
         /// core, pending or episodic.
         layer: String,

@@ -15,19 +15,18 @@ message MemoryItem {
   map<string, string> attrs = 4;
   // The file it is in, relative to the memory directory.
   string file = 5;
-  // An episodic item's time of day (HH:MM), when it was written down; the
+  // A note's time of day (HH:MM), when it was written down; the
   // text then leaves it out.
   string time = 6;
 }
 
 // A memory layer and what it holds now.
 message MemoryLayer {
-  // dream, pending, episodic, working, core, long, forgotten.
+  // dream, pending, episodic (the inbox of notes), working, core, long, forgotten.
   string id = 1;
   string label = 2;
   string help = 3;
-  // How many items or files it holds, in words; of episodic, only the notes
-  // waiting for the dream.
+  // How many items or files it holds, in words.
   string count = 4;
 }
 
@@ -37,7 +36,7 @@ message ListLayersResponse {
 
 message GetLayerRequest {
   string layer = 1;
-  // episodic: a date (YYYY-MM-DD); forgotten: a month (YYYY-MM).
+  // forgotten: a month (YYYY-MM).
   string at = 2;
 }
 
@@ -129,7 +128,7 @@ message Dream {
   // Memos that became tasks, and records marked as possibly out of date.
   int32 task_made = 12;
   int32 doubted = 13;
-  // Episodic notes nothing was kept of.
+  // Notes nothing was kept of.
   int32 discarded = 14;
 }
 
@@ -209,8 +208,8 @@ service MemoryService {
   rpc WriteFile(WriteFileRequest) returns (FileContent) {
     option (console_only) = true;
   }
-  // Write down a noticing in today's episodic memory: freely, roughly and often.
-  // The nightly dream keeps what is worth it and throws the rest away. What the
+  // Write down a noticing in the inbox: freely, roughly and often. The nightly
+  // dream files what is worth it and takes the note away. What the
   // owner said is handed to every new conversation until then.
   rpc Remember(RememberRequest) returns (MemoryItem);
   // Save where a piece of work stands, so it survives the conversation.

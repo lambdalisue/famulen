@@ -6,7 +6,7 @@ use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
 
 use tokio::sync::broadcast::error::RecvError;
 
-use super::dream::{Dreamt, dream_and_record};
+use super::dream::{Dreamt, dream_and_record, sweep_notes};
 use super::keep;
 use super::receive::sync_receivers;
 use super::watch::poll_lookout;
@@ -68,6 +68,7 @@ pub(super) async fn read_purchases(app: App) {
 pub(super) async fn chores(app: App) {
     let mut tick = tokio::time::interval(CHORE_TICK);
     let mut last_calendar = 0_i64;
+    sweep_notes(&app);
     loop {
         tick.tick().await;
         let tz = app.tz();

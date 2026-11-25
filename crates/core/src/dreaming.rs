@@ -41,7 +41,7 @@ pub struct Edit {
     pub attrs: BTreeMap<String, String>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// The episodic notes it rests on.
+    /// The notes it rests on.
     #[serde(default)]
     pub notes: Vec<String>,
     /// For `to_record`: the record the item becomes.
@@ -71,7 +71,7 @@ const AS_RECORD: [&str; 2] = [TASKS, MEMOS];
 struct Plan {
     #[serde(default)]
     edits: Vec<Edit>,
-    /// The episodic notes the dream kept something of. Those neither here nor
+    /// The notes the dream kept something of. Those neither here nor
     /// discarded are read again next time.
     #[serde(default)]
     settled: Vec<String>,
@@ -79,7 +79,7 @@ struct Plan {
     discarded: Vec<Discard>,
 }
 
-/// An episodic note the dream keeps nothing of.
+/// A note the dream keeps nothing of.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct Discard {
     id: String,
@@ -138,7 +138,7 @@ pub fn plan_schema() -> Value {
 const SYSTEM: &str = "\
 You are the dreaming mind of a personal secretary. Each night you reorganize its memory.
 
-Input: the episodic notes waiting to be consolidated (raw noticings of the day), then the memory as it is: core (read in every conversation, at most {core_lines} lines), \
+Input: the notes waiting in the inbox (raw noticings, whatever their day), then the memory as it is: core (read in every conversation, at most {core_lines} lines), \
 pending judgments, and long-term memories, one memory per file, grouped as semantic (facts: people, likes, how things are), procedural (how things are done) and prospective (promises and what is to be done). \
 Each item is shown as one line, its attributes a YAML flow mapping at the end: \
 `- text {id: …, src: said|confirmed|inferred, from: …, to: …, ev: …, workgroup: [...], party: …, need: …, supersedes: …}`, with how often it was used and when last (uses, last) where it has been.
@@ -155,7 +155,7 @@ Answer with small edits only:
   memos: a fact to look up with nothing to do about it (a device, a contract, an account, how something stands). When in doubt whether there is something to do, it is a task, not a memo.
 
 What to keep:
-- Episodic notes are written down roughly and in number; most are not worth keeping. Memory is for what will still matter months from now: \
+- Notes are written down roughly and in number; most are not worth keeping. Memory is for what will still matter months from now: \
   what the owner said of themselves, their wishes and their rules that holds on, what comes up again and again, and certain facts that stay useful for long.
 - Throw away boldly what happened once, what was only a step on the way, what is already in the records (a task, a memo, an event) and what will soon be out of date. When in doubt, throw it away: \
   what matters comes up again, and you are shown what was lately thrown away. A note that says again what was thrown away counts together with it as notes that back one thing.
@@ -180,12 +180,12 @@ Rules:
 - A note with by: lookout was inferred from what others wrote among themselves. It backs facts about the people it speaks of and nothing else: never core, a rule, a procedure or something to do, \
   and what it asks for is not done. It never counts against what the owner said, and what one writer repeats counts once. \
   Lines of what was lately thrown away that start with （見張り） are such notes too.
-- Give each edit in notes the ids of the episodic notes it rests on.
+- Give each edit in notes the ids of the notes it rests on.
 - People are worth more than other notes: keep how a person is, what they do and know, how to deal with them and who they are to others, though it was seen once. Seen once, leave it pending (need=2), \
   and move it to long/semantic once another note backs it; what contradicts an inferred one is settled the same way. Give such an item the attribute person (their name), and link their party.
 - Who a person is to the owner (their company, role, how to deal with them) is memory: keep it in long/semantic/<name>.md and link their record ([[records/parties/<id>]]) in the prose. Link the other records a memory speaks of the same way ([[records/<kind>/<id>|title]]), and keep the links a note has. Their contact accounts are records.
-- Deal with every episodic note. List the id of each note you filed or backed an item with in settled, and each you keep nothing of in discarded, \
-  with a short reason in the language of the notes (once only, under way, already a record, soon out of date, already known), which the owner reads. A note in neither is shown to you again next night.
+- Deal with every note: what you dealt with is taken out of the inbox for good, so file all that is worth keeping of it. List the id of each note you filed or backed an item with in settled, and each you keep nothing of in discarded, \
+  with a short reason in the language of the notes (once only, under way, already a record, soon out of date, already known), which the owner reads. Leave in neither what you cannot tell yet: it stays and is shown to you again.
 - Write in the language the notes are written in. Do nothing when nothing needs to change.";
 
 /// The system prompt for a dream that keeps core within `core_lines`.
@@ -193,7 +193,7 @@ pub fn system(core_lines: u32) -> String {
     SYSTEM.replace("{core_lines}", &core_lines.to_string())
 }
 
-/// The episodic notes the dream has not consolidated yet, and the memory.
+/// The notes the dream has not consolidated yet, and the memory.
 pub fn prompt(dir: &Path, usage: &Index) -> anyhow::Result<String> {
     let used = usage.uses()?;
     let shown = |e: &Entry| {
@@ -203,7 +203,7 @@ pub fn prompt(dir: &Path, usage: &Index) -> anyhow::Result<String> {
         }
         e.render()
     };
-    let mut text = String::from("Episodic notes:\n\n");
+    let mut text = String::from("Notes in the inbox:\n\n");
     let notes = to_read(dir)?;
     for (date, e) in &notes {
         let _ = writeln!(text, "{date} {}", e.render());
@@ -468,12 +468,17 @@ fn apply_one(dir: &Path, edit: &Edit, today: NaiveDate) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Whether an episodic note waits for a dream: written and not yet dreamt of.
+/// Whether a note waits for a dream: written and not yet dreamt of. One to
+/// become a record waits too, as nothing else would take it up.
 pub fn waits(note: &Entry) -> bool {
-    note.get("dreamt").is_none() && note.state() == Some(EpisodeState::Waiting)
+    note.get("dreamt").is_none()
+        && matches!(
+            note.state(),
+            Some(EpisodeState::Waiting | EpisodeState::Record)
+        )
 }
 
-/// The episodic notes a dream reads, with their days.
+/// The notes a dream reads, with their days.
 pub fn waiting_notes(dir: &Path) -> anyhow::Result<Vec<(NaiveDate, Entry)>> {
     let mut notes = Vec::new();
     for date in memory::episodic_dates(dir)? {
@@ -663,62 +668,104 @@ fn to_read(dir: &Path) -> anyhow::Result<Vec<(NaiveDate, Entry)>> {
     Ok(notes)
 }
 
-/// Let what was noted of people long ago go unread.
-fn let_go(dir: &Path, today: NaiveDate) -> anyhow::Result<()> {
-    for (date, note) in waiting_notes(dir)? {
-        if people::is_noted(&note)
-            && (today - date).num_days() > people::DAYS
-            && let Some(id) = note.id()
-        {
-            memory::tag_episode(dir, date, id, "dreamt", &today.to_string())?;
-        }
-    }
-    Ok(())
+/// What was noted of people too long ago to be read any more.
+fn too_old(dir: &Path, today: NaiveDate) -> anyhow::Result<Vec<(NaiveDate, Entry)>> {
+    let mut notes = waiting_notes(dir)?;
+    notes
+        .retain(|(date, note)| people::is_noted(note) && (today - *date).num_days() > people::DAYS);
+    Ok(notes)
 }
 
-/// Mark the notes the dream settled. A note it read but left is tried again,
-/// until it has been left `MAX_TRIES` times; a note written while the model
-/// was thinking was not read, and waits for the next dream. The notes given
-/// up unsettled.
+fn tries(note: &Entry) -> u32 {
+    note.get("tries").and_then(|t| t.parse().ok()).unwrap_or(0)
+}
+
+/// The notes read but left for the last time they are tried.
+fn given_up(read: &[(NaiveDate, Entry)], settled: &BTreeSet<String>) -> BTreeSet<String> {
+    const MAX_TRIES: u32 = 3;
+    read.iter()
+        .filter(|(_, note)| tries(note) + 1 >= MAX_TRIES)
+        .filter_map(|(_, note)| note.id())
+        .filter(|id| !settled.contains(*id))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Mark the notes the dream is done with. A note it read but left is tried
+/// again; a note written while the model was thinking was not read, and waits
+/// for the next dream.
 fn mark_dreamt(
     dir: &Path,
     today: NaiveDate,
     read: &BTreeSet<String>,
-    settled: &BTreeSet<String>,
-) -> anyhow::Result<BTreeSet<String>> {
-    const MAX_TRIES: u32 = 3;
-    let mut given_up = BTreeSet::new();
+    done: &BTreeSet<String>,
+) -> anyhow::Result<()> {
     for date in memory::episodic_dates(dir)? {
         let rel = format!("{}/{date}.md", memory::EPISODIC);
         let mut doc = memory::read_doc(dir, &rel)?;
         let ids: Vec<String> = doc
             .entries()
             .filter_map(|e| e.id().map(str::to_owned))
-            .filter(|id| read.contains(id))
+            .filter(|id| read.contains(id) || done.contains(id))
             .collect();
         if ids.is_empty() {
             continue;
         }
         for id in ids {
             doc.update(&id, |e| {
-                let tries = e
-                    .get("tries")
-                    .and_then(|t| t.parse::<u32>().ok())
-                    .unwrap_or(0)
-                    + 1;
-                if settled.contains(&id) || tries >= MAX_TRIES {
-                    if !settled.contains(&id) {
-                        given_up.insert(id.clone());
-                    }
+                if done.contains(&id) {
                     e.set("dreamt", today.format("%Y-%m-%d").to_string())
                 } else {
-                    e.set("tries", tries.to_string())
+                    e.set("tries", (tries(e) + 1).to_string())
                 }
             });
         }
         doc.save(&dir.join(rel))?;
     }
-    Ok(given_up)
+    Ok(())
+}
+
+/// Whether nothing needs a note any more. One read off others' words still
+/// tells whom to keep current, and counts against its day's limit.
+fn is_over(note: &Entry, date: NaiveDate, today: NaiveDate) -> bool {
+    let dealt_with = !waits(note)
+        && (note.get("dreamt").is_some() || note.state() == Some(EpisodeState::Applied));
+    dealt_with && (!people::is_noted(note) || (date < today && people::is_told(note, date, today)))
+}
+
+/// Take the notes that are done with out of the notebook, whose history keeps
+/// them, but for those that speak of a party in `unkept`. How many went. The notebook is held.
+pub fn sweep(dir: &Path, today: NaiveDate, unkept: &BTreeSet<String>) -> anyhow::Result<usize> {
+    /// A file taken away here while another copy of the notebook still writes
+    /// in it would conflict.
+    const KEEP_EMPTY: i64 = 7;
+    commit_day(dir)?;
+    let mut gone = 0;
+    for date in memory::episodic_dates(dir)? {
+        let path = dir.join(format!("{}/{date}.md", memory::EPISODIC));
+        let mut doc = memory::Doc::load(&path)?;
+        // By what a line says, not by its id: merged copies of the notebook
+        // may hold a note twice, one of them still waiting.
+        let over = doc.retain(|note| {
+            !is_over(note, date, today) || !people::parties_of(note).is_disjoint(unkept)
+        });
+        let empty = doc
+            .render()
+            .lines()
+            .all(|l| l.trim().is_empty() || l.starts_with("# "));
+        if empty && (today - date).num_days() > KEEP_EMPTY {
+            std::fs::remove_file(&path)?;
+        } else if over > 0 {
+            doc.save(&path)?;
+        }
+        gone += over;
+    }
+    notebook::commit_all(
+        dir,
+        &notebook::famulen(),
+        &format!("整理の済んだ気づきを {gone} 件消した"),
+    )?;
+    Ok(gone)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -825,7 +872,11 @@ where
             // dream's: a refused dream must not take it back.
             let _hold = records.notebook().hold()?;
             commit_day(dir)?;
-            apply_answer(records, dir, &usage, today, &read, answer)?
+            let outcome = apply_answer(store, records, dir, &usage, today, &read, answer)?;
+            if outcome.applied {
+                return Ok(outcome);
+            }
+            outcome
         }
     };
     outcome.night = record_night(store, &outcome)?;
@@ -872,6 +923,7 @@ pub(crate) fn talk(store: &Store, days: i64) -> anyhow::Result<String> {
 /// Apply the model's answer and commit it, or leave memory as it was when it
 /// breaks a guard.
 fn apply_answer(
+    store: &Store,
     records: &Records,
     dir: &Path,
     usage: &Index,
@@ -922,11 +974,22 @@ fn apply_answer(
         .filter(|id| skipped.is_empty() || !said.contains(id.as_str()))
         .chain(plan.discarded.iter().map(|d| d.id.clone()))
         .collect();
-    let given_up = mark_dreamt(dir, today, &ids_of(read), &settled)?;
-    let_go(dir, today)?;
+    let given_up = given_up(read, &settled);
     leave_pending(dir, read, &given_up)?;
     let after = Snapshot::take(dir)?;
-    let thrown = discards(read, &plan.discarded, &given_up);
+    let mut thrown = discards(read, &plan.discarded);
+    let left = too_old(dir, today)?
+        .into_iter()
+        .filter(|(_, note)| {
+            note.id()
+                .is_some_and(|id| !settled.contains(id) && !given_up.contains(id))
+        })
+        .collect::<Vec<_>>();
+    thrown.extend(
+        left.iter().filter_map(|(date, note)| {
+            discarded(*date, note, Some("読まないまま古くなった".into()))
+        }),
+    );
     for edit in plan.edits.iter().filter(|e| e.op == "confirm") {
         if let Some(id) = edit
             .id
@@ -945,7 +1008,6 @@ fn apply_answer(
         "夢: 足した {} · 直した {} · 置き換えた {} · 忘れた {}",
         c.added, c.edited, c.replaced, c.archived
     );
-    let commit = notebook::commit_all(dir, &notebook::famulen(), &message)?;
     let mut status = if skipped.is_empty() {
         format!("見た（変更の案 {proposed} 件）")
     } else {
@@ -958,31 +1020,48 @@ fn apply_answer(
     if summary.counts.discarded > 0 {
         let _ = write!(status, "。気づきを {} 件捨てた", summary.counts.discarded);
     }
-    Ok(Outcome {
+    let mut outcome = Outcome {
         status,
         applied: true,
         night: 0,
-        commit,
+        commit: None,
         summary,
-    })
+    };
+    // A marked note is taken away later, so the night tells of it first: one
+    // the night could not tell of stays, and is read again.
+    outcome.night = record_night(store, &outcome)?;
+    let done = settled
+        .into_iter()
+        .filter(|id| read.iter().any(|(_, n)| n.id() == Some(id)))
+        .chain(given_up)
+        .chain(ids_of(&left))
+        .collect();
+    mark_dreamt(dir, today, &ids_of(read), &done)?;
+    outcome.commit = notebook::commit_all(dir, &notebook::famulen(), &message)?;
+    store.conn().execute(
+        "UPDATE dreams SET commit_id = ?2 WHERE id = ?1",
+        params![outcome.night, outcome.commit],
+    )?;
+    Ok(outcome)
 }
 
-/// Leave pending what the owner said when no dream could deal with it.
+/// Leave pending what no dream could deal with.
 fn leave_pending(
     dir: &Path,
     read: &[(NaiveDate, Entry)],
     given_up: &BTreeSet<String>,
 ) -> anyhow::Result<()> {
     for (date, note) in read {
-        if note.src() != Some(memory::Src::Said)
-            || !note.id().is_some_and(|id| given_up.contains(id))
-        {
+        if !note.id().is_some_and(|id| given_up.contains(id)) {
             continue;
         }
         let mut entry = Entry::new(note.body())
             .with("id", memory::fresh_id(dir)?)?
-            .with("src", memory::Src::Said.as_str())?
+            .with("src", note.src().unwrap_or(memory::Src::Inferred).as_str())?
             .with("from", date.to_string())?;
+        if people::is_noted(note) {
+            entry.set(people::BY, people::LOOKOUT)?;
+        }
         let workgroup = note.workgroup();
         if !workgroup.is_empty() {
             entry.set("workgroup", workgroup.join(","))?;
@@ -998,37 +1077,30 @@ fn leave_pending(
 }
 
 /// What the night tells of the notes thrown away.
-fn discards(
-    read: &[(NaiveDate, Entry)],
-    asked: &[Discard],
-    given_up: &BTreeSet<String>,
-) -> Vec<memory::Change> {
+fn discards(read: &[(NaiveDate, Entry)], asked: &[Discard]) -> Vec<memory::Change> {
     read.iter()
         .filter_map(|(date, note)| {
-            let id = note.id()?;
-            let reason = match asked.iter().find(|d| d.id == id) {
-                Some(discard) => discard.reason.clone(),
-                None if given_up.contains(id) && note.src() != Some(memory::Src::Said) => {
-                    Some("何度読んでも片づかなかった".into())
-                }
-                None => return None,
-            };
-            Some(memory::Change {
-                op: memory::Op::Discarded,
-                id: id.to_owned(),
-                file: format!("{}/{date}.md", memory::EPISODIC),
-                text: if people::is_noted(note) {
-                    format!("{BY_LOOKOUT}{}", note.body())
-                } else {
-                    note.body().to_owned()
-                },
-                previous: None,
-                from_file: None,
-                replaces: None,
-                reason,
-            })
+            let discard = asked.iter().find(|d| note.id() == Some(d.id.as_str()))?;
+            discarded(*date, note, discard.reason.clone())
         })
         .collect()
+}
+
+fn discarded(date: NaiveDate, note: &Entry, reason: Option<String>) -> Option<memory::Change> {
+    Some(memory::Change {
+        op: memory::Op::Discarded,
+        id: note.id()?.to_owned(),
+        file: format!("{}/{date}.md", memory::EPISODIC),
+        text: if people::is_noted(note) {
+            format!("{BY_LOOKOUT}{}", note.body())
+        } else {
+            note.body().to_owned()
+        },
+        previous: None,
+        from_file: None,
+        replaces: None,
+        reason,
+    })
 }
 
 /// A memory on its way to the records.
@@ -1379,7 +1451,7 @@ mod tests {
             dir.path(),
             day(),
             |_, prompt| async move {
-                assert!(prompt.contains("Episodic notes:\n\n(none)"), "{prompt}");
+                assert!(prompt.contains("Notes in the inbox:\n\n(none)"), "{prompt}");
                 Ok(json!({ "edits": [] }))
             },
         )
@@ -1437,6 +1509,7 @@ mod tests {
         );
         assert_eq!(memory::core_entries(dir.path()).unwrap().len(), 3);
         assert!(memory::forgotten_months(dir.path()).unwrap().is_empty());
+        assert_eq!(recent_dreams(&store, 9).unwrap()[0].status, outcome.status);
     }
 
     #[tokio::test]
@@ -2003,11 +2076,6 @@ mod tests {
         .unwrap();
 
         assert!(waiting_notes(dir.path()).unwrap().is_empty());
-        assert!(
-            memory::read_file(dir.path(), "episodic/2026-11-21.md")
-                .unwrap()
-                .contains("昼は蕎麦だった")
-        );
         assert_eq!(outcome.summary.counts.discarded, 1);
         assert!(outcome.status.contains("気づきを 1 件捨てた"));
         let change = &recent_dreams(&store, 1).unwrap()[0].summary.changes[0];
@@ -2015,20 +2083,6 @@ mod tests {
         assert_eq!(change.text, "昼は蕎麦だった");
         assert_eq!(change.file, "episodic/2026-11-21.md");
         assert_eq!(change.reason.as_deref(), Some("一度きり"));
-    }
-
-    #[tokio::test]
-    async fn a_note_given_up_after_the_last_try_is_told_as_thrown_away() {
-        let (dir, store) = setup();
-        note(dir.path(), "片づかない気づき");
-        for left in [0, 0, 1] {
-            let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
-                Ok(json!({ "edits": [], "settled": [] }))
-            })
-            .await
-            .unwrap();
-            assert_eq!(outcome.summary.counts.discarded, left);
-        }
     }
 
     fn said(dir: &Path, text: &str) -> String {
@@ -2039,11 +2093,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn what_the_owner_said_is_left_pending_rather_than_given_up() {
+    async fn a_note_no_dream_could_deal_with_is_left_pending() {
         let (dir, store) = setup();
         let id = said(dir.path(), "返事は短く");
         memory::tag_episode(dir.path(), day(), &id, "workgroup", "work").unwrap();
-        for pending in [0, 0, 1] {
+        note(dir.path(), "片づかない気づき");
+        seen(dir.path(), day(), "田中さん：経理の担当");
+        for pending in [0, 0, 3] {
             let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
                 Ok(json!({ "edits": [], "settled": [] }))
             })
@@ -2057,6 +2113,9 @@ mod tests {
         assert_eq!(kept[0].body(), "返事は短く");
         assert_eq!(kept[0].src(), Some(memory::Src::Said));
         assert_eq!(kept[0].workgroup(), ["work"]);
+        assert_eq!(kept[1].body(), "片づかない気づき");
+        assert_eq!(kept[1].src(), Some(memory::Src::Inferred));
+        assert!(people::is_noted(&kept[2]) && !people::is_noted(&kept[1]));
     }
 
     #[tokio::test]
@@ -2224,6 +2283,157 @@ mod tests {
         assert!(moved.summary.changes.is_empty(), "{:?}", moved.summary);
     }
 
+    fn left(dir: &Path) -> Vec<String> {
+        memory::episodic_dates(dir)
+            .unwrap()
+            .into_iter()
+            .flat_map(|d| memory::episodes(dir, d).unwrap())
+            .map(|e| e.body().to_owned())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn only_the_notes_a_dream_is_done_with_are_swept_and_history_keeps_them() {
+        let (dir, store) = setup();
+        let filed = note(dir.path(), "覚えた");
+        let thrown = note(dir.path(), "捨てた");
+        note(dir.path(), "まだ分からない");
+        let path = dir.path().to_owned();
+        dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
+            note(&path, "考えている間の気づき");
+            Ok(json!({
+                "edits": [{ "op": "add", "file": "long/semantic/a.md", "text": "覚えた" }],
+                "settled": [filed],
+                "discarded": [{ "id": thrown, "reason": "一度きり" }]
+            }))
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(sweep(dir.path(), day(), &BTreeSet::new()).unwrap(), 2);
+
+        assert_eq!(left(dir.path()), ["まだ分からない", "考えている間の気づき"]);
+        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 2);
+        assert_eq!(
+            recent_dreams(&store, 1).unwrap()[0]
+                .summary
+                .counts
+                .discarded,
+            1
+        );
+        notebook::revert_to(dir.path(), "HEAD~1").unwrap();
+        assert!(left(dir.path()).contains(&"捨てた".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn a_night_that_cannot_be_recorded_takes_no_note_away() {
+        let (dir, store) = setup();
+        let thrown = note(dir.path(), "捨てた");
+        let result = dream(&store, &dir.records, dir.path(), day(), |_, _| {
+            store
+                .conn()
+                .execute_batch(
+                    "CREATE TRIGGER full BEFORE INSERT ON dreams
+                     BEGIN SELECT RAISE(ABORT, 'full'); END",
+                )
+                .unwrap();
+            async move {
+                Ok(json!({ "edits": [], "discarded": [{ "id": thrown, "reason": "一度きり" }] }))
+            }
+        })
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(sweep(dir.path(), day(), &BTreeSet::new()).unwrap(), 0);
+        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn notes_the_history_cannot_take_in_are_not_swept() {
+        let (dir, _store) = setup();
+        let id = note(dir.path(), "済んだ");
+        memory::tag_episode(dir.path(), day(), &id, "dreamt", "2026-11-21").unwrap();
+        let git = dir.path().parent().unwrap().join(".git");
+        std::fs::write(git.join("index.lock"), "").unwrap();
+
+        assert!(sweep(dir.path(), day(), &BTreeSet::new()).is_err());
+
+        assert_eq!(left(dir.path()), ["済んだ"]);
+    }
+
+    #[test]
+    fn notes_of_a_party_that_could_not_be_kept_are_not_swept() {
+        let (dir, _store) = setup();
+        for (text, party) in [("佐藤さん", "p1"), ("田中さん", "p2")] {
+            let id = note(dir.path(), text);
+            memory::tag_episode(dir.path(), day(), &id, "party", party).unwrap();
+            memory::tag_episode(dir.path(), day(), &id, "dreamt", "2026-11-21").unwrap();
+        }
+
+        sweep(dir.path(), day(), &BTreeSet::from(["p1".to_owned()])).unwrap();
+
+        assert_eq!(left(dir.path()), ["佐藤さん"]);
+    }
+
+    #[test]
+    fn notes_put_in_memory_at_once_are_swept_but_a_copy_still_waiting_is_not() {
+        let (dir, _store) = setup();
+        memory::write_file(
+            dir.path(),
+            "episodic/2026-11-21.md",
+            "# 2026-11-21\n\n- 09:00 待つ写し {id: n1, state: waiting}\n- 09:00 済んだ写し {id: n1, state: waiting, dreamt: 2026-11-21}\n- 09:01 すぐ入れた {id: n2, state: applied}\n- 09:02 記録へ {id: n3, state: record}\n- 09:03 ID のない走り書き\n主人の書いた文\n".as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(sweep(dir.path(), day(), &BTreeSet::new()).unwrap(), 2);
+
+        assert_eq!(
+            left(dir.path()),
+            ["待つ写し", "記録へ", "ID のない走り書き"]
+        );
+        let text = memory::read_file(dir.path(), "episodic/2026-11-21.md").unwrap();
+        assert!(text.contains("主人の書いた文"), "{text}");
+        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_day_left_empty_goes_once_no_other_copy_is_likely_to_write_in_it() {
+        let (dir, _store) = setup();
+        let id = note(dir.path(), "済んだ");
+        memory::tag_episode(dir.path(), day(), &id, "dreamt", "2026-11-21").unwrap();
+        sweep(
+            dir.path(),
+            day() + chrono::Duration::days(7),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert_eq!(memory::episodic_dates(dir.path()).unwrap(), [day()]);
+        sweep(
+            dir.path(),
+            day() + chrono::Duration::days(8),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert!(memory::episodic_dates(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn what_was_noted_of_people_stays_until_its_day_is_over_and_the_secretary_was_shown_it() {
+        let (dir, _store) = setup();
+        seen(dir.path(), day(), "田中さん：経理の担当");
+        let id = waiting_notes(dir.path()).unwrap()[0]
+            .1
+            .id()
+            .unwrap()
+            .to_owned();
+        memory::tag_episode(dir.path(), day(), &id, "dreamt", "2026-11-21").unwrap();
+        let next = day().succ_opt().unwrap();
+        assert_eq!(sweep(dir.path(), next, &BTreeSet::new()).unwrap(), 0);
+        people::mark_told(dir.path(), next, &[(day(), id)]).unwrap();
+        assert_eq!(sweep(dir.path(), day(), &BTreeSet::new()).unwrap(), 0);
+        assert_eq!(sweep(dir.path(), next, &BTreeSet::new()).unwrap(), 1);
+    }
+
     #[tokio::test]
     async fn a_dream_reads_the_latest_of_what_was_noted_of_people_and_lets_the_old_go() {
         let (dir, store) = setup();
@@ -2249,6 +2459,10 @@ mod tests {
         let waiting = waiting_notes(dir.path()).unwrap();
         assert_eq!(waiting.len(), 201);
         assert!(waiting.iter().all(|(date, _)| *date == day()));
+        let night = &recent_dreams(&store, 1).unwrap()[0];
+        let told: Vec<&str> = night.summary.changes.iter().map(|c| &*c.text).collect();
+        assert_eq!(told, ["（見張り）古い気づき"]);
+        assert_eq!(sweep(dir.path(), day(), &BTreeSet::new()).unwrap(), 1);
     }
 
     #[tokio::test]
