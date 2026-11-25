@@ -14,12 +14,21 @@ function tooWide(page: Page): Promise<string[]> {
   );
 }
 
+/** What is longer inside than it is, though only what is within it is to scroll. */
+function tooLong(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("html, .app, .body, .main, #pane:has(> .framed, > .split-pane), .split-detail, .chat")]
+      .filter((el) => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1)
+      .map((el) => `${el.tagName}.${el.className} ${el.scrollHeight} > ${el.clientHeight}`),
+  );
+}
+
 async function open(page: Page, path: string) {
   await page.goto(path);
   await expect(page.locator("#composer .view")).not.toBeEmpty();
 }
 
-test.describe("no page is wider than it is given, at any of the widths", () => {
+test.describe("no page is larger than it is given, at any of the widths", () => {
   const paths: string[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -86,6 +95,74 @@ test.describe("no page is wider than it is given, at any of the widths", () => {
         if (found.length > 0) wide[path] = found;
       }
       expect(wide).toEqual({});
+    });
+  }
+
+  // A window this low leaves no page room enough, so each has something to scroll.
+  for (const width of WIDTHS.filter((w) => w > 700)) {
+    test(`at ${width} and low, the page itself never scrolls`, async ({ page }) => {
+      test.setTimeout(180_000);
+      await page.setViewportSize({ width, height: 480 });
+      const long: { [path: string]: string[] } = {};
+      for (const path of paths) {
+        await open(page, path);
+        await expect(page.locator(".md-plain")).toHaveCount(0);
+        await expect(page.locator("#pane").getByText("読み込んでいる")).toHaveCount(0);
+        const found = await tooLong(page);
+        if (found.length > 0) long[path] = found;
+      }
+      expect(long).toEqual({});
+    });
+  }
+});
+
+test.describe("the left and the right each scroll by themselves", () => {
+  /** Turn the wheel over an element, further than it can go. */
+  async function wheel(page: Page, over: string) {
+    await page.locator(over).hover({ position: { x: 20, y: 60 } });
+    await page.mouse.wheel(0, 5000);
+  }
+  const top = (page: Page, of: string) => page.locator(of).evaluate((el) => el.scrollTop);
+
+  async function scrollApart(page: Page, left: string, right: string) {
+    for (const [over, other] of [
+      [left, right],
+      [right, left],
+    ]) {
+      const before = await top(page, other);
+      await wheel(page, over);
+      await expect.poll(() => top(page, over)).toBeGreaterThan(0);
+      expect(await top(page, other)).toBe(before);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      await expect(page.locator(".topbar")).toBeInViewport({ ratio: 1 });
+      await expect(page.locator(".tabs")).toBeInViewport({ ratio: 1 });
+    }
+  }
+
+  for (const width of WIDTHS.filter((w) => w > 700)) {
+    test(`at ${width}`, async ({ page, request }) => {
+      await page.setViewportSize({ width, height: 480 });
+      let id = "";
+      for (let i = 0; i < 15; i++) id = (await record(request, "memos", `長い一覧のメモ ${width}-${i}`, { notes: "長い本文\n\n".repeat(60) })).id;
+      await open(page, `/memos?id=${id}`);
+      await expect(page.locator(".md-plain")).toHaveCount(0);
+      await page.locator(".split-left").evaluate((el) => el.scrollTo(0, 0));
+      await scrollApart(page, ".split-left", ".split-scroll");
+
+      await open(page, "/settings");
+      await expect(page.locator(".detail .radio-cards").first()).toBeVisible();
+      await scrollApart(page, ".side", ".detail");
+
+      // With nothing more to show at the left, the wheel over it is for nothing else either.
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, "/settings");
+      await expect(page.locator(".detail .radio-cards").first()).toBeVisible();
+      await wheel(page, ".side");
+      await wheel(page, ".chat .messages");
+      // A wheel is answered only after the fact: the next one that is answered shows this one was too.
+      await wheel(page, ".detail");
+      await expect.poll(() => top(page, ".detail")).toBeGreaterThan(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
     });
   }
 });
