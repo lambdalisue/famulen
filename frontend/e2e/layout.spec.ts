@@ -82,38 +82,46 @@ test.describe("no page is larger than it is given, at any of the widths", () => 
     );
   });
 
-  for (const width of WIDTHS) {
-    test(`at ${width}`, async ({ page }) => {
-      test.setTimeout(180_000);
-      await page.setViewportSize({ width, height: 900 });
-      const wide: { [path: string]: string[] } = {};
-      for (const path of paths) {
-        await open(page, path);
-        // What is written is drawn after the page is, and a table or a line of code is the widest there is.
-        await expect(page.locator(".md-plain")).toHaveCount(0);
-        const found = await tooWide(page);
-        if (found.length > 0) wide[path] = found;
-      }
-      expect(wide).toEqual({});
-    });
+  /** Open a page and wait until what is written in it is drawn: a table or a line of code is the widest there is. */
+  async function drawn(page: Page, path: string) {
+    await open(page, path);
+    await expect(page.locator(".md-plain")).toHaveCount(0);
+    await expect(page.locator("#pane").getByText("読み込んでいる")).toHaveCount(0);
   }
 
-  // A window this low leaves no page room enough, so each has something to scroll.
-  for (const width of WIDTHS.filter((w) => w > 700)) {
-    test(`at ${width} and low, the page itself never scrolls`, async ({ page }) => {
-      test.setTimeout(180_000);
-      await page.setViewportSize({ width, height: 480 });
-      const long: { [path: string]: string[] } = {};
-      for (const path of paths) {
-        await open(page, path);
-        await expect(page.locator(".md-plain")).toHaveCount(0);
-        await expect(page.locator("#pane").getByText("読み込んでいる")).toHaveCount(0);
-        const found = await tooLong(page);
-        if (found.length > 0) long[path] = found;
-      }
-      expect(long).toEqual({});
-    });
-  }
+  // A phone is laid out by the page's own code as well, so it is opened as one.
+  test("on a phone", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: 390, height: 900 });
+    const found: { [at: string]: string[] } = {};
+    for (const path of paths) {
+      await drawn(page, path);
+      const wide = await tooWide(page);
+      if (wide.length > 0) found[path] = wide;
+    }
+    expect(found).toEqual({});
+  });
+
+  // Nothing but the stylesheet tells the wider widths apart, so each page is opened once and the window resized.
+  test("on a wide screen, where the page itself never scrolls", async ({ page }) => {
+    test.setTimeout(180_000);
+    const found: { [at: string]: string[] } = {};
+    const look = async (path: string, width: number, height: number, at: (page: Page) => Promise<string[]>) => {
+      await page.setViewportSize({ width, height });
+      // What measures itself does so a frame after the window changed, and is drawn in the next.
+      await onFrame(page, () => onFrame(page, async () => {}));
+      const over = await at(page);
+      if (over.length > 0) found[`${path} at ${width}x${height}`] = over;
+    };
+    const wide = WIDTHS.filter((w) => w > 700);
+    for (const path of paths) {
+      await drawn(page, path);
+      for (const width of wide) await look(path, width, 900, tooWide);
+      // A window this low leaves no page room enough, so each has something to scroll.
+      for (const width of wide) await look(path, width, 480, tooLong);
+    }
+    expect(found).toEqual({});
+  });
 });
 
 test.describe("the left and the right each scroll by themselves", () => {
