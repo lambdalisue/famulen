@@ -1,4 +1,4 @@
-import { type APIRequestContext, expect, type Page } from "@playwright/test";
+import { type APIRequestContext, expect, type Locator, type Page } from "@playwright/test";
 
 const BACKEND = "http://127.0.0.1:17790";
 
@@ -89,4 +89,37 @@ export function detail(page: Page) {
 /** A field of what is open, as it is read. */
 export function field(page: Page, name: string) {
   return detail(page).locator(".rec-field").filter({ has: page.locator("dt", { hasText: new RegExp(`^${name}$`) }) });
+}
+
+/** Say something along with an image of this size, drawn in a page. */
+export async function sayImage(page: Page, request: APIRequestContext, text: string, name: string, size: { width: number; height: number }) {
+  const drawn = await page.evaluate(({ width, height }) => {
+    const canvas = document.createElement("canvas");
+    Object.assign(canvas, { width, height });
+    const pen = canvas.getContext("2d");
+    if (pen) {
+      pen.fillStyle = "#2a78d6";
+      pen.fillRect(0, 0, width, height);
+    }
+    return canvas.toDataURL("image/png").split(",")[1];
+  }, size);
+  const res = await request.post(`${BACKEND}/attachments?name=${encodeURIComponent(name)}`, {
+    data: Buffer.from(drawn, "base64"),
+    headers: { "content-type": "application/octet-stream" },
+  });
+  expect(res.ok(), await res.text()).toBe(true);
+  const { id } = (await res.json()) as { id: string };
+  await call(request, "ConsoleService", "Send", { text, workgroup: "all", attachments: [id] });
+  await expect(page.getByTestId("message").filter({ hasText: text })).toBeAttached();
+  // What the secretary is doing takes room at the end of the conversation until it is done.
+  await expect.poll(async () => (await call<{ state: string }>(request, "ConsoleService", "GetStatus")).state).not.toBe("running");
+  await expect(page.getByTestId("working")).toHaveCount(0);
+}
+
+/** Whether an element has a size and all of it is on the screen. */
+export async function whollyOnScreen(page: Page, element: Locator) {
+  const box = await element.boundingBox();
+  const screen = page.viewportSize();
+  if (!box || !screen) return false;
+  return box.width > 0 && box.height > 0 && box.x >= 0 && box.y >= 0 && box.x + box.width <= screen.width && box.y + box.height <= screen.height;
 }

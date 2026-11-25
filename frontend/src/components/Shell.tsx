@@ -13,9 +13,10 @@ import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { createKept } from "~/lib/kept";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
-import { followKeyboard, isNarrow } from "~/lib/viewport";
+import { followKeyboard, isNarrow, layoutHeld } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
+import Lightbox, { closeImage } from "./Lightbox";
 import AideIcon from "./AideIcon";
 import { followPortrait } from "./PageIcons";
 import { useOwner } from "~/lib/owner";
@@ -66,6 +67,7 @@ export default function Shell(props: { children?: JSX.Element }) {
 
   /** Bring a request a notice told of before the owner. */
   const showRequest = async (id: string) => {
+    closeImage();
     const inbox = await look(() => api.console.getInbox({}));
     if (!inbox) return;
     await revalidate("inbox");
@@ -109,7 +111,7 @@ export default function Shell(props: { children?: JSX.Element }) {
       }
     };
     const focusOut = (e: FocusEvent) => {
-      if (e.target instanceof HTMLElement && e.target.id === "say") document.body.classList.remove("typing");
+      if (e.target instanceof HTMLElement && e.target.id === "say" && !layoutHeld()) document.body.classList.remove("typing");
     };
     document.addEventListener("focusin", focusIn);
     document.addEventListener("focusout", focusOut);
@@ -124,7 +126,11 @@ export default function Shell(props: { children?: JSX.Element }) {
   createEffect(
     on(
       () => location.pathname,
-      () => setChatOpen(false),
+      () => {
+        // Closing it may open the conversation, as the focus goes back there.
+        closeImage();
+        setChatOpen(false);
+      },
       { defer: true },
     ),
   );
@@ -270,6 +276,7 @@ export default function Shell(props: { children?: JSX.Element }) {
           ワークグループを足す
         </LinkButton>
       </dialog>
+      <Lightbox />
       <ConfirmHost />
       <Toast />
     </div>
