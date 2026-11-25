@@ -831,27 +831,33 @@ away = "60s"
 front = "app.say"
 "#;
     let say = say.replace("{{", "{").replace("}}", "}");
-    for (idle, front, told) in [
+    // Each waits out the second the program runs on, so they do it together.
+    let looks = [
         (Some(5), Some("app.say"), 0),
         (Some(5), Some("app.other"), 1),
         (Some(5), None, 1),
         (Some(90), Some("app.say"), 1),
         (None, None, 1),
-    ] {
-        let (g, _) = gateway(&[("say.toml", &say)]);
-        let g = g.with_presence(move || crate::presence::Presence {
-            idle: idle.map(std::time::Duration::from_secs),
-            front: front.map(str::to_owned),
-        });
-        add(&g, "say", "say", &[]);
-        let seen: Arc<Mutex<Vec<Arrival>>> = Arc::default();
-        let here = seen.clone();
-        g.register_destination("here", Arc::new(move |a| here.lock().unwrap().push(a)));
-        g.set_destination(super::super::OWNER, "say", "asks", Some("here"))
-            .unwrap();
+    ]
+    .map(|(idle, front, told)| {
+        let say = &say;
+        async move {
+            let (g, _) = gateway(&[("say.toml", say)]);
+            let g = g.with_presence(move || crate::presence::Presence {
+                idle: idle.map(std::time::Duration::from_secs),
+                front: front.map(str::to_owned),
+            });
+            add(&g, "say", "say", &[]);
+            let seen: Arc<Mutex<Vec<Arrival>>> = Arc::default();
+            let here = seen.clone();
+            g.register_destination("here", Arc::new(move |a| here.lock().unwrap().push(a)));
+            g.set_destination(super::super::OWNER, "say", "asks", Some("here"))
+                .unwrap();
 
-        g.lines_once("say", "asks").await.unwrap();
+            g.lines_once("say", "asks").await.unwrap();
 
-        assert_eq!(seen.lock().unwrap().len(), told, "{idle:?} {front:?}");
-    }
+            assert_eq!(seen.lock().unwrap().len(), told, "{idle:?} {front:?}");
+        }
+    });
+    futures_util::future::join_all(looks).await;
 }
