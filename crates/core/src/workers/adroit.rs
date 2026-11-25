@@ -294,7 +294,7 @@ async fn went_on_in(
     let ask = async |tool, input| {
         tokio::time::timeout(LOOKS_BACK_FOR, read(app, connection, tool, input))
             .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("{tool} did not answer")))
+            .unwrap_or_else(|late| Err(late.into()))
     };
     let listed = match ask("list_sessions", json!({})).await {
         Ok(listed) => listed,
@@ -319,22 +319,30 @@ async fn went_on_in(
             before.as_ref() != Some(t)
                 && (t.1 / 1000 >= run.ended_at.unwrap_or_default() || works(&t.0))
         });
-        if !heard && !may_have {
+        // One that is closed is not listed, and Famulen may not have been
+        // there when it was told of: that of a run that failed is read once.
+        let unlisted = trace.is_none() && before.is_none() && run.outcome == Some(Ended::Failed);
+        if !heard && !may_have && !unlisted {
             continue;
         }
         let input = json!({ "session": run.session, "turns": WATCHED_TURNS });
         match ask("read_session", input).await {
             Ok(session) if has_gone_on(&session, run) => went.push(run.id),
             Ok(_) => {
-                if let Some(trace) = trace {
-                    read_before
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .insert(run.id, trace);
-                }
+                read_before
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(run.id, trace.unwrap_or_default());
             }
             Err(error) => {
                 tracing::debug!(run = run.id, %error, "could not read an ended run's session");
+                // One Adroit answers it cannot read is not asked for forever.
+                if trace.is_none() && !error.is::<tokio::time::error::Elapsed>() {
+                    read_before
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(run.id, Trace::default());
+                }
             }
         }
     }

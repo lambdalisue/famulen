@@ -1961,7 +1961,7 @@ read_only = true
 [[commands]]
 name = "list_sessions"
 description = "List them."
-args = ["-e", "open my $f, '<', shift or die; print '[', <$f>, ']'", "--", "{account.shows}"]
+args = ["-e", "open my $f, '<', shift or die; my $s = <$f>; print '[', $s =~ /ended/ ? '' : $s, ']'", "--", "{account.shows}"]
 read_only = true
 
 [[commands]]
@@ -2071,6 +2071,27 @@ async fn a_session_in_adroit_is_asked_to_go_on_unless_forbidden_and_seen_going_o
     look().await;
     assert_eq!(state(), State::Running);
     assert_ne!(status(), "done");
+
+    // It failed, went on and was closed while Famulen was not running.
+    app.workers.runs.due(run, 0).unwrap();
+    app.workers
+        .runs
+        .ending(run, Outcome::Failed, "broke")
+        .unwrap();
+    app.workers.runs.ended(run).unwrap();
+    show("ended", now + 9999);
+    app.store
+        .conn()
+        .execute("UPDATE worker_runs SET ended_at = ended_at - 60", [])
+        .unwrap();
+    let anew = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    anew.tick().await.unwrap();
+    assert_eq!(state(), State::Running);
+    anew.tick().await.unwrap();
+    assert_eq!(status(), "done");
+    let told = app.store.recent_inputs(0, 50).unwrap().len();
+    anew.tick().await.unwrap();
+    assert_eq!(app.store.recent_inputs(0, 50).unwrap().len(), told);
 }
 
 #[cfg(unix)]
