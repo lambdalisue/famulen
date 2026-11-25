@@ -24,7 +24,7 @@ pub const LOOKOUT: &str = "lookout";
 const TOLD: &str = "told";
 
 /// The most notes one batch leaves.
-const MOST_NOTES: usize = 20;
+pub const MOST_NOTES: usize = 20;
 /// Long enough for the names put beside ids.
 const LONGEST_NOTE: usize = 400;
 const LONGEST_WHO: usize = 200;
@@ -46,6 +46,7 @@ Say in `tie` how the person is tied to the owner: deals (they write to the owner
 asks (they ask something of the owner or invite them), works_with (they are of the owner's team or company, or of one it does business with), or none. \
 One who only stands in an item is none: a speaker at an event, an author, someone quoted, introduced or advertised, someone a service tells news of. \
 When in doubt it is none, and none is not kept. \
+Of mail, note only who sent it, and nobody spoken of in it. \
 Nothing of anyone in advertising, newsletters, event announcements or notices sent automatically; mail marked automated is such mail. \
 Give the item's index, in `who` the name as the item gives it, or an empty text when it is the writer, \
 and in `note` one short sentence in Japanese that is understood without the item. \
@@ -87,13 +88,56 @@ fn tells_of_people(feed: Feed, item: &Item) -> bool {
     feed != Feed::Mail || !arrivals::mail_head(item).is_automated()
 }
 
-/// Leave out what was noted of those the owner does not deal with, and what
-/// is too much for one batch after that.
+/// Leave out what was noted of those the owner does not deal with. Of mail,
+/// only who sent it can be told to be one the owner writes to.
 pub fn of_those_dealt_with(feed: Feed, items: &[Item], mut noted: Vec<Noted>) -> Vec<Noted> {
     noted.retain(|n| {
-        n.tie != Tie::None && items.get(n.item).is_some_and(|i| tells_of_people(feed, i))
+        n.tie != Tie::None
+            && items.get(n.item).is_some_and(|item| {
+                tells_of_people(feed, item)
+                    && (feed != Feed::Mail || sender_noted(item, n).is_some())
+            })
     });
-    noted.truncate(MOST_NOTES);
+    noted
+}
+
+/// The address of a mail's sender, when the note is of them.
+fn sender_noted(item: &Item, noted: &Noted) -> Option<String> {
+    let sent = writer(Feed::Mail, item)?;
+    let named = noted.who.trim();
+    let plainly = |name: &str| {
+        let name: String = name.split_whitespace().collect();
+        name.trim_end_matches("さん").to_lowercase()
+    };
+    let is_sender = named.is_empty()
+        || names_sender(named, &sent)
+        || sent
+            .name
+            .as_deref()
+            .is_some_and(|name| plainly(name) == plainly(named));
+    is_sender.then(|| sent.id.to_lowercase())
+}
+
+/// The addresses of the senders of mail that were noted.
+pub fn senders(items: &[Item], noted: &[Noted]) -> BTreeSet<String> {
+    noted
+        .iter()
+        .filter_map(|n| sender_noted(items.get(n.item)?, n))
+        .collect()
+}
+
+/// Leave out what was noted of senders of mail the owner does not write to.
+pub fn of_correspondents(
+    items: &[Item],
+    mut noted: Vec<Noted>,
+    written_to: &BTreeSet<String>,
+) -> Vec<Noted> {
+    noted.retain(|n| {
+        items
+            .get(n.item)
+            .and_then(|item| sender_noted(item, n))
+            .is_some_and(|address| written_to.contains(&address))
+    });
     noted
 }
 
@@ -732,8 +776,9 @@ pub fn to_ask(dir: &Path, today: NaiveDate) -> anyhow::Result<Option<(String, Ve
     let text = format!(
         "Bring the owner's parties up to date with what was lately noted of people. \
 Add a party for everyone who has none and has to do with the owner, even when they appear only once: \
-one who writes to the owner or is written to by them, takes part in a conversation the owner is in, or is named to the owner or in such a conversation. \
+in chat, one who writes to the owner or is written to by them, takes part in a conversation the owner is in, or is named to the owner or in such a conversation. \
 Not bots, and not those who only write where the owner takes no part. \
+From mail, only one the owner both wrote to and heard from: look in the sent messages of the account the note names (in:sent to:…), and add nobody you cannot find there. \
 Before adding one, look for them among all the parties, resting ones too, under every name, alias and account you know; \
 add a new name to the party you find rather than a second party, and when one may be the same and you cannot tell, add none and say so in that one's notes. \
 Check who they are with the service's own tools (their name, their account), \
@@ -924,6 +969,40 @@ mod tests {
     }
 
     #[test]
+    fn of_mail_only_senders_the_owner_writes_to_are_kept() {
+        let items = [
+            advert(&[("From", "Sato <Sato@example.com>")]),
+            advert(&[("From", "Mori <mori@example.com>")]),
+        ];
+        let notes = vec![
+            noted(0, "", "返事が早い"),
+            noted(0, "Sato", "経理の担当"),
+            noted(0, "satoさん", "朝が早い"),
+            noted(0, "田中", "名が出ただけ"),
+            noted(1, "", "一度も返事をしていない"),
+        ];
+
+        let dealt = of_those_dealt_with(Feed::Mail, &items, notes);
+        assert_eq!(
+            senders(&items, &dealt),
+            ["mori@example.com", "sato@example.com"]
+                .map(str::to_owned)
+                .into()
+        );
+        let written_to = BTreeSet::from(["sato@example.com".to_owned()]);
+        let kept = of_correspondents(&items, dealt, &written_to);
+
+        assert_eq!(
+            kept,
+            [
+                noted(0, "", "返事が早い"),
+                noted(0, "Sato", "経理の担当"),
+                noted(0, "satoさん", "朝が早い"),
+            ]
+        );
+    }
+
+    #[test]
     fn those_only_spoken_of_are_left_out_and_those_the_owner_deals_with_are_kept() {
         let items = [chat("U1", "a")];
         let tied = |tie| Noted {
@@ -937,10 +1016,6 @@ mod tests {
                 .map(tied)
                 .to_vec(),
         );
-        let mut many = vec![tied(Tie::None); MOST_NOTES];
-        many.extend(vec![tied(Tie::Asks); MOST_NOTES + 1]);
-        let most = of_those_dealt_with(Feed::Chat, &items, many);
-        assert_eq!(most.len(), MOST_NOTES, "those left out take no room");
         let ties: Vec<_> = kept.iter().map(|n| n.tie).collect();
         assert_eq!(ties, [Tie::Deals, Tie::Asks, Tie::WorksWith]);
     }
