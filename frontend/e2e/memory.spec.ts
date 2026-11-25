@@ -84,6 +84,36 @@ test("a note shows the time it was written apart from its text", async ({ page, 
   await expect(row.locator(".tag")).toHaveText("あなたが言った");
 });
 
+test("a note opens its details, with where it came from as far as it is kept", async ({ page, request }) => {
+  await call(request, "MemoryService", "WriteFile", {
+    path: "episodic/2026-01-07.md",
+    text: [
+      "- 09:15 前からの気づき {id: e2e-o1, src: inferred, by: lookout, state: waiting}",
+      "- 09:16 メールの気づき {id: e2e-o2, src: inferred, by: lookout, state: waiting, origin: mail/e2e-gone/1a21}",
+      "",
+    ].join("\n"),
+  });
+  try {
+    await visit(page, "/memory/episodic", "記憶 · 気づき");
+    const row = (text: string) => page.locator(".list .item").filter({ hasText: text });
+    const sheet = page.getByRole("dialog", { name: "気づきの詳細" });
+
+    await row("前からの気づき").locator(".item-title").click();
+    await expect(sheet).toContainText("出どころは残っていない");
+    await expect(sheet).toContainText("推し量り");
+    await expect(sheet).toContainText("夢待ち");
+    await expect(sheet).toContainText("09:15");
+    await sheet.getByRole("button", { name: "閉じる" }).click();
+    await expect(sheet).toHaveCount(0);
+
+    await row("メールの気づき").getByRole("button", { name: "詳細を見る" }).click();
+    await expect(sheet.getByRole("link", { name: "メールを開く" })).toHaveAttribute("href", "https://mail.google.com/mail/?#all/1a21");
+    await expect(sheet).not.toContainText("出どころは残っていない");
+  } finally {
+    await call(request, "MemoryService", "WriteFile", { path: "episodic/2026-01-07.md", text: "" });
+  }
+});
+
 test("the inbox shows only the notes waiting for the dream, by day, and counts them", async ({ page, request }) => {
   const item = page.getByRole("navigation", { name: "記憶の層" }).getByRole("link", { name: /^気づき/ });
   const waiting = async () => Number(await item.locator(".mono").textContent());

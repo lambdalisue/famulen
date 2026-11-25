@@ -20,6 +20,8 @@ export function List(props: { label?: string; class?: string; children: JSX.Elem
  */
 export function ListRow(props: {
   href?: string;
+  /** Pressed anywhere outside its links and controls. One of its controls does the same from the keyboard. */
+  onPick?: () => void;
   /** It is what is open beside the list. */
   current?: boolean;
   icon?: string;
@@ -38,9 +40,14 @@ export function ListRow(props: {
   return (
     <div
       class={`item ${props.class ?? ""}`}
-      classList={{ picks: !!props.href, current: props.current, ...props.classList }}
+      classList={{ picks: !!props.href || !!props.onPick, current: props.current, ...props.classList }}
       role="listitem"
       data-record={props.record}
+      onClick={(e) => {
+        // What ends at the end of a selection is no press.
+        const selecting = window.getSelection()?.isCollapsed === false;
+        if (props.onPick && !selecting && e.target instanceof Element && !e.target.closest("a, button, input, label")) props.onPick();
+      }}
     >
       <Show when={props.icon}>{(svg) => <Icon svg={svg()} size={18} />}</Show>
       {props.lead}

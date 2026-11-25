@@ -129,6 +129,26 @@ auth = "user"
 ok = "{/ok}"
 
 [[tools]]
+name = "channel_info"
+description = "Read a channel's name and what it is about, as the owner."
+method = "GET"
+path = "/conversations.info"
+query = { channel = "{args.channel}" }
+input = { type = "object", properties = { channel = { type = "string", title = "チャンネルの ID", description = "C で始まる ID" } }, required = ["channel"] }
+auth = "user"
+ok = "{/ok}"
+
+[[tools]]
+name = "get_permalink"
+description = "Read the URL of a message."
+method = "GET"
+path = "/chat.getPermalink"
+query = { channel = "{args.channel}", message_ts = "{args.ts}" }
+input = { type = "object", properties = { channel = { type = "string", title = "チャンネルの ID", description = "C で始まる ID" }, ts = { type = "string", title = "発言の時刻印", description = "1700000000.000000 の形" } }, required = ["channel", "ts"] }
+auth = "user"
+ok = "{/ok}"
+
+[[tools]]
 name = "user_info"
 description = "Read a Slack user's name and profile; the bot is a user too."
 method = "GET"

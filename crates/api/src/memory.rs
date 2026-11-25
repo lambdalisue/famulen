@@ -5,6 +5,7 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::dream_settings::{self as ds, DreamSettings as Plan, Frequency};
 use famulen_core::dreaming;
 use famulen_core::memory::{self as m, Entry, EpisodeState, Src};
+use famulen_core::note_origin::{Origin, Told};
 use famulen_core::notebook;
 use famulen_core::workgroups::ALL;
 
@@ -37,6 +38,30 @@ fn item(e: &Entry, file: &str) -> MemoryItem {
             .time()
             .map(|t| t.format("%H:%M").to_string())
             .unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+fn origin(told: Told) -> NoteOrigin {
+    let kind = match told.origin {
+        Some(Origin::Mail { .. }) => "mail",
+        Some(Origin::Slack { .. }) => "slack",
+        None => "",
+    };
+    NoteOrigin {
+        kind: kind.into(),
+        account: told.account,
+        channel: told.channel,
+        from: told.from,
+        subject: told.subject,
+        at: told.at.unwrap_or_default(),
+        url: told.url,
+        excerpt: told.excerpt,
+        outcome: told
+            .outcome
+            .map(|o| o.label().to_owned())
+            .unwrap_or_default(),
+        reason: told.reason,
         ..Default::default()
     }
 }
@@ -247,6 +272,23 @@ impl MemoryService for Api {
             _ => {}
         }
         Response::ok(out)
+    }
+
+    async fn get_note_origin(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<NoteOrigin> {
+        let id = request.id.to_owned();
+        let notes = dreaming::waiting_notes(&self.app.memory_dir).or_fail()?;
+        let Some((_, note)) = notes.iter().find(|(_, n)| n.id() == Some(id.as_str())) else {
+            return Err(fail(format!("no note {id} waits in the inbox")));
+        };
+        let told = match note.get(Origin::ATTR).and_then(Origin::parse) {
+            Some(origin) => self.app.told_of(origin).await.or_fail()?,
+            None => Told::default(),
+        };
+        Response::ok(origin(told))
     }
 
     async fn read_file(

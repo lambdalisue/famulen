@@ -235,7 +235,7 @@ async fn note_people(
     if !tells_of_people(source) {
         return Ok(());
     }
-    let noted = people::noted_from(answer);
+    let noted = people::of_those_dealt_with(source.feed, items, people::noted_from(answer));
     if noted.is_empty() {
         return Ok(());
     }
@@ -254,6 +254,7 @@ async fn note_people(
         &people::Place {
             feed: source.feed,
             name: &source.name,
+            connection: &source.connection,
             workgroups: &app
                 .workgroups
                 .workgroups_of(MemberKind::Lookout, source.id.to_string())?,
@@ -420,7 +421,7 @@ mod tests {
         let answer = serde_json::json!({
             "items": [{ "index": 0, "related": false, "urgency": "later" }],
             "groups": [],
-            "people": [{ "item": 0, "who": "", "note": "経理の担当" }]
+            "people": [{ "item": 0, "who": "", "note": "経理の担当", "tie": "works_with" }]
         });
         let mut source = LookoutSource {
             id: 1,

@@ -171,7 +171,19 @@ pub(crate) mod tests {
             let answer = answer(&user);
             async move { answer.to_string() }
         };
-        let router = axum::Router::new().route("/users.info", axum::routing::get(info));
+        let channel = json!({ "ok": true, "channel": { "name": "general" } }).to_string();
+        let link = json!({ "ok": true, "permalink": "https://acme.slack.com/archives/C1/p1" });
+        let link = link.to_string();
+        let router = axum::Router::new()
+            .route("/users.info", axum::routing::get(info))
+            .route(
+                "/conversations.info",
+                axum::routing::get(move || async move { channel }),
+            )
+            .route(
+                "/chat.getPermalink",
+                axum::routing::get(move || async move { link }),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });

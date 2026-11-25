@@ -271,6 +271,7 @@ mod tests {
                 &people::Place {
                     feed: crate::lookout::Feed::Chat,
                     name: "会社",
+                    connection: "slack",
                     workgroups: &[],
                     names: &Default::default(),
                 },
@@ -282,6 +283,7 @@ mod tests {
                     item: 0,
                     who: who.into(),
                     note: "経理の担当".into(),
+                    tie: people::Tie::WorksWith,
                 }],
             )
             .unwrap();

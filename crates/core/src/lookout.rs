@@ -122,6 +122,15 @@ pub struct Decision {
     pub feedback: Option<String>,
 }
 
+/// An item as it was read, and what was decided of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeenItem {
+    pub item: Item,
+    pub at: i64,
+    pub outcome: Outcome,
+    pub reason: String,
+}
+
 /// What the lookout watches and what it decided.
 #[derive(Clone)]
 pub struct Lookout {
@@ -185,6 +194,42 @@ impl Lookout {
         )?;
         let rows = stmt.query_map(params![before, limit as i64], decision)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The latest item decided on, read through `connection`, whose body starts with `start` and whose
+    /// first line ends with `end`, its line break with it; an empty `end`
+    /// leaves the line as it is.
+    pub fn seen(
+        &self,
+        connection: &str,
+        start: &str,
+        end: &str,
+    ) -> anyhow::Result<Option<SeenItem>> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT title, body, at, outcome, reason FROM lookout_items
+                 WHERE outcome != 'pending'
+                   AND source IN (SELECT CAST(id AS TEXT) FROM lookout_sources WHERE connection = ?3)
+                   AND substr(body, 1, length(?1)) = ?1
+                   AND (?2 = '' OR substr(substr(body, 1, instr(body, char(10))), -length(?2)) = ?2)
+                 ORDER BY id DESC LIMIT 1",
+                params![start, end, connection],
+                |r| {
+                    let outcome: String = r.get(3)?;
+                    Ok(SeenItem {
+                        item: Item {
+                            title: r.get(0)?,
+                            body: r.get(1)?,
+                        },
+                        at: r.get(2)?,
+                        outcome: Outcome::parse(&outcome).unwrap_or(Outcome::Digest),
+                        reason: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// Items since `since`: received, found to concern the owner, passed to

@@ -310,6 +310,7 @@ mod tests {
             "subscribe_events",
             "answer_approval",
             "connect_known",
+            "get_note_origin",
         ] {
             assert!(
                 tools.iter().all(|t| t.def.name != console_only),
