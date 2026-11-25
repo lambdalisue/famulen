@@ -22,6 +22,7 @@ mod notebook;
 mod notices;
 mod paging;
 mod permissions;
+mod pictures;
 mod records;
 mod routines;
 mod settings;
@@ -98,11 +99,13 @@ impl Api {
     }
 
     /// The router as an axum app, with a plain liveness probe and the
-    /// notebook's Git, the files the owner attaches and the pictures of links.
+    /// notebook's Git, the files the owner attaches and the pictures of links
+    /// and parties.
     pub fn axum(self) -> axum::Router {
         sharing::router()
             .merge(attachments::router())
             .merge(link_previews::router())
+            .merge(pictures::router())
             .with_state(self.clone())
             .route("/health", axum::routing::get(|| async { "OK" }))
             .fallback_service(self.router().into_axum_service())

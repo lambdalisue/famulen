@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { call, detail, field, record, row, toast, visit } from "./support";
 
 const me = (as: string) => [{ name: "Relations", items: [{ text: "me", fields: [{ name: "As", value: as }] }] }];
@@ -100,4 +100,69 @@ test("whoever rests is put away under 休み, and is found by words", async ({ p
   await expect(row(page, "休田五郎さん")).toBeHidden();
   await page.getByLabel("相手を探す").fill("休田");
   await expect(row(page, "休田五郎さん")).toBeVisible();
+});
+
+const PIXEL = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/** Parties read from here on have a picture, which Slack alone could give. */
+async function pictured(page: Page, id: string, picture: string) {
+  await page.route(/RecordService\/(ListRecords|GetRecord)/, async (route) => {
+    const answer = await route.fetch();
+    const json = await answer.json();
+    for (const r of json.records ?? [json]) if (r.id === id) r.picture = picture;
+    await route.fulfill({ response: answer, json });
+  });
+}
+
+for (const [name, viewport] of [
+  ["a wide screen", { width: 1440, height: 900 }],
+  ["a phone", { width: 360, height: 740 }],
+] as const) {
+  test.describe(`on ${name}`, () => {
+    test.use({ viewport });
+
+    test("a person's picture is round in the list and on the page, from the console", async ({ page, request }) => {
+      const outside: string[] = [];
+      page.on("request", (r) => {
+        if (new URL(r.url()).hostname.includes("slack")) outside.push(r.url());
+      });
+      const p = await record(request, "parties", `画像 ${name}`, { fields: { Kind: "person" } });
+      await record(request, "parties", `無地 ${name}`, { fields: { Kind: "person" } });
+      await pictured(page, p.id, "e2e-picture");
+      await page.route("**/party-pictures/e2e-picture", (route) => route.fulfill({ contentType: "image/png", body: PIXEL }));
+      await visit(page, "/memos", /^メモ/);
+      await page.evaluate(() => {
+        const a = document.createElement("a");
+        a.href = "/parties";
+        document.querySelector("main")?.append(a);
+        a.click();
+      });
+      const inList = row(page, `画像 ${name}`).locator(".avatar img");
+      await expect(inList).toHaveAttribute("src", "/party-pictures/e2e-picture");
+      await expect(row(page, `無地 ${name}`).locator(".avatar")).toHaveText("無");
+      const box = await row(page, `画像 ${name}`).locator(".avatar").boundingBox();
+      expect([box?.width, box?.height]).toEqual([32, 32]);
+
+      await row(page, `画像 ${name}`).click();
+      await expect(detail(page).locator(".rec-title .avatar img")).toBeVisible();
+      await expect(detail(page).locator(".rec-title .avatar")).toHaveCSS("border-radius", "50%");
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(wide).toBeLessThanOrEqual(0);
+      expect(outside).toEqual([]);
+    });
+  });
+}
+
+test("a picture that is not there leaves the start of the name", async ({ page, request }) => {
+  const p = await record(request, "parties", "欠画さん", { fields: { Kind: "person" } });
+  await pictured(page, p.id, "gone");
+  await visit(page, "/memos", /^メモ/);
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "/parties";
+    document.querySelector("main")?.append(a);
+    a.click();
+  });
+  await expect(row(page, "欠画さん").locator(".avatar")).toHaveText("欠");
+  await expect(row(page, "欠画さん").locator(".avatar img")).toHaveCount(0);
 });

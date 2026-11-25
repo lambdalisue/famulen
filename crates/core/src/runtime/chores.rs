@@ -65,6 +65,17 @@ pub(super) async fn read_purchases(app: App) {
     }
 }
 
+/// Apart from the other chores, since Slack may take long over each picture.
+pub(super) async fn keep_pictures(app: App) {
+    let mut tick = tokio::time::interval(CHORE_TICK);
+    loop {
+        tick.tick().await;
+        if let Err(error) = app.refresh_pictures(Utc::now().timestamp()).await {
+            tracing::warn!(%error, "could not keep the parties' pictures");
+        }
+    }
+}
+
 pub(super) async fn chores(app: App) {
     let mut tick = tokio::time::interval(CHORE_TICK);
     let mut last_calendar = 0_i64;

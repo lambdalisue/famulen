@@ -124,7 +124,17 @@ pub struct PartyAccount {
     pub how: String,
 }
 
-fn accounts(record: &Record) -> Vec<PartyAccount> {
+impl PartyAccount {
+    /// The Slack member it is, when the owner or a sure source confirmed it.
+    pub fn slack_member(&self) -> Option<&str> {
+        let slack = self.confirmed && self.service.to_lowercase().contains("slack");
+        let member = self.handle.rsplit(['/', ':']).next();
+        member.filter(|m| slack && !m.is_empty())
+    }
+}
+
+/// The accounts of a party.
+pub fn accounts(record: &Record) -> Vec<PartyAccount> {
     record
         .body
         .items("Accounts")

@@ -141,6 +141,7 @@ impl Api {
             obsolete: obsolete.as_ref().map(|m| m.on.clone()).unwrap_or_default(),
             obsolete_reason: obsolete.map(|m| m.reason).unwrap_or_default(),
             moved_to: moved_to.into(),
+            picture: self.app.pictures.of(r).unwrap_or_default(),
             ..Default::default()
         }
     }

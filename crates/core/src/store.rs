@@ -677,6 +677,15 @@ CREATE TABLE IF NOT EXISTS attachments (
     at   INTEGER NOT NULL,
     body TEXT NOT NULL
 );
+-- the picture each account shows; `id` is empty while it shows none
+CREATE TABLE IF NOT EXISTS account_pictures (
+    account TEXT PRIMARY KEY,
+    due     INTEGER NOT NULL,
+    url     TEXT NOT NULL DEFAULT '',
+    id      TEXT NOT NULL DEFAULT '',
+    mime    TEXT NOT NULL DEFAULT '',
+    bytes   BLOB NOT NULL DEFAULT x''
+);
 CREATE TABLE IF NOT EXISTS slack_taken (
     workspace TEXT NOT NULL,
     channel   TEXT NOT NULL,

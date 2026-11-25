@@ -140,6 +140,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
             gateway.clone(),
             permissions.clone(),
         ),
+        pictures: crate::pictures::Pictures::new(store.clone(), gateway.clone()),
         notices: crate::notices::Notices::new(store.clone(), permissions.clone()),
         permissions,
         models: Models::new(store.clone()).with_gateway(gateway.clone()),

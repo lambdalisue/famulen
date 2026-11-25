@@ -143,11 +143,7 @@ fn parties_by_member(records: &Records) -> anyhow::Result<BTreeMap<String, Recor
     let mut parties = BTreeMap::new();
     for (party, accounts) in records.accounts()? {
         for a in accounts {
-            if a.confirmed
-                && a.service.to_lowercase().contains("slack")
-                && let Some(member) = a.handle.rsplit(['/', ':']).next()
-                && !member.is_empty()
-            {
+            if let Some(member) = a.slack_member() {
                 parties
                     .entry(member.to_owned())
                     .or_insert_with(|| party.clone());
