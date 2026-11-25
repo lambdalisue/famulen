@@ -173,6 +173,9 @@ message DreamSettings {
   // Whether the dream also makes tasks of memos and asks about records that
   // may be out of date. Left out, it stays as it is.
   optional bool tidy_records = 7;
+  // How many days a person goes unseen before they are put to rest; 0 never
+  // does. Left out, it stays as it is.
+  optional int32 rest_after = 8;
 }
 
 message ListPartyMemoriesResponse {

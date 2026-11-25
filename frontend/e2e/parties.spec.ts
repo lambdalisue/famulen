@@ -91,3 +91,13 @@ test("a party nothing is remembered about says so", async ({ page, request }) =>
   await visit(page, `/parties?id=${p.id}`, "相手 · 南の商会");
   await expect(page.getByText("まだ覚えていることはない")).toBeVisible();
 });
+
+test("whoever rests is put away under 休み, and is found by words", async ({ page, request }) => {
+  await record(request, "parties", "休田五郎さん", { fields: { Kind: "person", Status: "resting" } });
+  await record(request, "parties", "今田六郎さん", { fields: { Kind: "person" } });
+  await visit(page, "/parties", "相手");
+  await expect(row(page, "今田六郎さん")).toBeVisible();
+  await expect(row(page, "休田五郎さん")).toBeHidden();
+  await page.getByLabel("相手を探す").fill("休田");
+  await expect(row(page, "休田五郎さん")).toBeVisible();
+});

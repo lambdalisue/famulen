@@ -17,6 +17,8 @@ pub const LAST_KEY: &str = "dream.last";
 pub const MAX_CORE_LINES: u32 = 1000;
 /// The most waiting notes the early dream may wait for.
 pub const MAX_EARLY_AT: u32 = 1000;
+/// The most days a person may go unseen before they rest.
+pub const MAX_REST_AFTER: u32 = 3650;
 
 /// How often the scheduled dream runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +46,8 @@ pub struct DreamSettings {
     pub core_lines: u32,
     /// Whether the dream also tidies records.
     pub tidy_records: bool,
+    /// How many days a person goes unseen before they rest; 0 never.
+    pub rest_after: u32,
 }
 
 impl Default for DreamSettings {
@@ -55,6 +59,7 @@ impl Default for DreamSettings {
             early_at: 30,
             core_lines: 150,
             tidy_records: true,
+            rest_after: 60,
         }
     }
 }
@@ -89,6 +94,10 @@ impl DreamSettings {
         anyhow::ensure!(
             (1..=MAX_CORE_LINES).contains(&self.core_lines),
             "core holds 1 to {MAX_CORE_LINES} lines"
+        );
+        anyhow::ensure!(
+            self.rest_after <= MAX_REST_AFTER,
+            "a person rests after at most {MAX_REST_AFTER} days"
         );
         Ok(())
     }
@@ -171,8 +180,8 @@ mod tests {
         let s = DreamSettings::load(&store).unwrap();
         assert_eq!(s, DreamSettings::default());
         assert_eq!(
-            (s.hour, s.minute, s.early_at, s.core_lines),
-            (4, 0, 30, 150)
+            (s.hour, s.minute, s.early_at, s.core_lines, s.rest_after),
+            (4, 0, 30, 150, 60)
         );
         assert_eq!(s.frequency, Frequency::Nightly);
     }
@@ -187,6 +196,7 @@ mod tests {
             early_at: 0,
             core_lines: 80,
             tidy_records: false,
+            rest_after: 0,
         };
         s.save(&store).unwrap();
         assert_eq!(DreamSettings::load(&store).unwrap(), s);
@@ -213,6 +223,10 @@ mod tests {
             },
             DreamSettings {
                 core_lines: MAX_CORE_LINES + 1,
+                ..good
+            },
+            DreamSettings {
+                rest_after: MAX_REST_AFTER + 1,
                 ..good
             },
         ] {

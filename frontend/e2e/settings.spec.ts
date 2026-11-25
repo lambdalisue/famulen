@@ -641,6 +641,17 @@ test.describe("夢の頁", () => {
     expect((await plan(request)).coreLines).toBe(80);
   });
 
+  test("the days until a person rests are set on the page and kept after a reload", async ({ page }) => {
+    await visit(page, "/settings/roles/dream", "設定 · 夢");
+    const days = page.getByLabel("相手を休みにする");
+    await expect(days).toHaveValue("60");
+    await days.fill("90");
+    await days.press("Tab");
+    await expect(toast(page)).toHaveText("保存した");
+    await page.reload();
+    await expect(page.getByLabel("相手を休みにする")).toHaveValue("90");
+  });
+
   test("今すぐ夢を見る sits at the foot of the page", async ({ page, request }) => {
     await useClaudeForDream(request);
     await visit(page, "/settings/roles/dream", "設定 · 夢");

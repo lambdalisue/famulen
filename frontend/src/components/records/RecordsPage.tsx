@@ -318,7 +318,7 @@ export default function RecordsPage(props: {
             <Keyed each={groups().filter((g) => g.records.length > 0)} by={(g) => `${tab()}/${g.name}`}>
               {(g) => (
                 <Show when={g().name} fallback={<Whole records={g().records} />}>
-                  <details class="rec-group" open={!g().folded}>
+                  <details class="rec-group" open={!g().folded || !!n.words().trim()}>
                     <summary>
                       <h2>{g().name}</h2>
                       <span class="sub">{g().records.length}</span>

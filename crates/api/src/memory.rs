@@ -102,6 +102,7 @@ impl Api {
             core_lines: plan.core_lines as i32,
             next: self.next_dream()?,
             tidy_records: Some(plan.tidy_records),
+            rest_after: Some(plan.rest_after as i32),
             ..Default::default()
         })
     }
@@ -524,16 +525,15 @@ impl MemoryService for Api {
             _ => return Err(fail("say how often to dream")),
         };
         let count = |n: i32| u32::try_from(n).map_err(|_| fail("a count is never negative"));
+        let kept = Plan::load(&self.app.store).or_fail()?;
         let plan = Plan {
             hour,
             minute,
             frequency,
             early_at: count(r.early_at)?,
             core_lines: count(r.core_lines)?,
-            tidy_records: match r.tidy_records {
-                Some(on) => on,
-                None => Plan::load(&self.app.store).or_fail()?.tidy_records,
-            },
+            tidy_records: r.tidy_records.unwrap_or(kept.tidy_records),
+            rest_after: r.rest_after.map_or(Ok(kept.rest_after), count)?,
         };
         plan.save(&self.app.store).or_fail()?;
         self.app.journal.record("setting", "dream changed");
