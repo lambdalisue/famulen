@@ -6,8 +6,8 @@ import { AttachedList, DraftList } from "~/components/Attachments";
 import Markdown from "~/components/Markdown";
 import { createPull } from "~/components/pull";
 import * as icons from "~/lib/icons";
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { ApprovalAnswer, type ConsoleMessage, Speaker } from "~/gen/famulen/v1/console_pb";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
+import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, ConsoleMessageSchema, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
 import { api } from "~/lib/api";
 import { ACCEPTED, createDrafts } from "~/lib/attachments";
@@ -16,6 +16,7 @@ import { workgroup } from "~/lib/workgroup";
 import { inboxQuery, messagesQuery } from "~/lib/data";
 import { useWaiting } from "~/lib/inbox";
 import { pushed, working } from "~/lib/events";
+import { createKept, createSame } from "~/lib/kept";
 import { excerptOf } from "~/lib/records";
 import { tabNamed } from "~/lib/tabs";
 import { useOwner } from "~/lib/owner";
@@ -27,7 +28,7 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
   const owner = () => props.m.who === Speaker.OWNER;
   const open = () => tabNamed(props.m.open);
   return (
-    <div class={owner() ? "msg owner" : "msg aide"} data-testid="message">
+    <div class={owner() ? "msg owner" : "msg aide"} data-testid="message" data-id={props.m.id.toString()}>
       <span class="meta">
         <Show when={!owner()}>
           <AideIcon size={20} />
@@ -56,7 +57,9 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
 }
 
 function Inbox(props: { aide: string }) {
-  const inbox = createAsync(() => inboxQuery());
+  const inbox = createKept(() => inboxQuery());
+  const heldOnes = createSame(HeldInputSchema, () => inbox()?.held ?? [], (h) => h.id);
+  const approvals = createSame(ApprovalSchema, () => inbox()?.approvals ?? [], (r) => r.id);
   const approve = async (id: bigint, answer: ApprovalAnswer, replies: string[] = []) => {
     await api.console.answerApproval({ id, answer, replies });
     await revalidate("inbox");
@@ -67,7 +70,7 @@ function Inbox(props: { aide: string }) {
   };
   return (
     <div id="approvals">
-      <For each={inbox()?.held}>
+      <For each={heldOnes()}>
         {(h) => (
           <div class="approval">
             <div class="row">
@@ -90,7 +93,7 @@ function Inbox(props: { aide: string }) {
           </div>
         )}
       </For>
-      <For each={inbox()?.approvals}>
+      <For each={approvals()}>
         {(r) => <ApprovalCard approval={r} onAnswer={(answer, replies) => void approve(r.id, answer, replies)} />}
       </For>
     </div>
@@ -101,11 +104,34 @@ const CHAT_WIDTH = 460;
 /** The least the page beside the conversation is left with. */
 const MAIN_LEAST = 560;
 
+/** What was said, as last read for one workgroup, and all that had come when it was asked for. */
+type Talk = { of: string; messages: ConsoleMessage[]; had: Came[] };
+/** A message that came since, for the workgroup it was shown in. */
+type Came = { of: string; m: ConsoleMessage };
+
 /** The conversation column. It stays mounted while pages change. */
 export default function Chat(props: { open: boolean; setOpen: (open: boolean) => void }) {
   const owner = useOwner();
-  const loaded = createAsync(() => messagesQuery(workgroup()));
-  const [extra, setExtra] = createSignal<ConsoleMessage[]>([]);
+  const [extra, setExtra] = createSignal<Came[]>([]);
+  const read = createAsync<Talk>((before) => {
+    const of = workgroup();
+    const same = before?.of === of ? before : undefined;
+    const had = untrack(extra);
+    return messagesQuery(of).then(
+      (said) => {
+        // Only the newest are read; what the owner reads further back is not taken away.
+        const first = said[0]?.id;
+        const earlier = same && first !== undefined && !follows ? untrack(messages).filter((m) => m.id < first) : [];
+        return { of, messages: [...earlier, ...said], had };
+      },
+      (e: unknown) => {
+        if (!before) throw e;
+        return same ?? { of, messages: [], had };
+      },
+    );
+  });
+  // Nothing is taken off the screen while it is read again.
+  const loaded = () => read.latest;
   const [text, setText] = createSignal("");
   const [error, setError] = createSignal("");
   const attached = createDrafts();
@@ -117,24 +143,55 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
 
   const aide = owner.aide;
   const tz = owner.tz;
-  const messages = () => {
-    // One pushed again is how it stands now, such as once its files came in.
-    const said = new Map<bigint, ConsoleMessage>();
-    for (const m of [...(loaded() ?? []), ...extra()]) said.set(m.id, m);
-    return [...said.values()].sort((a, b) => Number(a.id - b.id));
-  };
+  const messages = createSame(
+    ConsoleMessageSchema,
+    () => {
+      // One pushed again is how it stands now, such as once its files came in.
+      const said = new Map<bigint, ConsoleMessage>();
+      const talk = loaded();
+      for (const m of talk?.messages ?? []) said.set(m.id, m);
+      for (const { of, m } of extra()) if (of === talk?.of) said.set(m.id, m);
+      return [...said.values()].sort((a, b) => Number(a.id - b.id));
+    },
+    (m) => m.id,
+  );
   const last = () => [...messages()].reverse().find((m) => m.who === Speaker.AIDE);
   const waiting = useWaiting();
 
   // The newest stays in sight, whatever grows or shrinks, until the owner
-  // scrolls up to read what came before.
+  // scrolls up to read what came before. Then what is read stays where it is:
+  // the browser does not see to it, as Safari cannot.
   let follows = true;
   let was = { top: 0, height: 0, room: 0 };
+  /** The message at the top of what is seen and the part of it there, and how far below the top each begins. */
+  let reading: { id: string; at: number; part: Element; partAt: number } | undefined;
+  const offset = (message: Element, seen: HTMLElement) => message.getBoundingClientRect().top - seen.getBoundingClientRect().top;
+  const mark = (seen: HTMLElement) => {
+    const top = seen.getBoundingClientRect().top;
+    const below = (el: Element) => el.getBoundingClientRect().bottom > top;
+    const first = [...seen.querySelectorAll<HTMLElement>("[data-id]")].find(below);
+    const part = first && ([...first.querySelectorAll(".markdown-body > *, .attached > *")].find(below) ?? first);
+    reading = first?.dataset.id && part ? { id: first.dataset.id, at: offset(first, seen), part, partAt: offset(part, seen) } : undefined;
+    was = { top: seen.scrollTop, height: seen.scrollHeight, room: seen.clientHeight };
+  };
+  /** Put right what grew or shrank above what is read, but for how far the owner scrolled since. */
+  const hold = (seen: HTMLElement) => {
+    if (!reading) return;
+    // What is drawn anew, as once its files came in, is found again by its message.
+    const { part, partAt, id, at } = reading;
+    const message = part.isConnected ? part : seen.querySelector(`[data-id="${id}"]`);
+    if (!message) return;
+    const by = offset(message, seen) - ((part.isConnected ? partAt : at) - (seen.scrollTop - was.top));
+    if (Math.abs(by) >= 1) seen.scrollTop += by;
+  };
   const onScroll = (e: Event & { currentTarget: HTMLElement }) => {
-    const { scrollTop: top, scrollHeight: height, clientHeight: room } = e.currentTarget;
+    const seen = e.currentTarget;
+    const { scrollTop: top, scrollHeight: height, clientHeight: room } = seen;
+    if (room === 0) return;
     if (height - top - room < 40) follows = true;
     else if (top < was.top && height === was.height && room === was.room) follows = false;
-    was = { top, height, room };
+    if (!follows && height !== was.height) hold(seen);
+    mark(seen);
   };
   const toBottom = () => {
     follows = true;
@@ -144,7 +201,10 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     if (!list || !said) return;
     const seen = list;
     const sized = new ResizeObserver(() => {
+      if (seen.clientHeight === 0) return;
       if (follows) seen.scrollTop = seen.scrollHeight;
+      else hold(seen);
+      mark(seen);
     });
     sized.observe(seen);
     sized.observe(said);
@@ -189,11 +249,16 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     open: () => props.open,
     setOpen: (open) => props.setOpen(open),
   });
+  let shown = untrack(() => loaded()?.of);
   createEffect(
     on(
       loaded,
-      () => {
-        setExtra([]);
+      (talk) => {
+        if (!talk) return;
+        // What came while it was read is not in it, or not as it stands now.
+        setExtra((e) => e.filter((x) => x.of === talk.of && !talk.had.includes(x)));
+        if (shown === talk.of) return;
+        shown = talk.of;
         toBottom();
       },
       { defer: true },
@@ -202,9 +267,8 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   createEffect(
     on(
       pushed,
-      (m) => {
-        if (!m) return;
-        setExtra((e) => [...e.filter((x) => x.id !== m.id), m]);
+      (came) => {
+        if (came) setExtra((e) => [...e.filter((x) => x.m.id !== came.m.id), came]);
       },
       { defer: true },
     ),
@@ -224,10 +288,11 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
       return;
     }
     setError("");
+    const of = workgroup();
     try {
       const m = await api.console.send({
         text: body,
-        workgroup: workgroup(),
+        workgroup: of,
         view: view(),
         selection: selection(),
         attachments: files.flatMap((f) => f.id ?? []),
@@ -235,7 +300,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
       setText("");
       attached.remove(files);
       setSelection("");
-      setExtra((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]));
+      setExtra((x) => (x.some((y) => y.m.id === m.id) ? x : [...x, { of, m }]));
       toBottom();
     } catch (err) {
       setError(message(err));

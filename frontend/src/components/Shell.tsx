@@ -1,6 +1,6 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Title } from "@solidjs/meta";
-import { createAsync, revalidate, useLocation, useNavigate } from "@solidjs/router";
+import { revalidate, useLocation, useNavigate } from "@solidjs/router";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup, tint } from "~/lib/workgroup";
@@ -11,6 +11,7 @@ import { followNotices, lapsed } from "~/lib/notices";
 import { useParam, withParams } from "~/lib/params";
 import { statusQuery, workgroupsQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
+import { createKept } from "~/lib/kept";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { followKeyboard, isNarrow } from "~/lib/viewport";
 import { pageTitle } from "~/lib/view";
@@ -23,7 +24,7 @@ import { ConfirmHost, ErrorState, Icon, LinkButton, List, Loading, SideSheet, To
 
 /** How the secretary is, in a word; pressing it opens the whole state. */
 function Alive() {
-  const status = createAsync(() => statusQuery());
+  const status = createKept(() => statusQuery());
   const waiting = useWaiting();
   const busy = () => status()?.state === "running";
   return (
@@ -50,7 +51,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
   const navigate = useNavigate();
   const confirm = useParam("confirm");
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = createKept(() => workgroupsQuery());
   const owner = useOwner();
   followPortrait();
   const [chatOpen, setChatOpen] = createSignal(false);
