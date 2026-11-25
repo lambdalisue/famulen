@@ -1,10 +1,9 @@
-import { createAsync } from "@solidjs/router";
 import { createEffect, For, type JSX, onCleanup, onMount } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import { Icon, IconButton, Segmented, Tag, TextField } from "~/components/ui";
 import { own } from "~/lib/colors";
 import { say } from "~/lib/act";
-import { workgroupsQuery } from "~/lib/data";
+import { useWorkgroups } from "~/lib/workgroups";
 import * as icons from "~/lib/icons";
 import { KIND_NAMES, type Rec } from "~/lib/records";
 import type { SaveRecord } from "./useRecordEdit";
@@ -83,7 +82,7 @@ function Labels(props: { record: Rec; save: SaveRecord }) {
 }
 
 function Workgroups(props: { record: Rec; save: SaveRecord }) {
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   return (
     <span class="chips-line" role="group" aria-label="入るワークグループ">
       <For each={(workgroups() ?? []).filter((w) => w.id !== "all")}>

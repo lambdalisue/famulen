@@ -17,6 +17,16 @@ export function createKept<T>(read: () => Promise<T>) {
 }
 
 /**
+ * What is read in a dialog or a sheet that is open: undefined until it is read
+ * first, then what it said last while it is read again. Waiting for it by the
+ * Suspense around would take the form off the screen, and the focus with it.
+ */
+export function createLate<T>(read: () => Promise<T>) {
+  const late = createAsync<T | undefined>(read, { initialValue: undefined });
+  return () => late.latest;
+}
+
+/**
  * A list read again, with each item that says what it said before as the same
  * object, so that `For` leaves its elements, and what the owner does in them, alone.
  */

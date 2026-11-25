@@ -4,6 +4,7 @@ import { FileRoutes } from "@solidjs/start/router";
 import { Suspense } from "solid-js";
 import Shell from "./components/Shell";
 import { OwnerProvider } from "./lib/owner";
+import { WorkgroupsProvider } from "./lib/workgroups";
 import "./app.css";
 
 export default function App() {
@@ -13,7 +14,9 @@ export default function App() {
         <MetaProvider>
           <Suspense>
             <OwnerProvider>
-              <Shell>{props.children}</Shell>
+              <WorkgroupsProvider>
+                <Shell>{props.children}</Shell>
+              </WorkgroupsProvider>
             </OwnerProvider>
           </Suspense>
         </MetaProvider>

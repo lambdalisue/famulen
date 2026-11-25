@@ -1,7 +1,6 @@
-import { createAsync } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { type LookoutDefault, type LookoutPlace, LookoutRoute } from "~/gen/famulen/v1/lookout_pb";
-import { workgroupsQuery } from "~/lib/data";
+import { useWorkgroups } from "~/lib/workgroups";
 import { Checkbox, Field, Segmented, Select, TextField } from "~/components/ui";
 
 /** Whether the default interval is used or overridden, in a dialog that saves it later. */
@@ -151,7 +150,7 @@ export function PlacesField(props: {
 export const WHOLE = "all";
 
 export function WorkgroupField(props: { workgroup: string; setWorkgroup: (id: string) => void }) {
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   return (
     <Field label="ワークグループ" hint="拾ったものを、このワークグループのこととして扱う。">
       <Select onChange={(e) => props.setWorkgroup(e.currentTarget.value)}>

@@ -1,9 +1,10 @@
 import { Dialog } from "@ark-ui/solid/dialog";
-import type { JSX } from "solid-js";
+import { type JSX, Suspense } from "solid-js";
 import { Portal } from "solid-js/web";
 import * as icons from "~/lib/icons";
 import { buttonClass, IconButton } from "./Button";
 import Icon from "./Icon";
+import { Loading } from "./feedback";
 import { createResizer } from "./resize";
 
 /**
@@ -43,7 +44,9 @@ export default function SideSheet(props: { name: string; title: string; children
               </Dialog.CloseTrigger>
             </div>
           </header>
-          <div class="side-sheet-body">{props.children}</div>
+          <div class="side-sheet-body">
+            <Suspense fallback={<Loading />}>{props.children}</Suspense>
+          </div>
         </Dialog.Content>
       </Dialog.Positioner>
     </Portal>

@@ -3,7 +3,7 @@ import { createSignal, For, Match, Show, Switch } from "solid-js";
 import { DelegatedPage, DelegatedSummary, Delegation } from "~/components/records/Delegated";
 import RecordDetail from "~/components/records/detail/RecordDetail";
 import RecordsPage, { type Group } from "~/components/records/RecordsPage";
-import { AddRoutine, routineParts, Runs } from "~/components/records/RoutineParts";
+import { AddRoutine, Runs, useRoutineParts } from "~/components/records/RoutineParts";
 import { finish, taskParts } from "~/components/records/TaskRow";
 import { Button, Callout, IconButton, List, ListRow, Segmented, whenConfirmed } from "~/components/ui";
 import { shortTime } from "~/lib/dates";
@@ -102,6 +102,27 @@ function Wakes() {
   );
 }
 
+function Routines() {
+  const parts = useRoutineParts();
+  const [adding, setAdding] = createSignal(false);
+  return (
+    <>
+      <RecordsPage
+        kind="routines"
+        base="/tasks?tab=routines"
+        title="定期タスク"
+        tools={<Tabs tab="routines" />}
+        narrow={["Assignee"]}
+        row={parts}
+        detail={(id) => <RecordDetail kind="routines" id={id} back="/tasks?tab=routines" top={(r) => <Runs routine={r()} />} />}
+        add={{ label: "定期タスクを足す", onAdd: () => setAdding(true) }}
+        empty="定期タスクはまだない"
+      />
+      <AddRoutine open={adding()} onOpenChange={setAdding} />
+    </>
+  );
+}
+
 export default function Tasks() {
   const owner = useOwner();
   const asked = useParam("tab");
@@ -111,7 +132,6 @@ export default function Tasks() {
     section: () => "タスク",
     sub: () => TABS.find(([t]) => t === tab() && t !== "once")?.[1] ?? "",
   });
-  const [adding, setAdding] = createSignal(false);
 
   const groups = (records: Rec[]): Group[] => {
     const sorted = [...records].sort(order);
@@ -158,18 +178,7 @@ export default function Tasks() {
         />
       </Match>
       <Match when={tab() === "routines"}>
-        <RecordsPage
-          kind="routines"
-          base="/tasks?tab=routines"
-          title="定期タスク"
-          tools={<Tabs tab="routines" />}
-          narrow={["Assignee"]}
-          row={routineParts}
-          detail={(id) => <RecordDetail kind="routines" id={id} back="/tasks?tab=routines" top={(r) => <Runs routine={r()} />} />}
-          add={{ label: "定期タスクを足す", onAdd: () => setAdding(true) }}
-          empty="定期タスクはまだない"
-        />
-        <AddRoutine open={adding()} onOpenChange={setAdding} />
+        <Routines />
       </Match>
       <Match when={tab() === "delegated"}>
         <DelegatedPage tools={<Tabs tab="delegated" />} detail={task("/tasks?tab=delegated")} />

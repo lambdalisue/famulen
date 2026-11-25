@@ -6,12 +6,13 @@ import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup
 import { chooseWorkgroup, workgroup } from "~/lib/workgroup";
 import { own } from "~/lib/colors";
 import { followTheme } from "~/lib/theme";
+import { useWorkgroups } from "~/lib/workgroups";
 import { approvalId, useWaiting } from "~/lib/inbox";
 import { look, say } from "~/lib/act";
 import { api } from "~/lib/api";
 import { followNotices, lapsed } from "~/lib/notices";
 import { useParam, withParams } from "~/lib/params";
-import { statusQuery, workgroupsQuery } from "~/lib/data";
+import { statusQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { createKept } from "~/lib/kept";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
@@ -55,7 +56,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
   const navigate = useNavigate();
   const confirm = useParam("confirm");
-  const workgroups = createKept(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   const owner = useOwner();
   followPortrait();
   const [chatOpen, setChatOpen] = createSignal(false);

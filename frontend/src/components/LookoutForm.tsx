@@ -1,4 +1,3 @@
-import { createAsync } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
 import { ARRIVED } from "~/components/LookoutInterval";
 import { IntervalField, PlacesField, RouteField, WHOLE, WorkgroupField } from "~/components/LookoutFields";
@@ -7,6 +6,7 @@ import { type LookoutDefault, type LookoutPlace, type LookoutPreset, LookoutRout
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { connectionsQuery, lookoutChoicesQuery, workspacesQuery } from "~/lib/connections";
+import { createLate } from "~/lib/kept";
 import * as icons from "~/lib/icons";
 import { DialogActions, Disclosure, Field, Select, TextField } from "~/components/ui";
 
@@ -17,14 +17,14 @@ export default function LookoutForm(props: {
   sources: LookoutSource[];
   onDone: () => void;
 }) {
-  const list = createAsync(() => connectionsQuery());
-  const spaces = createAsync(() => workspacesQuery());
+  const list = createLate(() => connectionsQuery());
+  const spaces = createLate(() => workspacesQuery());
   const [name, setName] = createSignal("");
   const [connection, setConnection] = createSignal("");
   const [tool, setTool] = createSignal("");
   const [args, setArgs] = createSignal("");
   const [advanced, setAdvanced] = createSignal(false);
-  const choices = createAsync(async () => {
+  const choices = createLate(async () => {
     const id = connection();
     return id ? { id, ...(await lookoutChoicesQuery(id)) } : undefined;
   });

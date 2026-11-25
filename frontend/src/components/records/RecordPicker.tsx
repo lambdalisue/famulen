@@ -1,6 +1,7 @@
-import { createAsync, query } from "@solidjs/router";
+import { query } from "@solidjs/router";
 import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { api } from "~/lib/api";
+import { createLate } from "~/lib/kept";
 import * as icons from "~/lib/icons";
 import { KIND_NAMES, kindsQuery, matches, type Rec } from "~/lib/records";
 import { Button, Dialog, SearchBox } from "~/components/ui";
@@ -15,7 +16,7 @@ const pickQuery = query(async (kinds: string) => {
 const SHOWN = 50;
 
 function Choices(props: { kinds?: string[]; onPick: (r: Rec) => void }) {
-  const all = createAsync(() => pickQuery(props.kinds?.join(",") ?? ""));
+  const all = createLate(() => pickQuery(props.kinds?.join(",") ?? ""));
   const [words, setWords] = createSignal("");
   const [at, setAt] = createSignal(0);
   const found = () => (all() ?? []).filter((r) => matches(r, words())).slice(0, SHOWN);
@@ -46,7 +47,7 @@ function Choices(props: { kinds?: string[]; onPick: (r: Rec) => void }) {
         }}
       />
       <ul class="pick-list" ref={list}>
-        <For each={found()} fallback={<li class="empty">見つからない</li>}>
+        <For each={found()} fallback={<li class="empty">{all() ? "見つからない" : "読み込んでいる"}</li>}>
           {(r, n) => (
             <li>
               <button type="button" class="folder-item" aria-current={n() === at() ? "true" : undefined} onClick={() => props.onPick(r)}>
