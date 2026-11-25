@@ -67,8 +67,8 @@ textarea.input { padding: var(--s2) 10px; min-height: 112px; width: 100%; line-h
 .choice:hover { background: var(--soft); }
 .choice .grow { display: flex; flex-direction: column; }
 
-/* Tags. */
-.tag { flex-shrink: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); line-height: 1.5; border-radius: var(--r-full); padding: 2px 8px; border: 1px solid transparent; background: var(--soft); color: var(--ink2); overflow-wrap: anywhere; text-decoration: none; }
+/* Tags. Round to the ends on one line; a long one that wraps is no ellipse. */
+.tag { flex-shrink: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); line-height: 1.5; border-radius: 20px; padding: 2px 8px; border: 1px solid transparent; background: var(--soft); color: var(--ink2); overflow-wrap: anywhere; text-decoration: none; }
 .tag.said { background: var(--ink); color: var(--on-ink); }
 .tag.ok, .tag.aide { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 .tag.guess { background: var(--card); color: var(--muted); border-color: var(--line-strong); }
@@ -85,9 +85,10 @@ textarea.input { padding: var(--s2) 10px; min-height: 112px; width: 100%; line-h
 .tag.missing { color: var(--danger); text-decoration: line-through; }
 button.tag { cursor: pointer; font-family: inherit; min-height: 24px; }
 .tag.removable { padding-right: 2px; }
-.tag.removable > button { width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; padding: 0; cursor: pointer; color: inherit; display: inline-flex; align-items: center; justify-content: center; }
+.tag.removable > button { flex: none; width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; padding: 0; cursor: pointer; color: inherit; display: inline-flex; align-items: center; justify-content: center; }
 .tag.removable > button:hover { background: rgba(27, 27, 25, .1); }
-.tag.removable .tag { padding: 0; border: 0; background: transparent; }
+/* A long title wraps inside, leaving room for the button that takes it off. */
+.tag.removable .tag { flex-shrink: 1; min-width: 0; padding: 0; border: 0; background: transparent; }
 .chips, .chips-line, .chips-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; list-style: none; margin: 0; padding: 0; }
 .chips-edit > .input { width: 132px; min-height: 28px; font-size: var(--t-sm); }
 .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r-full); padding: 2px 4px 2px 10px; font-size: var(--t-xs); color: var(--accent-ink); overflow-wrap: anywhere; }

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { agree, call, detail, record, toast, visit } from "./support";
 
 const back = (page: Parameters<typeof detail>[0], text: string) => detail(page).locator(".rec-links").filter({ hasText: text });
@@ -81,3 +81,59 @@ test("a memory that links to a record shows on it, and leads back", async ({ pag
   await page.getByRole("link", { name: "記憶が触れるメモ" }).click();
   await expect(page).toHaveURL(new RegExp(`id=${memo.id}`));
 });
+
+const SENTENCE = "キャサリン（Katherine Montgomery）（Slack・アットマーク、U09ABCDEFGH）：地区の区分（関東・関西・東海・福岡）の定義を確認している。";
+
+const roundness = (of: Locator) => of.evaluate((el) => Number.parseFloat(getComputedStyle(el).borderTopLeftRadius));
+
+/** The links of one kind are in square rows below their name, as wide as the section they are in. */
+async function expectRows(page: Page, name: string) {
+  const links = back(page, name);
+  const row = links.getByRole("listitem");
+  await expect(row).toHaveText(new RegExp(SENTENCE.slice(0, 20)));
+  const [section, label, rowBox] = [await links.boundingBox(), await links.getByText(name, { exact: true }).boundingBox(), await row.boundingBox()];
+  if (!section || !label || !rowBox) throw new Error(`no ${name}`);
+  expect(rowBox.y).toBeGreaterThanOrEqual(label.y + label.height);
+  expect(rowBox.width).toBeGreaterThanOrEqual(section.width - 4);
+  expect(await links.getByRole("list").evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  // What opens it is the whole row, and no part of it is a chip.
+  await expect(links.locator(".tag")).toHaveCount(0);
+  expect(await roundness(links.getByRole("list"))).toBeLessThanOrEqual(20);
+}
+
+for (const width of [390, 1280]) {
+  test(`at ${width}, long memories and titles that link here are read in rows of the full width`, async ({ page, request }) => {
+    // High enough for the whole record to be in the pictures.
+    await page.setViewportSize({ width, height: 1400 });
+    const party = await record(request, "parties", `長い文でつながる相手 ${width}`, { fields: { Kind: "person" } });
+    const other = await record(request, "memos", `${SENTENCE.repeat(2)}（関わる ${width}）`);
+    await record(request, "memos", `${SENTENCE}（触れる ${width}）`, { notes: `[[${party.code}]]` });
+    await call(request, "RecordService", "SaveRecord", {
+      kind: "parties",
+      id: party.id,
+      fields: [
+        { name: "Kind", value: "person" },
+        { name: "Related", value: `[[${other.code}]]` },
+      ],
+    });
+    await call(request, "MemoryService", "WriteFile", {
+      path: "long/semantic/e2e-long-link.md",
+      text: `---\nid: e2e-long-link\nsummary: ${SENTENCE}\nsrc: said\n---\n\n[[${other.code}]] を見る。\n`,
+    });
+
+    await visit(page, `/parties?id=${party.id}`, /^相手/);
+    await expectRows(page, "触れているメモ");
+    // A chip keeps to its column with the button that takes it off, and is no ellipse.
+    const chip = detail(page).locator(".tag.removable").filter({ hasText: `関わる ${width}` });
+    const [tag, off] = [await chip.boundingBox(), await chip.getByRole("button").boundingBox()];
+    if (!tag || !off) throw new Error("no chip");
+    expect(tag.height).toBeGreaterThan(40);
+    expect(off.x + off.width).toBeLessThanOrEqual(tag.x + tag.width);
+    expect(await roundness(chip)).toBeLessThanOrEqual(20);
+
+    await detail(page).screenshot({ path: test.info().outputPath("related.png") });
+    await visit(page, `/memos?id=${other.id}`, /^メモ/);
+    await expectRows(page, "触れている記憶");
+    await detail(page).screenshot({ path: test.info().outputPath("memories.png") });
+  });
+}

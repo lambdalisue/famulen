@@ -156,7 +156,8 @@
 textarea.input.rec-notes { min-height: 300px; font-family: var(--mono); line-height: 1.7; }
 .rec-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 var(--mono); background: var(--soft); border-radius: 10px; padding: 14px; max-height: 60vh; overflow-y: auto; }
 .rec .rec-raw { max-height: none; }
-.rec-links { display: grid; grid-template-columns: minmax(84px, 132px) minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.rec-links { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rec-links .item-title { font-weight: 400; line-height: 1.6; }
 .rec-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 88ch; }
 .rec-log li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: baseline; font-size: var(--t-base); }
 .rec-log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
