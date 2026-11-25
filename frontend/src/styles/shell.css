@@ -26,6 +26,10 @@
 .tab.on { border-bottom-color: var(--workgroup); color: var(--ink); font-weight: 600; }
 .tabs .gap { flex: 1; }
 .pane { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 26px; display: flex; flex-direction: column; gap: var(--s4); }
+/* What is placed within a part that scrolls, such as the hidden input of a switch, is cut off with it: placed against the page it would make the page itself scroll. */
+@media not (--phone) {
+  .pane, .side, .split-left, .split-scroll, .detail, .run-plan, .messages, #approvals { position: relative; }
+}
 /* A page in two columns scrolls each by itself. */
 .pane:has(> .framed, > .split-pane) { padding: 0; overflow: hidden; gap: 0; }
 .framed { flex: 1; min-height: 0; display: flex; }
