@@ -146,39 +146,6 @@ export default function Shell(props: { children?: JSX.Element }) {
       <Title>
         {tab().label} · {aide()}
       </Title>
-      <header class="topbar">
-        <span class="logo">
-          <AideIcon size={32} />
-        </span>
-        <span class="brand">
-          <b>{aide()}</b>
-          <small>Famulen</small>
-        </span>
-        <div class="wg-tabs" role="group" aria-label="ワークグループ">
-          <For each={workgroups()}>
-            {(c) => (
-              <button
-                type="button"
-                aria-pressed={c.id === current()?.id}
-                class={`wg-btn${c.id === current()?.id ? " on" : ""}`}
-                onClick={() => choose(c.id)}
-              >
-                <span class="dot" style={{ background: c.color }} />
-                {c.name}
-              </button>
-            )}
-          </For>
-          <a class="wg-btn" href="/settings/workgroups" aria-label="ワークグループを足す">
-            <Icon svg={icons.plus} size={14} />
-          </a>
-        </div>
-        <span class="wg-hint">
-          {current()?.id === "all" || !current()
-            ? "すべてのワークグループを使う"
-            : `${current()?.name}のものだけを使い、ほかの予定は薄く出す`}
-        </span>
-        <Alive />
-      </header>
       <header id="m-head" class="m-head">
         <Show when={wayBack(location.pathname, location.search)}>
           {(back) => (
@@ -202,6 +169,39 @@ export default function Shell(props: { children?: JSX.Element }) {
       <div class="body">
         <Chat open={chatOpen()} setOpen={setChatOpen} />
         <div id="main" class="main">
+          <header class="topbar">
+            <span class="logo">
+              <AideIcon size={32} />
+            </span>
+            <span class="brand">
+              <b>{aide()}</b>
+              <small>Famulen</small>
+            </span>
+            <div class="wg-tabs" role="group" aria-label="ワークグループ">
+              <For each={workgroups()}>
+                {(c) => (
+                  <button
+                    type="button"
+                    aria-pressed={c.id === current()?.id}
+                    class={`wg-btn${c.id === current()?.id ? " on" : ""}`}
+                    onClick={() => choose(c.id)}
+                  >
+                    <span class="dot" style={{ background: c.color }} />
+                    {c.name}
+                  </button>
+                )}
+              </For>
+              <a class="wg-btn" href="/settings/workgroups" aria-label="ワークグループを足す">
+                <Icon svg={icons.plus} size={14} />
+              </a>
+            </div>
+            <span class="wg-hint">
+              {current()?.id === "all" || !current()
+                ? "すべてのワークグループを使う"
+                : `${current()?.name}のものだけを使い、ほかの予定は薄く出す`}
+            </span>
+            <Alive />
+          </header>
           <nav class="tabs" aria-label="セクション">
             <For each={SECTIONS}>
               {(t) => (

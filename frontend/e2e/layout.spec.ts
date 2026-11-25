@@ -167,6 +167,53 @@ test.describe("the left and the right each scroll by themselves", () => {
   }
 });
 
+test.describe("the conversation is as high as the window, with the bar over the pages alone", () => {
+  const box = (page: Page, of: string) =>
+    page.locator(of).evaluate((el) => {
+      const { left, top, right, bottom } = el.getBoundingClientRect();
+      return { left, top, right, bottom };
+    });
+
+  // 701 is the narrowest window with the two side by side.
+  for (const width of [701, ...WIDTHS.filter((w) => w > 700)]) {
+    test(`at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, "/tasks");
+      const chat = await box(page, ".chat");
+      const messages = await box(page, ".messages");
+      const bar = await box(page, ".topbar");
+      const tabs = await box(page, ".tabs");
+      expect(chat).toMatchObject({ left: 0, top: 0, bottom: 900 });
+      expect(messages.top).toBe(0);
+      expect(bar).toMatchObject({ left: chat.right, top: 0, right: width, bottom: tabs.top });
+      await expect(page.locator(".topbar .logo")).toBeInViewport({ ratio: 1 });
+      await expect(page.locator(".topbar .brand")).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("button", { name: "秘書の状態" })).toBeInViewport({ ratio: 1 });
+      await page.locator(".topbar").getByRole("link", { name: "ワークグループを足す" }).click();
+      await expect(page).toHaveURL(/settings\/workgroups/);
+    });
+  }
+
+  test("a long name leaves the bar room for the rest", async ({ page }) => {
+    await page.setViewportSize({ width: 701, height: 900 });
+    await open(page, "/tasks");
+    const name = page.locator(".topbar .brand b");
+    await name.evaluate((el) => (el.textContent = "とても長い名前を主人に付けてもらった秘書の名前".repeat(2)));
+    await expect(page.getByRole("button", { name: "秘書の状態" })).toBeInViewport({ ratio: 1 });
+    expect(await box(page, ".topbar")).toMatchObject({ right: 701 });
+    expect(await page.locator(".wg-tabs").evaluate((el) => el.clientWidth)).toBeGreaterThan(100);
+  });
+
+  test("a phone keeps its own bar over the whole width", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await open(page, "/tasks");
+    await expect(page.locator(".topbar")).toBeHidden();
+    const head = await box(page, "#m-head");
+    expect(head).toMatchObject({ left: 0, top: 0, right: 700 });
+    expect(await box(page, "#main")).toMatchObject({ left: 0, top: head.bottom, right: 700, bottom: 900 });
+  });
+});
+
 test("a phone shows a record over its list, and the list comes back", async ({ page, request }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const memo = await record(request, "memos", "幅の狭い画面のメモ", { notes: "本文" });
