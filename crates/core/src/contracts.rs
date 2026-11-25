@@ -52,7 +52,7 @@ const SYSTEM: &str = "\
 You read a mail sent to the owner of a personal secretary, and say which contracts it tells of, so that they are kept among the owner's contracts.
 A contract goes on over time: a subscription, a licence, a cloud, AI or developer service, a domain or server, a phone or internet line, electricity or gas, \
 insurance, a gym, a newspaper, a card or membership with a fee, an extended warranty, instalments.
-Only what the owner, or the company they act for, holds or pays for. Not a thing bought once, a free account, an offer or advertisement, what others pay for, \
+Only what the owner, or the company they act for, holds or pays for. Not a thing bought once, a free account, leave given to take payments (such as a PayPal billing agreement, 請求処理規約), points or coupons, an offer or advertisement, what others pay for, \
 or an invoice the owner sends to a customer. Answer none when it tells of none. For each:
 - event: signed (it was made, or will start), billed (a bill, a receipt or a renewal that was charged), notice (it goes on and something of it is told, such as a renewal or price to come), \
 cancelled (it was cancelled, though it may run on to a day) or ended (it ran out, was closed or suspended). A payment that failed is neither billed nor ended unless the service stopped.
@@ -60,6 +60,7 @@ cancelled (it was cancelled, though it may run on to a day) or ended (it ran out
 - contract: the id of the known contract it is, when one is the same service and account, whatever its wording and even when its plan changed; empty otherwise.
 - name (what the owner would call it, such as Netflix; a service's own name, such as GitHub Copilot, and a domain's, such as example.com), provider (who it is with), plan, number (the contract's own lasting number, never one of an invoice, order or receipt), category (such as 動画, 音楽, クラウド, AI, 開発, 通信, 電気・ガス, 保険, ジム, 新聞・雑誌, ドメイン・サーバー, カード, 会員, 保証, 分割払い; one the owner already has when it fits).
 - price for one cycle (such as 1980 JPY), cycle (monthly, yearly or once), auto_renew (yes or no). Empty when unknown; never guess.
+A card's statement of what was bought with it says the card goes on (notice) but is no price of it; only its own fee is. What a line of a statement was paid for is no contract by itself.
 - payment: how it is paid, such as Visa 1234 or 口座振替. Never a whole card or account number.
 - covers: the ids of the owner's things it is a warranty, insurance or instalment plan for, of those shown; none when not sure.
 Never write a password, a token, a whole card number or a link.
