@@ -238,7 +238,7 @@ impl Job {
             .stderr(Stdio::inherit());
         let process = Process::start(command)
             .with_context(|| format!("could not start {}", launch.program))?;
-        let tally = Tally::begin(self.app.models.clone(), spec)?;
+        let tally = Tally::begin(self.run, self.app.models.clone(), spec)?;
         Ok(Started {
             process,
             input: launch.input,
@@ -437,6 +437,7 @@ impl Drop for Process {
 
 /// What a worker used, counted as it goes: one cut off has used it too.
 struct Tally {
+    run: i64,
     models: Models,
     spec: ModelSpec,
     /// Input and output tokens of each of the model's messages.
@@ -445,9 +446,9 @@ struct Tally {
 
 impl Tally {
     /// Count the run itself, before it has used anything.
-    fn begin(models: Models, spec: ModelSpec) -> anyhow::Result<Self> {
-        models.record(
-            Role::Worker,
+    fn begin(run: i64, models: Models, spec: ModelSpec) -> anyhow::Result<Self> {
+        models.record_run(
+            run,
             &spec,
             &Usage {
                 calls: 1,
@@ -455,6 +456,7 @@ impl Tally {
             },
         )?;
         Ok(Self {
+            run,
             models,
             spec,
             messages: HashMap::new(),
@@ -470,7 +472,7 @@ impl Tally {
             output_tokens: Some(output),
             calls: 0,
         };
-        if let Err(error) = self.models.record(Role::Worker, &self.spec, &usage) {
+        if let Err(error) = self.models.record_run(self.run, &self.spec, &usage) {
             tracing::warn!(%error, "could not count what a worker used");
         }
     }

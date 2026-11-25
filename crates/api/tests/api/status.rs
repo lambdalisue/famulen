@@ -215,3 +215,42 @@ async fn usage_is_this_month_unless_asked_and_refuses_a_day_that_is_none() {
         "{refused}"
     );
 }
+
+#[tokio::test]
+async fn usage_tells_which_delegated_task_used_what() {
+    let dir = temp();
+    let api = open(&dir);
+    let order = famulen_core::workers::Order {
+        code: "task-abc123".into(),
+        title: "直す".into(),
+        ..Default::default()
+    };
+    let run = api.app().workers.runs.begin("t1", &order).unwrap();
+    let models = &api.app().models;
+    models
+        .record_run(run.id, &priced("a"), &used(10, 1))
+        .unwrap();
+    models
+        .record(Role::Worker, &priced("a"), &used(5, 1))
+        .unwrap();
+
+    let rows = json!([
+        { "role": "ROLE_WORKER", "model": "a", "calls": "1", "inputTokens": "10",
+          "outputTokens": "1", "yen": 12.0, "metered": true },
+    ]);
+    let usage = call(&api, "ModelService/GetUsage", json!({})).await;
+    assert_eq!(
+        usage["runs"],
+        json!([
+            { "run": run.id.to_string(), "task": "t1", "code": "task-abc123", "title": "直す",
+              "rows": rows },
+        ])
+    );
+    let output = call(
+        &api,
+        "WorkerService/ReadRun",
+        json!({ "id": run.id.to_string() }),
+    )
+    .await;
+    assert_eq!(output["usage"], rows);
+}

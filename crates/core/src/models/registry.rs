@@ -395,8 +395,25 @@ impl Models {
     }
 
     pub fn record(&self, role: Role, model: &ModelSpec, usage: &Usage) -> anyhow::Result<f64> {
+        self.record_of(role, None, model, usage)
+    }
+
+    /// Record what a run of a delegated task used.
+    pub fn record_run(&self, run: i64, model: &ModelSpec, usage: &Usage) -> anyhow::Result<f64> {
+        self.record_of(Role::Worker, Some(run), model, usage)
+    }
+
+    fn record_of(
+        &self,
+        role: Role,
+        run: Option<i64>,
+        model: &ModelSpec,
+        usage: &Usage,
+    ) -> anyhow::Result<f64> {
         let cost = estimate_cost_yen(&model.price, usage);
-        self.store.conn().execute(
+        let conn = self.store.conn();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO usage (at, role, model, input_tokens, output_tokens, calls, cost_yen)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -409,6 +426,13 @@ impl Models {
                 cost
             ],
         )?;
+        if let Some(run) = run {
+            tx.execute(
+                "INSERT OR REPLACE INTO usage_runs (usage, run) VALUES (?1, ?2)",
+                [tx.last_insert_rowid(), run],
+            )?;
+        }
+        tx.commit()?;
         Ok(cost)
     }
 

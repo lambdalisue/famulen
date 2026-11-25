@@ -35,7 +35,16 @@ pub struct UsageRow {
     pub calls: i64,
     pub input_tokens: i64,
     pub output_tokens: i64,
+    /// The part of the input read from a cache, where it is known.
+    pub cached_tokens: Option<i64>,
     pub cost_yen: f64,
+}
+
+/// What a run of a delegated task used.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunUsage {
+    pub run: i64,
+    pub rows: Vec<UsageRow>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +59,8 @@ pub struct UsageReport {
     pub today: NaiveDate,
     pub buckets: Vec<UsageBucket>,
     pub rows: Vec<UsageRow>,
+    /// The runs of delegated tasks, the one that used the most tokens first.
+    pub runs: Vec<RunUsage>,
     /// Every model used in the year the period starts in, first used first,
     /// so a model keeps its place whichever part of the year is shown.
     pub models: Vec<String>,
@@ -121,6 +132,7 @@ impl UsagePeriod {
 
 struct Call {
     day: NaiveDate,
+    run: Option<i64>,
     row: UsageRow,
 }
 
@@ -133,11 +145,40 @@ fn sum<'a>(calls: impl Iterator<Item = &'a Call>) -> Vec<UsageRow> {
                 sum.calls += row.calls;
                 sum.input_tokens += row.input_tokens;
                 sum.output_tokens += row.output_tokens;
+                sum.cached_tokens = match (sum.cached_tokens, row.cached_tokens) {
+                    (None, None) => None,
+                    (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+                };
                 sum.cost_yen += row.cost_yen;
             })
             .or_insert_with(|| row.clone());
     }
     rows.into_values().collect()
+}
+
+fn by_run<'a>(calls: impl Iterator<Item = &'a Call>) -> Vec<RunUsage> {
+    let mut runs: BTreeMap<i64, Vec<&Call>> = BTreeMap::new();
+    for call in calls {
+        if let Some(run) = call.run {
+            runs.entry(run).or_default().push(call);
+        }
+    }
+    let mut runs: Vec<_> = runs
+        .into_iter()
+        .map(|(run, calls)| RunUsage {
+            run,
+            rows: sum(calls.into_iter()),
+        })
+        .collect();
+    runs.sort_by_key(|r| {
+        std::cmp::Reverse(
+            r.rows
+                .iter()
+                .map(|r| r.input_tokens + r.output_tokens)
+                .sum::<i64>(),
+        )
+    });
+    runs
 }
 
 impl Models {
@@ -165,20 +206,7 @@ impl Models {
                 },
                 tz,
             )?;
-            let mut metered: BTreeSet<String> = calls
-                .iter()
-                .filter(|c| c.row.cost_yen > 0.0)
-                .map(|c| c.row.model.clone())
-                .collect();
-            metered.extend(
-                self.registered()?
-                    .into_iter()
-                    .filter(|m| m.spec.price.is_metered())
-                    .map(|m| m.spec.id),
-            );
-            for call in &mut calls {
-                call.row.metered = metered.contains(&call.row.model);
-            }
+            self.mark_metered(&mut calls)?;
             calls
         };
         let mut models: Vec<String> = Vec::new();
@@ -188,6 +216,7 @@ impl Models {
             }
         }
         let rows = sum(calls.iter().filter(|c| period.holds(c.day)));
+        let runs = by_run(calls.iter().filter(|c| period.holds(c.day)));
         Ok(UsageReport {
             buckets: span
                 .buckets(period)
@@ -217,8 +246,34 @@ impl Models {
             period,
             today,
             rows,
+            runs,
             models,
         })
+    }
+
+    /// All that a run of a delegated task used.
+    pub fn run_usage(&self, run: i64) -> anyhow::Result<Vec<UsageRow>> {
+        let mut calls = self.read_calls(Some(run), i64::MIN, i64::MAX, chrono_tz::UTC)?;
+        self.mark_metered(&mut calls)?;
+        Ok(sum(calls.iter()))
+    }
+
+    fn mark_metered(&self, calls: &mut [Call]) -> anyhow::Result<()> {
+        let mut metered: BTreeSet<String> = calls
+            .iter()
+            .filter(|c| c.row.cost_yen > 0.0)
+            .map(|c| c.row.model.clone())
+            .collect();
+        metered.extend(
+            self.registered()?
+                .into_iter()
+                .filter(|m| m.spec.price.is_metered())
+                .map(|m| m.spec.id),
+        );
+        for call in calls {
+            call.row.metered = metered.contains(&call.row.model);
+        }
+        Ok(())
     }
 
     /// The calls of a period, oldest first.
@@ -232,12 +287,35 @@ impl Models {
         };
         let start = bound(period.from.checked_sub_days(Days::new(1)))?;
         let end = bound(period.to.checked_add_days(Days::new(2)))?;
+        let mut calls = self.read_calls(None, start, end, tz)?;
+        calls.retain(|c| period.holds(c.day));
+        Ok(calls)
+    }
+
+    fn read_calls(
+        &self,
+        run: Option<i64>,
+        start: i64,
+        end: i64,
+        tz: Tz,
+    ) -> anyhow::Result<Vec<Call>> {
         let conn = self.store.conn();
+        // A session's answers are many; every time zone's days begin on a
+        // quarter of an hour.
         let mut stmt = conn.prepare(
-            "SELECT at, role, model, input_tokens, output_tokens, calls, cost_yen FROM usage
-             WHERE at >= ?1 AND at < ?2 ORDER BY at, id",
+            "SELECT at, role, model, input_tokens, output_tokens, calls, cost_yen,
+                    NULL AS cached_tokens, run, id AS place
+             FROM usage LEFT JOIN usage_runs ON usage_runs.usage = usage.id
+             WHERE at >= ?1 AND at < ?2 AND (?3 IS NULL OR run = ?3)
+             UNION ALL
+             SELECT at / 900 * 900, 'worker', model, SUM(input_tokens), SUM(output_tokens),
+                    SUM(calls), SUM(cost_yen), SUM(cached_tokens), run, 0
+             FROM session_usage
+             WHERE at >= ?1 AND at < ?2 AND (?3 IS NULL OR run = ?3)
+             GROUP BY at / 900, model, run
+             ORDER BY 1, place",
         )?;
-        let found = stmt.query_map([start, end], |r| {
+        let found = stmt.query_map(rusqlite::params![start, end, run], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
@@ -249,24 +327,25 @@ impl Models {
                     output_tokens: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                     calls: r.get(5)?,
                     cost_yen: r.get(6)?,
+                    cached_tokens: r.get(7)?,
                 },
+                r.get::<_, Option<i64>>(8)?,
             ))
         })?;
         let mut calls = Vec::new();
         for call in found {
-            let (at, role, row) = call?;
+            let (at, role, row, run) = call?;
             let Some(role) = role_from_id(&role) else {
                 continue;
             };
             let Some(day) = tz.timestamp_opt(at, 0).single().map(|t| t.date_naive()) else {
                 continue;
             };
-            if period.holds(day) {
-                calls.push(Call {
-                    day,
-                    row: UsageRow { role, ..row },
-                });
-            }
+            calls.push(Call {
+                day,
+                run,
+                row: UsageRow { role, ..row },
+            });
         }
         Ok(calls)
     }

@@ -383,6 +383,18 @@ message UsageRow {
   double yen = 6;
   // Whether the model is counted in yen; otherwise it is counted by calls.
   bool metered = 7;
+  // The part of the input read from a cache, where it is known.
+  optional int64 cached_tokens = 8;
+}
+
+// What a run of a delegated task used.
+message RunUsage {
+  int64 run = 1;
+  // The task's id, code and title.
+  string task = 2;
+  string code = 3;
+  string title = 4;
+  repeated UsageRow rows = 5;
 }
 
 // A day, or a month of a year.
@@ -419,6 +431,8 @@ message Usage {
   // Every subscription's fee for a month.
   double fixed_monthly_yen = 8;
   int64 calls_today = 9;
+  // The runs of delegated tasks, the one that used the most tokens first.
+  repeated RunUsage runs = 10;
 }
 
 // The models Famulen runs on and what each does.

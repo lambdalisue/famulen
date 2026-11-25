@@ -82,8 +82,14 @@ fn connection(app: &App, run: &Run) -> anyhow::Result<String> {
 
 /// What names a run's session, and no other's: it stands at the head of the
 /// session's name, so a start whose answer was lost is found again.
-pub(super) fn token(run: &Run) -> String {
-    format!("{}-run{}", run.order.code, run.id)
+pub(super) fn token(code: &str, run: i64) -> String {
+    format!("{code}-run{run}")
+}
+
+/// Whether a name begins with a run's token, and not with a later run's.
+pub(super) fn bears(name: &str, token: &str) -> bool {
+    name.strip_prefix(token)
+        .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 /// The call that starts a run's session. The same run makes the same call, so
@@ -93,7 +99,7 @@ fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
     let mut input = json!({
         "dir": order.directory,
         "prompt": super::finish::prompt(order),
-        "name": format!("{} {}", token(run), order.title.replace('\n', " ")),
+        "name": format!("{} {}", token(&order.code, run.id), order.title.replace('\n', " ")),
     });
     if order.worktree {
         input["worktree"] = json!(true);
@@ -149,17 +155,12 @@ pub(super) async fn find(app: &App, run: &Run) -> anyhow::Result<Option<Began>> 
         json!({ "ended": true }),
     )
     .await?;
-    let token = token(run);
+    let token = token(&run.order.code, run.id);
     let found = sessions
         .as_array()
         .into_iter()
         .flatten()
-        .find(|s| {
-            s["name"]
-                .as_str()
-                .and_then(|n| n.strip_prefix(&token))
-                .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
-        })
+        .find(|s| s["name"].as_str().is_some_and(|name| bears(name, &token)))
         .and_then(|s| s["id"].as_str());
     if let Some(id) = found {
         return Ok(Some(Began::Running(id.to_owned())));

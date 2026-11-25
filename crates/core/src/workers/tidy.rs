@@ -302,7 +302,7 @@ impl<'a> Tidy<'a> {
             .find(|r| {
                 r.order.worktree
                     && !r.order.code.is_empty()
-                    && named_after(name, &token(r))
+                    && named_after(name, &token(&r.order.code, r.id))
                     && checkout_of(Path::new(&r.order.directory)).as_deref() == Some(checkout)
             })
             .cloned()
