@@ -147,6 +147,8 @@ message ServiceDefinition {
   // What its key is called, when it logs in with one: given as `api_key`
   // when the connection is added.
   string key_label = 10;
+  // Why only the owner may add it; empty when AddKeylessConnection can.
+  string only_by_owner = 11;
 }
 
 message ListBuiltinToolsResponse {
@@ -247,6 +249,15 @@ message AddConnectionRequest {
   // itself where it goes.
   string api_key = 7;
   string header = 8;
+}
+
+message AddKeylessConnectionRequest {
+  // The id of a service definition, as ListDefinitions lists it.
+  string definition = 1;
+  // The definition's account fields by name, such as `url`.
+  map<string, string> values = 2;
+  // What the owner calls it; the service's name when empty.
+  string name = 3;
 }
 
 message StartLoginRequest {
@@ -378,6 +389,14 @@ service ConnectionService {
   }
   rpc AddConnection(AddConnectionRequest) returns (ConnectResult) {
     option (console_only) = true;
+  }
+  // Add a connection of a service definition that needs no login, no app and
+  // no secret, such as `rss` with the `url` of a feed. Its address must be a
+  // public https:// URL, and it must not be connected already. Other services
+  // are added by the owner. Its tools can be used, and looked out on with
+  // add_lookout, at once; a feed is read with `get_feed`.
+  rpc AddKeylessConnection(AddKeylessConnectionRequest) returns (Connection) {
+    option (confirm) = true;
   }
   rpc StartLogin(StartLoginRequest) returns (GoTo) {
     option (console_only) = true;

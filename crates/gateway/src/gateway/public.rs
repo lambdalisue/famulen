@@ -16,6 +16,8 @@ use crate::log::{LogEntry, digest};
 const WEB: &str = "web";
 const TIMEOUT: Duration = Duration::from_secs(6);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long what a connection asks for may take.
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REDIRECTS: usize = 4;
 /// Nothing of the owner's is told.
 const AGENT: &str = "Mozilla/5.0 (compatible; Famulen link preview)";
@@ -102,6 +104,15 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         && a != 0x3ffe
 }
 
+/// Whether a name is one of this machine or of the network it is in.
+fn is_local_name(name: &str) -> bool {
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    !name.contains('.')
+        || [".localhost", ".local", ".internal", ".home.arpa"]
+            .iter()
+            .any(|end| name.ends_with(end))
+}
+
 /// Whether two addresses are in one network as a home or an office has it. A
 /// public address of the owner's own network is no more open to anyone than
 /// a private one, when a firewall stands before it.
@@ -151,6 +162,26 @@ struct Reach {
 }
 
 impl Reach {
+    fn lets_in(&self, url: &Url) -> bool {
+        self.also
+            .iter()
+            .any(|at| url.port() == Some(at.port()) && url.host_str() == Some(&at.ip().to_string()))
+    }
+
+    /// [`Self::check`], of an address that is neither read in the clear nor
+    /// named as only its own network names it.
+    fn check_secure(&self, url: &Url) -> Result<(), &'static str> {
+        if url.scheme() != "https" && !self.lets_in(url) {
+            return Err("not an https:// URL");
+        }
+        if let Some(Host::Domain(name)) = url.host()
+            && is_local_name(name)
+        {
+            return Err("not a public name");
+        }
+        self.check(url)
+    }
+
     /// Why `url` is not asked for. A name is checked once it is resolved.
     fn check(&self, url: &Url) -> Result<(), &'static str> {
         if !matches!(url.scheme(), "http" | "https") {
@@ -165,9 +196,7 @@ impl Reach {
             Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
             None => return Err("the address names no host"),
         };
-        if let (Some(ip), Some(port)) = (ip, url.port())
-            && self.also.contains(&SocketAddr::new(ip, port))
-        {
+        if self.lets_in(url) {
             return Ok(());
         }
         // What a service of the owner's own listens at is rarely one of these.
@@ -203,25 +232,48 @@ impl Resolve for PublicNames {
 #[derive(Clone)]
 pub(super) struct Public {
     http: reqwest::Client,
+    guarded: reqwest::Client,
     reach: Reach,
 }
 
 impl Default for Public {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
+            http: on_public_names(reqwest::Client::builder())
                 // Each step of a redirect is checked before it is taken.
                 .redirect(reqwest::redirect::Policy::none())
-                // A proxy would resolve the name itself, unchecked.
-                .no_proxy()
-                .dns_resolver(Arc::new(PublicNames))
-                .connect_timeout(CONNECT_TIMEOUT)
                 .user_agent(AGENT)
                 .build()
                 .expect("a plain HTTP client builds"),
+            guarded: guarded(Reach::default()),
             reach: Reach::default(),
         }
     }
+}
+
+fn on_public_names(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
+        // A proxy would resolve the name itself, unchecked.
+        .no_proxy()
+        .dns_resolver(Arc::new(PublicNames))
+        .connect_timeout(CONNECT_TIMEOUT)
+}
+
+/// A client that follows where it is sent on only where `reach` lets it.
+fn guarded(reach: Reach) -> reqwest::Client {
+    let policy = reqwest::redirect::Policy::custom(move |to| {
+        if to.previous().len() > MAX_REDIRECTS {
+            return to.error("redirected too often");
+        }
+        match reach.check_secure(to.url()) {
+            Ok(()) => to.follow(),
+            Err(why) => to.error(why),
+        }
+    });
+    on_public_names(reqwest::Client::builder().timeout(CLIENT_TIMEOUT))
+        .redirect(policy)
+        .build()
+        .expect("a plain HTTP client builds")
 }
 
 /// Why nothing was read.
@@ -246,6 +298,32 @@ impl From<reqwest::Error> for Unread {
 }
 
 impl Public {
+    /// Why `url` may not be what a connection reaches. Where its name leads
+    /// is checked each time it is asked, since that can change.
+    pub(super) fn check_secure(&self, url: &str) -> Result<(), &'static str> {
+        self.reach
+            .check_secure(&Url::parse(url).map_err(|_| "not a URL")?)
+    }
+
+    /// `builder` for a client that asks `url` and reaches only the public
+    /// internet. A redirect leads past the check of an address, so its policy
+    /// must keep to the host or check each step.
+    pub(super) fn guard(
+        &self,
+        builder: reqwest::ClientBuilder,
+        url: &str,
+    ) -> anyhow::Result<reqwest::ClientBuilder> {
+        self.check_secure(url).map_err(|why| anyhow::anyhow!(why))?;
+        Ok(on_public_names(builder))
+    }
+
+    /// The client that asks `url`, and follows where it is sent on, only on
+    /// the public internet.
+    pub(super) fn client_for(&self, url: &str) -> anyhow::Result<reqwest::Client> {
+        self.check_secure(url).map_err(|why| anyhow::anyhow!(why))?;
+        Ok(self.guarded.clone())
+    }
+
     async fn read(&self, url: &str, wanted: Wanted<'_>) -> Result<PublicPage, Unread> {
         let mut at = Url::parse(url).map_err(|_| Unread::Refused("not an address"))?;
         for _ in 0..=MAX_REDIRECTS {
@@ -346,8 +424,9 @@ impl Gateway {
 
     /// Read from a server of a test's own, on this machine, too.
     #[cfg(test)]
-    fn reading_also(mut self, at: impl IntoIterator<Item = SocketAddr>) -> Self {
+    pub(super) fn reading_also(mut self, at: impl IntoIterator<Item = SocketAddr>) -> Self {
         self.public.reach.also.extend(at);
+        self.public.guarded = guarded(self.public.reach.clone());
         self
     }
 }

@@ -480,6 +480,34 @@ impl ConnectionService for Api {
         })
     }
 
+    async fn add_keyless_connection(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, AddKeylessConnectionRequest>,
+    ) -> ServiceResult<Connection> {
+        let r = request.to_owned_message();
+        let c = self
+            .app
+            .gateway
+            .add_keyless(
+                actor(&ctx),
+                &r.definition,
+                r.values.into_iter().collect(),
+                Some(&r.name),
+            )
+            .or_fail()?;
+        if let Err(error) = self.app.gateway.read_tools(&c.id).await {
+            return Err(self.undo_add(&c.id, error));
+        }
+        self.app.journal.record(
+            "setting",
+            format!("service {} added from {}", c.id, r.definition.trim()),
+        );
+        self.app.changed.notify_one();
+        changed(self);
+        Response::ok(connection(&self.need_connection(&c.id).or_fail()?))
+    }
+
     async fn start_login(
         &self,
         _ctx: RequestContext,

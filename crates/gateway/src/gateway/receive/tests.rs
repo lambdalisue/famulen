@@ -65,6 +65,7 @@ fn add(g: &Gateway, id: &str, def: &str, values: &[(&str, &str)]) {
                     .iter()
                     .map(|(k, v)| ((*k).into(), (*v).into()))
                     .collect(),
+                public: false,
             },
             Secret::default(),
             "",

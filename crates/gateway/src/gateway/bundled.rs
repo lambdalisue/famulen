@@ -239,6 +239,7 @@ mod tests {
                     Transport::Defined {
                         definition: "slack".into(),
                         values: BTreeMap::from([("team".into(), team.into())]),
+                        public: false,
                     },
                     Secret::default(),
                     "",
@@ -267,6 +268,7 @@ mod tests {
                 Transport::Defined {
                     definition: "google".into(),
                     values: BTreeMap::from([("channel_token".into(), "t-123".into())]),
+                    public: false,
                 },
                 Secret::default(),
                 "",
@@ -350,6 +352,7 @@ mod tests {
                 Transport::Defined {
                     definition: "google".into(),
                     values: BTreeMap::new(),
+                    public: false,
                 },
                 Secret {
                     tokens: BTreeMap::from([("access_token".into(), "ya29.t".into())]),

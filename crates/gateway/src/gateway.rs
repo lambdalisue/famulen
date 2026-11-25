@@ -20,6 +20,7 @@ mod commands;
 mod defined;
 mod judge;
 mod keeping;
+mod keyless;
 mod logins;
 mod model_keys;
 mod public;
@@ -68,6 +69,8 @@ pub struct Gateway {
     endpoints: receive::Endpoints,
     /// Whether the owner is at the machine.
     presence: PresenceNow,
+    /// Held while a connection is added that must not be there twice.
+    adding: Arc<std::sync::Mutex<()>>,
     /// The answers that finished a login, with the connection each logged
     /// in. Held while one is being finished, so two of the same wait.
     finished: Arc<Mutex<HashMap<String, String>>>,
@@ -116,6 +119,7 @@ impl Gateway {
             openapi: Arc::default(),
             finished: Arc::default(),
             exchanging: Arc::default(),
+            adding: Arc::default(),
             presence: Arc::new(crate::presence::now),
             endpoints: Default::default(),
             jwks: Arc::default(),

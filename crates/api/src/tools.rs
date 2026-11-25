@@ -331,6 +331,16 @@ mod tests {
     }
 
     #[test]
+    fn the_secretary_adds_only_keyless_connections_and_asks_the_owner_first() {
+        let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
+        assert!(tools.iter().all(|t| t.def.name != "add_connection"));
+        let add = tool(&tools, "add_keyless_connection");
+        assert!(add.confirm && !add.read_only);
+        let values = &add.input_schema["properties"]["values"];
+        assert_eq!(values["additionalProperties"]["type"], "string", "{values}");
+    }
+
+    #[test]
     fn how_long_a_channel_is_attended_is_the_owners_to_set() {
         let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
         assert!(tools.iter().all(|t| t.def.name != "set_attention"));

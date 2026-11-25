@@ -40,6 +40,9 @@ pub enum Transport {
         definition: String,
         #[serde(default)]
         values: BTreeMap<String, String>,
+        /// Reached only on the public internet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        public: bool,
     },
 }
 

@@ -22,12 +22,21 @@ const AGENT: &str = concat!("famulen-gateway/", env!("CARGO_PKG_VERSION"));
 impl Gateway {
     /// The definition a connection is made from, or why it cannot be used.
     pub fn definition_of(&self, connection: &Connection) -> Option<Result<Definition, String>> {
-        let Transport::Defined { definition, .. } = &connection.transport else {
+        let Transport::Defined {
+            definition, public, ..
+        } = &connection.transport
+        else {
             return None;
         };
         let defs = crate::lock::read(&self.definitions);
         Some(match defs.get(definition) {
-            Some(def) => Ok(def.clone()),
+            // A definition that came to need more is the owner's to connect.
+            Some(def) => match def.only_by_owner().filter(|_| *public) {
+                Some(why) => Err(format!(
+                    "only the owner adds a connection of {definition}: {why}"
+                )),
+                None => Ok(def.clone()),
+            },
             None => Err(defs.why_not(definition).unwrap_or_default()),
         })
     }
@@ -54,11 +63,28 @@ impl Gateway {
         values: BTreeMap<String, String>,
         name: Option<&str>,
     ) -> anyhow::Result<Connection> {
-        let def = self
-            .definitions()
-            .get(definition)
+        let def = self.need_definition(definition)?;
+        let _adding = crate::lock::lock(&self.adding);
+        self.add_made_from(&def, values, name, OWNER, false)
+    }
+
+    pub(super) fn need_definition(&self, id: &str) -> anyhow::Result<Definition> {
+        self.definitions()
+            .get(id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("no service definition {definition}"))?;
+            .ok_or_else(|| anyhow::anyhow!("no service definition {id}"))
+    }
+
+    /// Add a connection made from `def` as `actor`, one that reaches only
+    /// the public internet when it is `public`.
+    pub(super) fn add_made_from(
+        &self,
+        def: &Definition,
+        values: BTreeMap<String, String>,
+        name: Option<&str>,
+        actor: &str,
+        public: bool,
+    ) -> anyhow::Result<Connection> {
         for field in &def.fields {
             anyhow::ensure!(
                 field.optional
@@ -83,6 +109,7 @@ impl Gateway {
             Transport::Defined {
                 definition: def.id.clone(),
                 values,
+                public,
             },
             Secret::default(),
             "",
@@ -96,7 +123,7 @@ impl Gateway {
         }
         self.generate_account_values(&id)?;
         self.refresh_display(&connection.id)?;
-        self.log_change_by(OWNER, &id, "connection.add", &def.id)?;
+        self.log_change_by(actor, &id, "connection.add", &def.id)?;
         self.connections
             .get(&connection.id)?
             .ok_or_else(|| anyhow::anyhow!("connection {id} vanished"))
@@ -161,6 +188,7 @@ impl Gateway {
             let Transport::Defined {
                 definition,
                 mut values,
+                public,
             } = connection.transport
             else {
                 unreachable!("a connection with a definition is made from it");
@@ -170,8 +198,14 @@ impl Gateway {
             } else {
                 values.insert(name.to_owned(), value.to_owned());
             }
-            self.connections
-                .set_transport(id, &Transport::Defined { definition, values })?;
+            self.connections.set_transport(
+                id,
+                &Transport::Defined {
+                    definition,
+                    values,
+                    public,
+                },
+            )?;
         }
         self.refresh_display(id)?;
         self.clients.lock().await.remove(id);
@@ -274,7 +308,7 @@ impl Gateway {
         args: Value,
         secrets: bool,
     ) -> anyhow::Result<Context> {
-        let Transport::Defined { values, .. } = &connection.transport else {
+        let Transport::Defined { values, public, .. } = &connection.transport else {
             anyhow::bail!("{} is not made from a definition", connection.id);
         };
         let mut account = values.clone();
@@ -306,6 +340,7 @@ impl Gateway {
             first_token,
             args,
             secrets,
+            public: *public,
             ..Default::default()
         })
     }
@@ -368,13 +403,20 @@ impl Gateway {
         let Transport::Defined {
             definition,
             mut values,
+            public,
         } = connection.transport
         else {
             return Ok(());
         };
         values.extend(found);
-        self.connections
-            .set_transport(id, &Transport::Defined { definition, values })
+        self.connections.set_transport(
+            id,
+            &Transport::Defined {
+                definition,
+                values,
+                public,
+            },
+        )
     }
 }
 

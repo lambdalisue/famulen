@@ -24,6 +24,8 @@ pub struct Context {
     /// Whether secrets may be filled in: only inside a request going out
     /// and inside the check of what arrived.
     pub secrets: bool,
+    /// Whether what is filled goes only to the public internet.
+    pub public: bool,
 }
 
 impl Context {
@@ -197,6 +199,7 @@ mod tests {
             body: Some("{\"a\":1}".into()),
             doc: json!({ "team": { "id": "T1" } }),
             secrets: false,
+            public: false,
         }
     }
 
