@@ -73,6 +73,12 @@ fn pictured(party: &Record) -> Vec<PartyAccount> {
     all
 }
 
+/// The name a picture is asked for by.
+pub(crate) fn id_of(bytes: &[u8]) -> String {
+    let hash = sha2::Sha256::digest(bytes);
+    hash.iter().take(16).map(|b| format!("{b:02x}")).collect()
+}
+
 /// How pictures are read, so that a test can read its own.
 type Read = Arc<dyn Fn(Url) -> BoxFuture<'static, anyhow::Result<Vec<u8>>> + Send + Sync>;
 
@@ -182,9 +188,7 @@ impl Pictures {
                     .map(|(mime, _)| mime)
                     .filter(|m| m.starts_with("image/"))
                     .ok_or_else(|| anyhow::anyhow!("not a picture"))?;
-                let hash = sha2::Sha256::digest(&bytes);
-                let id: String = hash.iter().take(16).map(|b| format!("{b:02x}")).collect();
-                (url.to_string(), id, mime, bytes)
+                (url.to_string(), id_of(&bytes), mime, bytes)
             }
             Shown::Nothing => Default::default(),
         };

@@ -162,3 +162,68 @@ test("categories past those that fit are picked from a list", async ({ page, req
   await expect(categories(page).getByRole("link", { name: "すべて 9" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "ほかの分類" })).toHaveValue("余り 9");
 });
+
+const PICTURE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/** Things read from here on have a picture, which a mail alone could give. */
+async function pictured(page: Page, id: string, picture: string) {
+  await page.route(/RecordService\/(ListRecords|GetRecord)/, async (route) => {
+    const answer = await route.fetch();
+    const json = await answer.json();
+    for (const r of json.records ?? [json]) if (r.id === id) r.picture = picture;
+    await route.fulfill({ response: answer, json });
+  });
+  await visit(page, "/memos", /^メモ/);
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "/things";
+    document.querySelector("main")?.append(a);
+    a.click();
+  });
+}
+
+for (const [name, viewport] of [
+  ["a wide screen", { width: 1440, height: 900 }],
+  ["a phone", { width: 360, height: 740 }],
+] as const) {
+  test.describe(`on ${name}`, () => {
+    test.use({ viewport });
+
+    test("a thing's picture is small in the list, larger on its page, and opens over everything", async ({ page, request }) => {
+      const r = await record(request, "holdings", `絵のある物 ${name}`);
+      await record(request, "holdings", `絵のない物 ${name}`);
+      await page.route("**/holding-pictures/e2e", (route) => route.fulfill({ contentType: "image/png", body: PICTURE }));
+      await pictured(page, r.id, "e2e");
+      await page.getByLabel("物を探す").fill(name);
+      const small = row(page, `絵のある物 ${name}`).locator("img");
+      await expect(small).toHaveAttribute("src", "/holding-pictures/e2e");
+      const box = await small.boundingBox();
+      expect([box?.width, box?.height]).toEqual([48, 48]);
+      await expect(row(page, `絵のない物 ${name}`)).toBeVisible();
+      await expect(row(page, `絵のない物 ${name}`).locator("img")).toHaveCount(0);
+
+      await row(page, `絵のある物 ${name}`).getByRole("link").click();
+      const open = detail(page).getByRole("button", { name: `絵のある物 ${name}の画像を拡大する` });
+      await expect(open).toBeVisible();
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(wide).toBeLessThanOrEqual(0);
+      await open.click();
+      const dialog = page.getByRole("dialog", { name: `絵のある物 ${name}` });
+      await expect(dialog.getByRole("img")).toHaveAttribute("src", "/holding-pictures/e2e");
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(open).toBeFocused();
+    });
+  });
+}
+
+test("a thing whose picture cannot be read shows as one without", async ({ page, request }) => {
+  const r = await record(request, "holdings", "絵の消えた物");
+  await pictured(page, r.id, "gone");
+  await page.getByLabel("物を探す").fill("絵の消えた物");
+  await expect(row(page, "絵の消えた物")).toBeVisible();
+  await expect(row(page, "絵の消えた物").locator("img")).toHaveCount(0);
+  await row(page, "絵の消えた物").getByRole("link").click();
+  await expect(detail(page).getByLabel("題名")).toHaveValue("絵の消えた物");
+  await expect(detail(page).locator(".thing-picture")).toHaveCount(0);
+});

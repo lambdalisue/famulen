@@ -99,8 +99,8 @@ impl Api {
     }
 
     /// The router as an axum app, with a plain liveness probe and the
-    /// notebook's Git, the files the owner attaches and the pictures of links
-    /// and parties.
+    /// notebook's Git, the files the owner attaches and the pictures of links,
+    /// parties and things.
     pub fn axum(self) -> axum::Router {
         sharing::router()
             .merge(attachments::router())

@@ -76,6 +76,18 @@ pub(super) async fn keep_pictures(app: App) {
     }
 }
 
+/// Apart from the other chores, since a shop may take long over each picture.
+pub(super) async fn keep_holding_pictures(app: App) {
+    let mut tick = tokio::time::interval(CHORE_TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        if let Err(error) = crate::purchases::pictures::look(&app, Utc::now().timestamp()).await {
+            tracing::warn!(%error, "could not look for the pictures of what was bought");
+        }
+    }
+}
+
 pub(super) async fn chores(app: App) {
     let mut tick = tokio::time::interval(CHORE_TICK);
     let mut last_calendar = 0_i64;
