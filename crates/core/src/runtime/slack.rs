@@ -314,6 +314,7 @@ where
                     thread_ts: said.thread_ts.clone(),
                     user: said.user.clone(),
                     unmentioned: true,
+                    others_before: from_others(&before, &owner_of(app, workspace)?),
                     attached: said.files,
                 },
                 text,
@@ -332,6 +333,12 @@ where
         }
         None => Ok(None),
     }
+}
+
+/// Whether any of the lines kept as said before is not the owner's.
+fn from_others(before: &[String], owner: &str) -> bool {
+    let mark = format!("<@{owner}>: ");
+    owner.is_empty() && !before.is_empty() || before.iter().any(|line| !line.starts_with(&mark))
 }
 
 /// Triage's model, unless there is none or it is over its cap.
@@ -485,6 +492,16 @@ mod tests {
             headers: Default::default(),
             payload: serde_json::json!({ "envelope_id": "e1", "type": "events_api", "payload": { "event": event } }),
         }
+    }
+
+    #[test]
+    fn what_was_said_before_is_others_unless_every_line_is_the_owners() {
+        let lines = |of: &[&str]| of.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        assert!(!from_others(&[], "U1"));
+        assert!(!from_others(&[], ""));
+        assert!(!from_others(&lines(&["<@U1>: a", "<@U1>: b"]), "U1"));
+        assert!(from_others(&lines(&["<@U1>: a", "<@U2>: <@U1>: b"]), "U1"));
+        assert!(from_others(&lines(&["<@U1>: a"]), ""));
     }
 
     #[test]

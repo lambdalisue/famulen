@@ -29,6 +29,7 @@ const WHOLE: &[(&str, &str)] = &[
     ("adroit.send_to_session", "セッションに伝える"),
     ("bluesky.create_post", "投稿する"),
     ("definitions.change_definition", "サービス定義を変える"),
+    ("famulen.ask_owner", "ほかの人に教えてよいかを尋ねる"),
     ("google.get_message", "メールを読む"),
     ("google.respond_to_event", "予定の出欠を答える"),
     ("google.search_messages", "メールを探す"),

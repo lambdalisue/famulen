@@ -168,6 +168,14 @@ impl Gateway {
         self.held.subscribe()
     }
 
+    /// Whether any ticket of `tool` was held for what a caller made it for,
+    /// however it stands now.
+    pub fn was_held_for(&self, connection: &str, tool: &str, origin: &str) -> anyhow::Result<bool> {
+        Ok(self.tickets_where("1")?.iter().any(|t| {
+            t.connection == connection && t.tool == tool && t.origin.as_deref() == Some(origin)
+        }))
+    }
+
     /// The tickets still waiting for an answer, oldest first.
     pub fn held_tickets(&self) -> anyhow::Result<Vec<Ticket>> {
         self.lapse_tickets()?;

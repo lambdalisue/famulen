@@ -113,6 +113,7 @@ fn source_of(source: &Source) -> (&'static str, String) {
         Source::Console { view, .. } => ("console", view.clone()),
         Source::Arrival { connection, .. } => ("arrival", connection.clone()),
         Source::Lookout { source, .. } => ("lookout", source.clone()),
+        Source::Asked { request, .. } => ("approval", format!("#{request}")),
         Source::Worker { task, .. } => ("worker", task.clone()),
     }
 }

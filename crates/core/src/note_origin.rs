@@ -296,7 +296,7 @@ impl App {
         }
     }
 
-    async fn channel_name(&self, c: &Connection, channel: &str) -> Option<String> {
+    pub(crate) async fn channel_name(&self, c: &Connection, channel: &str) -> Option<String> {
         // Slack names neither, and the owner's token may not ask of them.
         if channel.starts_with('D') {
             return Some("DM".into());

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use famulen_gateway::{Question, Ticket};
 
 use crate::asking;
-use crate::input::{Input, Sender, Source};
+use crate::input::{Input, Reach, Sender, Source};
 use crate::permissions::Permissions;
 use crate::slack::clients::SlackClients;
 use crate::slack::events::Action;
@@ -21,6 +21,7 @@ use crate::slack::web::{Outgoing, Slack};
 use crate::store::{Store, now};
 use crate::wording;
 
+pub(crate) mod asked;
 mod exposure;
 
 const ACTION_PREFIX: &str = "famulen.approval.";
@@ -251,6 +252,27 @@ impl<S: Slack> Approvals<S> {
         self.owners.get(workspace).map_or("", String::as_str)
     }
 
+    /// Whether `channel` is the bot's DM with the owner, in `workspace` or
+    /// the main one when it is empty.
+    pub async fn is_owners_dm(&self, workspace: &str, channel: &str) -> bool {
+        let Some(slack) = &self.slack else {
+            return false;
+        };
+        let workspace = if workspace.is_empty() {
+            slack.main_id()
+        } else {
+            workspace
+        };
+        let owner = self.owner(workspace);
+        if owner.is_empty() {
+            return false;
+        }
+        match slack.get(Some(workspace)) {
+            Ok(slack) => slack.open_dm(owner).await.is_ok_and(|dm| dm == channel),
+            Err(_) => false,
+        }
+    }
+
     fn posted(&self, id: i64, channel: &str, ts: &str) -> anyhow::Result<()> {
         self.store.conn().execute(
             "UPDATE approvals SET channel = ?1, ts = ?2 WHERE id = ?3",
@@ -314,7 +336,9 @@ impl<S: Slack> Approvals<S> {
         while let Some(input) = match origin.take() {
             Some(origin) => self.store.input_of_origin(&origin)?,
             None => None,
-        } {
+        }
+        .filter(|input| input.reach() != Reach::Guest)
+        {
             match input.source {
                 Source::Slack {
                     workspace,
@@ -375,7 +399,7 @@ impl<S: Slack> Approvals<S> {
             let asked = Asked::of(&self.permissions, tool);
             return request_message(id, &asked, input, None, once(&self.permissions, tool));
         }
-        question_message(id, input, &questions)
+        question_message(id, tool, input, &questions)
     }
 
     /// Put every ticket still held that the owner has not been shown.
@@ -416,6 +440,9 @@ impl<S: Slack> Approvals<S> {
     /// press that passed its checks.
     pub async fn fill_by_id(&self, id: i64, replies: Vec<String>) -> anyhow::Result<Option<Input>> {
         let said = replies.join(" / ");
+        if let Some(ticket) = self.asked(id)? {
+            return self.settle_asked(ticket, Answer::Approve, Some(said)).await;
+        }
         let Some(answered) = self.permissions.gateway().fill_ticket(id, replies).await? else {
             return Ok(None);
         };
@@ -426,6 +453,9 @@ impl<S: Slack> Approvals<S> {
     /// its checks. `None` when there is nothing to tell the session: it was
     /// answered before, or the call is not the session's.
     pub async fn answer_by_id(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Input>> {
+        if let Some(ticket) = self.asked(id)? {
+            return self.settle_asked(ticket, answer, None).await;
+        }
         let Some(answered) = self
             .permissions
             .gateway()
@@ -436,6 +466,35 @@ impl<S: Slack> Approvals<S> {
             return Ok(None);
         };
         self.settle(id, answer, answered, None).await
+    }
+
+    /// The request `id`, when it asks whether someone else may be told.
+    fn asked(&self, id: i64) -> anyhow::Result<Option<Ticket>> {
+        Ok(self.permissions.gateway().ticket(id)?.filter(asked::is_ask))
+    }
+
+    /// Act on the owner's word on what someone else asks.
+    async fn settle_asked(
+        &self,
+        ticket: Ticket,
+        answer: Answer,
+        said: Option<String>,
+    ) -> anyhow::Result<Option<Input>> {
+        let word = asked::Word::of(answer, said.as_deref());
+        let answer = word.answer();
+        let Some(answered) = self
+            .permissions
+            .gateway()
+            .answer_ticket(ticket.id, answer.into())
+            .await?
+        else {
+            return Ok(None);
+        };
+        // A message that cannot be changed does not take the word back.
+        if let Err(error) = self.settle(ticket.id, answer, answered, said).await {
+            tracing::warn!(%error, id = ticket.id, "could not show the answer");
+        }
+        asked::outcome(&self.store, &ticket, word)
     }
 
     /// Show a request as answered, and tell the session.
@@ -487,6 +546,12 @@ impl<S: Slack> Approvals<S> {
         // A worker's call is made by the pool, which sees the answer itself.
         if answered.ticket.actor == crate::permissions::WORKER {
             return Ok(None);
+        }
+        if let Some(words) = asked::held_answer(&self.store, &answered.ticket)? {
+            return match answer {
+                Answer::Reject => Ok(None),
+                _ => asked::approved(&self.store, &answered.ticket, words),
+            };
         }
         let text = match answered.ran {
             Some(Ok(())) if answer == Answer::Reject => {
@@ -652,12 +717,13 @@ struct Claimed {
 /// Whether the owner is asked of every call of `tool`, so it cannot be let
 /// run from now on.
 pub fn once(permissions: &Permissions, tool: &str) -> bool {
-    famulen_gateway::permissions::split_tool(tool).is_some_and(|(connection, tool)| {
-        permissions
-            .gateway()
-            .asks_each_time(connection, tool)
-            .unwrap_or(true)
-    })
+    tool == asked::TOOL
+        || famulen_gateway::permissions::split_tool(tool).is_some_and(|(connection, tool)| {
+            permissions
+                .gateway()
+                .asks_each_time(connection, tool)
+                .unwrap_or(true)
+        })
 }
 
 /// Whether what a request shows may hold a secret, or words from elsewhere.
@@ -672,6 +738,9 @@ pub fn asks_questions(permissions: &Permissions, ticket: &Ticket) -> bool {
 
 /// The questions the owner answers in a request instead of approving it.
 pub fn questions(permissions: &Permissions, tool: &str, shown: &Value) -> Vec<Question> {
+    if tool == asked::TOOL {
+        return vec![asked::question(shown)];
+    }
     famulen_gateway::permissions::split_tool(tool)
         .and_then(|(connection, tool)| {
             permissions
@@ -730,8 +799,13 @@ fn heading(id: i64, what: &str, shown: &Value) -> Vec<Value> {
     blocks
 }
 
-fn question_message(id: i64, shown: &Value, asked: &[Question]) -> Outgoing {
-    let mut blocks = heading(id, "セッションからの質問", shown);
+fn question_message(id: i64, tool: &str, shown: &Value, asked: &[Question]) -> Outgoing {
+    let what = if tool == asked::TOOL {
+        "ほかの人からの質問"
+    } else {
+        "セッションからの質問"
+    };
+    let mut blocks = heading(id, what, shown);
     match asking::blocks(id, asked) {
         Some(asking) => blocks.extend(asking),
         None => blocks.push(context("長くて全部は出せないので、コンソールで答える")),
@@ -990,6 +1064,7 @@ mod tests {
             thread_ts: thread_ts.map(Into::into),
             user: OWNER.into(),
             unmentioned: false,
+            others_before: false,
             attached: Vec::new(),
         }
     }
@@ -1174,6 +1249,74 @@ mod tests {
             permissions.decide(TOOL, &input()).await.unwrap(),
             Decision::Held(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn the_owners_word_on_what_someone_else_asks_is_carried_out_once() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let asked = |ts: &str| {
+            let mut source = said_in("w1", "C1", Some(ts));
+            if let Source::Slack {
+                user, ts: said_at, ..
+            } = &mut source
+            {
+                *user = "U9".into();
+                *said_at = format!("{ts}1");
+            }
+            turn(&approvals, Sender::Other, source);
+            let input = approvals.store.running().unwrap().unwrap().input;
+            let asker = asked::Asker {
+                name: "Bさん".into(),
+                place: "#general".into(),
+                said: "給与は？".into(),
+            };
+            asked::Ask::new(input, &asker, "Aさんの給与")
+                .put(&permissions)
+                .unwrap();
+            permissions.gateway().held_tickets().unwrap()[0].id
+        };
+        let id = asked("5.0");
+        approvals.present_held().await.unwrap();
+        assert_eq!(slack.posts()[0].0, "DM-U1", "never where others are");
+        let shown = format!("{:?}", slack.posts()[0].1.blocks);
+        assert!(shown.contains("教えてよい") && shown.contains("Aさんの給与"));
+
+        let told = approvals
+            .fill_by_id(id, vec!["教えてよい".into()])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(told.reach(), Reach::Answering);
+        let again = approvals.fill_by_id(id, vec!["教えてよい".into()]).await;
+        assert_eq!(again.unwrap(), None);
+        assert_eq!(slack.updates().len(), 1);
+
+        let id = asked("6.0");
+        approvals.present_held().await.unwrap();
+        let left = approvals.answer_by_id(id, Answer::Reject).await.unwrap();
+        assert_eq!(left, None);
+    }
+
+    #[tokio::test]
+    async fn an_approved_answer_to_someone_else_is_said_without_the_resident_session() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        turn(&approvals, Sender::Other, said_in("w1", "C1", Some("5.0")));
+        let send = json!({ "workspace": "w1", "channel": "C1", "text": "こんにちは" });
+        let held = permissions.decide("mcp__famulen__send_slack", &send).await;
+        let Decision::Held(id) = held.unwrap() else {
+            panic!("it is held");
+        };
+        approvals.present_held().await.unwrap();
+        let told = approvals
+            .answer_by_id(id, Answer::Approve)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(told.reach(), Reach::Guest);
+        assert!(told.text.ends_with("こんにちは"));
+        assert_eq!(told.place().unwrap().thread(), "5.0");
     }
 
     #[tokio::test]

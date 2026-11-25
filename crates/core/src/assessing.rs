@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use famulen_gateway::{Assessment, Assessor, Call};
 
-use crate::input::Sender;
+use crate::input::{Reach, Sender};
 use crate::models::{Models, Role};
 use crate::settings::Settings;
 use crate::store::Store;
@@ -127,7 +127,9 @@ impl ModelAssessor {
             .store
             .recent_inputs(0, RECENT_INPUTS)?
             .into_iter()
-            .find(|(stored, _)| stored.input.sender == Sender::Owner)
+            .find(|(stored, _)| {
+                stored.input.sender == Sender::Owner && stored.input.reach() == Reach::Full
+            })
             .map(|(stored, _)| stored.input.gist()))
     }
 
