@@ -30,6 +30,15 @@ export function itemHref(item: MemoryItem): string {
   return withParams(layerHref(layer), { at, item: item.id });
 }
 
+/** A commit's message without its trailers, and the sources one of those names. */
+export function splitMessage(message: string): { text: string; sources: string[] } {
+  const paragraphs = message.trim().split(/\n{2,}/);
+  const last = paragraphs.length > 1 ? (paragraphs.at(-1)?.split("\n") ?? []) : [];
+  if (last.length === 0 || !last.every((line) => /^[A-Za-z-]+: /.test(line))) return { text: message.trim(), sources: [] };
+  const sources = last.flatMap((line) => /^Notebook-Source: (.+)$/.exec(line)?.[1].split(/,\s*/) ?? []);
+  return { text: paragraphs.slice(0, -1).join("\n\n"), sources };
+}
+
 /** What a memory's prose says of where it came from, apart from the rest of it. */
 export function splitSources(prose: string): { prose: string; sources: string[] } {
   const sources: string[] = [];

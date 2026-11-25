@@ -13,7 +13,7 @@ import { api } from "~/lib/api";
 import { workgroupsQuery } from "~/lib/data";
 import { dateTimeText } from "~/lib/dates";
 import * as icons from "~/lib/icons";
-import { dreamsQuery, itemHref, memoryQuery, splitSources } from "~/lib/memory";
+import { dreamsQuery, itemHref, memoryQuery, splitMessage, splitSources } from "~/lib/memory";
 import { useOwner } from "~/lib/owner";
 import { withParams } from "~/lib/params";
 import { hrefOf, KIND_NAMES, workgroupNames } from "~/lib/records";
@@ -40,26 +40,30 @@ const KNOWN = new Set([
 
 const MAKING = new Set(["added", "replaced", "pending_added"]);
 
+/** Whose change a commit is, as the owner reads it. */
+function useAuthor() {
+  const owner = useOwner();
+  return (author: string) => (author === "Famulen" ? owner.aide() : author === "Owner" ? "あなた" : author);
+}
+
 export function History(props: { changes: FileChange[] }) {
   const owner = useOwner();
+  const named = useAuthor();
   return (
     <List label="更新の履歴">
       <For each={props.changes} fallback={<EmptyState>まだ経緯はない</EmptyState>}>
-        {(c) => {
-          const aides = c.author === "Famulen";
-          return (
-            <ListRow
-              title={<span class="memory-change">{c.message}</span>}
-              sub={
-                <>
-                  <Tag tone={aides ? "aide" : "said"}>{aides ? owner.aide() : "あなた"}</Tag>
-                  <span>{dateTimeText(c.at, owner.tz())}</span>
-                  <code>{c.commit}</code>
-                </>
-              }
-            />
-          );
-        }}
+        {(c) => (
+          <ListRow
+            title={<span class="memory-change">{splitMessage(c.message).text}</span>}
+            sub={
+              <>
+                <Tag tone={c.author === "Owner" ? "said" : "aide"}>{named(c.author)}</Tag>
+                <span>{dateTimeText(c.at, owner.tz())}</span>
+                <code>{c.commit}</code>
+              </>
+            }
+          />
+        )}
       </For>
     </List>
   );
@@ -122,14 +126,17 @@ export default function MemoryDetail(props: { detail: Detail; history?: boolean;
   const item = () => props.detail.item;
   const attrs = () => item()?.attrs ?? {};
   const kind = () => GROUP_NAMES.find(([g]) => g === d().group)?.[1] ?? LAYER_NAMES[d().layer] ?? "";
+  const named = useAuthor();
   const parts = createMemo(() => splitSources(d().prose));
+  /** What its prose names, and what the commits that changed it do. */
+  const sources = createMemo(() => [...new Set([...parts().sources, ...d().history.flatMap((c) => splitMessage(c.message).sources)])]);
   /** Whether a dream wrote it, as far as the nights tell; the newest to bring it in counts. */
   const dreamt = () => d().nights.find((n) => MAKING.has(n.op));
   const first = () => d().created;
   const writer = () => {
     if (attrs().by === "lookout") return "見張りの気づきから、夢が書いた";
     if (dreamt()) return "夢が書いた";
-    return first() ? (first()?.author === "Famulen" ? owner.aide() : "あなた") : "";
+    return named(first()?.author ?? "");
   };
   const written = () => {
     const at = dreamt()?.at ?? first()?.at;
@@ -231,12 +238,12 @@ export default function MemoryDetail(props: { detail: Detail; history?: boolean;
             </Show>
             <h3>出どころ</h3>
             <Show
-              when={parts().sources.length > 0 || d().nights.length > 0}
+              when={sources().length > 0 || d().nights.length > 0}
               fallback={<EmptyState>根拠は残っていない</EmptyState>}
             >
-              <Show when={parts().sources.length > 0}>
+              <Show when={sources().length > 0}>
                 <ul class="memory-sources">
-                  <For each={parts().sources}>
+                  <For each={sources()}>
                     {(s) => (
                       <li>
                         <Source text={s} />

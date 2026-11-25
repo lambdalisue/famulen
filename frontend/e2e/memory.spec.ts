@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type APIRequestContext, expect, test } from "@playwright/test";
@@ -381,6 +382,25 @@ test.describe("the details of a memory", () => {
     await page.goBack();
     await expect(item).toBeInViewport();
     await expect.poll(async () => Math.abs((await y()) - before)).toBeLessThan(60);
+  });
+
+  test("a memory another tool wrote names who wrote it and the sources its commit gives", async ({ page, request }) => {
+    const { path: notebook } = await call<{ path: string }>(request, "SettingsService", "GetNotebookPlace");
+    const path = "long/semantic/e2e-by-tool.md";
+    writeFileSync(join(notebook, "memory", path), "---\nid: e2e-d3\nsummary: 道具が書いた\nsrc: inferred\n---\n");
+    const run = (...args: string[]) => execFileSync("git", ["-C", notebook, ...args]);
+    run("add", `memory/${path}`);
+    const message = "書き留めた\n\nNotebook-Tool: famulen-notebook-cli 0.0.0\nNotebook-Source: AI との会話 e2e";
+    run("commit", "-q", "--author=Claude <c@example.com>", "-m", message, "--", `memory/${path}`);
+
+    await visit(page, `/memory/file?path=${path}`, /^記憶/);
+    const detail = page.locator("#pane .memory-detail");
+    await expect(detail.locator("dd").first()).toHaveText("Claude");
+    await expect(detail.locator(".memory-sources li")).toHaveText(["AI との会話 e2e"]);
+    await page.getByRole("link", { name: "経緯", exact: true }).click();
+    const change = page.getByRole("list", { name: "更新の履歴" }).getByRole("listitem");
+    await expect(change.locator(".memory-change")).toHaveText("書き留めた");
+    await expect(change.locator(".tag")).toHaveText("Claude");
   });
 
   test("a line of core opens over its list, and the way back closes it", async ({ page, request }) => {
