@@ -957,11 +957,12 @@ test("a day of the usage lists its calls, tokens and yen by agent, then by model
 
   await bar.click();
   const detail = page.getByRole("table", { name: `${day} の使った量` });
-  await expect(detail.getByRole("columnheader")).toHaveText(["エージェント", "回数", "入力", "出力", "金額"]);
+  await expect(detail.getByRole("columnheader")).toHaveText(["エージェント", "回数", "入力", "うちキャッシュ", "出力", "金額"]);
   await expect(detail.getByRole("row").filter({ hasText: "秘書" }).getByRole("cell")).toHaveText([
     "秘書",
     /^[1-9]\d* 回$/,
     /^[1-9]\d*k?$/,
+    "—",
     /^[1-9]\d*k?$/,
     /^\d[\d,]* 円$/,
   ]);

@@ -91,7 +91,7 @@ fn ollama_endpoint() -> String {
 }
 
 /// The id a model found in `source` is registered under, the same each time.
-pub(super) fn found_id(source: Source, model: &str) -> String {
+pub(crate) fn found_id(source: Source, model: &str) -> String {
     let source = source.as_str();
     if model.starts_with(&format!("{source}-")) {
         model.to_owned()

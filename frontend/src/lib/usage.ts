@@ -1,4 +1,5 @@
 import { Role, type Usage, type UsageRow, UsageSpan } from "~/gen/famulen/v1/settings_pb";
+import { shortTokens } from "./models";
 
 export type By = "agent" | "model";
 
@@ -24,19 +25,29 @@ export interface Sum {
   calls: number;
   inputTokens: number;
   outputTokens: number;
+  /** The part of the input read from a cache, where it is known. */
+  cachedTokens: number | undefined;
   yen: number;
 }
 
 export function sum(rows: UsageRow[]): Sum {
-  return rows.reduce(
+  return rows.reduce<Sum>(
     (s, r) => ({
       calls: s.calls + Number(r.calls),
       inputTokens: s.inputTokens + Number(r.inputTokens),
       outputTokens: s.outputTokens + Number(r.outputTokens),
+      cachedTokens: r.cachedTokens === undefined ? s.cachedTokens : (s.cachedTokens ?? 0) + Number(r.cachedTokens),
       yen: s.yen + r.yen,
     }),
-    { calls: 0, inputTokens: 0, outputTokens: 0, yen: 0 },
+    { calls: 0, inputTokens: 0, outputTokens: 0, cachedTokens: undefined, yen: 0 },
   );
+}
+
+/** What a run used, in a line. */
+export function usedText(rows: UsageRow[]): string {
+  const s = sum(rows);
+  const cached = s.cachedTokens === undefined ? "" : `（うちキャッシュ ${shortTokens(s.cachedTokens)}）`;
+  return `入力 ${shortTokens(s.inputTokens)}${cached}・出力 ${shortTokens(s.outputTokens)}`;
 }
 
 export function keyOf(row: UsageRow, by: By): string {

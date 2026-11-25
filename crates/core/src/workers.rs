@@ -13,6 +13,7 @@ mod queue;
 mod runners;
 mod runs;
 mod sight;
+mod spent;
 mod tidy;
 
 pub use dispatch::*;
@@ -23,6 +24,7 @@ pub use queue::*;
 pub use runners::{Began, Looked, Runners};
 pub use runs::*;
 pub use sight::*;
+pub use spent::*;
 pub use tidy::{Fate, How, Kind, Left, keep_tidy, tidy};
 
 use std::collections::HashSet;

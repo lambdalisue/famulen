@@ -78,6 +78,7 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     tokio::spawn(chores::keep_finding_models(app.clone()));
     tokio::spawn(crate::workers::run(app.clone()));
     tokio::spawn(crate::workers::keep_tidy(app.clone()));
+    tokio::spawn(crate::workers::keep_counting(app.clone()));
     tokio::spawn(chores::rebuild_when_redefined(app.clone()));
     let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
     let inbox: engine::ChannelInbox = Arc::new(tokio::sync::Mutex::new(inbox_rx));
