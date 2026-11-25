@@ -155,9 +155,10 @@ message DelegatedTask {
   string code = 2;
   string title = 3;
   string runner = 4;
-  // queued, paused, capped (the worker reached its cap for today), later (its
+  // queued (no slot is free), starting (a slot is free: it starts next),
+  // paused, capped (the worker reached its cap for today), later (its
   // start has not come), blocked, unfit (it cannot be run as it is written),
-  // asking (for the owner's approval), approved, retrying (its start failed
+  // asking (for the owner's approval), approved (and no slot is free), retrying (its start failed
   // and is tried again), unreachable (Adroit cannot be asked of it), running, waiting (its session
   // waits for the owner) or still (it is not asked to run: its Status is not
   // pending).

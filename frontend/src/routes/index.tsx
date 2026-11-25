@@ -171,7 +171,8 @@ function AideTile(props: { aide: string }) {
   const handed = (stage: string) => (delegated()?.queue ?? []).filter((t) => stageOf(t) === stage);
   const now = () => mine("in_progress").length + handed("running").length;
   const wait = () => mine("waiting").length + handed("owner").length;
-  const next = () => mine("pending").length + handed("next").length;
+  const later = () => [...handed("soon"), ...handed("next"), ...handed("held")];
+  const next = () => mine("pending").length + later().length;
   const handedLine = (t: DelegatedTask) => <Line href={`/tasks?tab=delegated&id=${t.task}`} title={t.title} sub={t.run?.percent || t.run?.doing ? <ProgressLine run={t.run} /> : "委託"} end={standingText(t)} />;
   return (
     <Show when={now() + wait() + next() > 0} fallback={<EmptyState>{props.aide} が進めている仕事はない</EmptyState>}>
@@ -184,7 +185,7 @@ function AideTile(props: { aide: string }) {
         <For each={mine("waiting")}>{(t) => <Line href={line(t)} title={t.title} sub={valueOf(t, "Waiting for")} />}</For>
       </Group>
       <Group title="これから" tone="next" count={next()}>
-        <For each={handed("next")}>{handedLine}</For>
+        <For each={later()}>{handedLine}</For>
         <For each={mine("pending")}>{(t) => <Line href={line(t)} title={t.title} sub={t.log.at(-1)?.text} />}</For>
       </Group>
     </Show>
