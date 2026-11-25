@@ -143,7 +143,11 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   createEffect(
     on(
       () => props.open,
-      (open) => open && toBottom(),
+      (open) => {
+        // A tap on a button leaves the focus where it was on iOS, and with it the keyboard.
+        if (open) toBottom();
+        else say?.blur();
+      },
       { defer: true },
     ),
   );
@@ -255,9 +259,6 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             </div>
           </Show>
           <div class="line">
-            <button type="button" class="m-dismiss" aria-label="キーボードを閉じる" onClick={() => say?.blur()}>
-              <Icon svg={icons.chevronDown} size={18} />
-            </button>
             <label for="say" class="sr">
               {aide()} への頼みごと
             </label>

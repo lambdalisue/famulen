@@ -95,12 +95,16 @@
   .composer textarea { font-size: 16px; }
   body.chat-open .chat { --under: calc(56px + env(safe-area-inset-bottom)); top: var(--seen-top, 0px); bottom: auto; height: calc(var(--seen-height, 100dvh) - var(--under)); padding-top: var(--clear-top); background: var(--panel); box-shadow: none; z-index: 28; }
   body.chat-open .chat .messages { display: block; min-height: 0; }
-  body.chat-open .chat #approvals { display: flex; }
+  body.chat-open .chat #approvals { display: flex; flex: 0 1000 auto; min-height: 0; }
+  /* What is said gives way first, then the box scrolls inside, so that it ends over the keyboard. */
+  body.chat-open .chat .composer { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+  body.chat-open .composer > * { flex: none; }
+  body.chat-open .composer > .line { flex: 0 1 auto; min-height: 44px; align-items: stretch; }
+  body.chat-open .composer .send { align-self: flex-end; }
   body.chat-open .chat .m-sheetbar { display: flex; flex-direction: column; gap: 4px; padding: 8px 16px 4px; border-bottom: 1px solid var(--line2); }
   body.chat-open :is(.m-peek, .m-float) { display: none; }
   body.typing :is(.m-tabbar, .m-peek, .m-float) { display: none; }
   body.typing.chat-open .chat { --under: 0px; }
-  body.typing .m-dismiss { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--muted); }
 
   .m-float { display: flex; position: fixed; left: 16px; right: 16px; z-index: 20; bottom: calc(56px + var(--composer, 182px) + 8px + env(safe-area-inset-bottom)); margin: 0 !important; justify-content: space-between; align-items: flex-end; pointer-events: none; }
   .m-float > * { pointer-events: auto; }
