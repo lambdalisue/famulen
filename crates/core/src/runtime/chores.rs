@@ -15,6 +15,7 @@ use crate::console_log::Event;
 use crate::dream_schedule;
 use crate::dreaming;
 use crate::models::Role;
+use crate::people;
 use crate::store::Store;
 
 const CHORE_TICK: Duration = Duration::from_secs(60);
@@ -117,7 +118,11 @@ async fn dream_when_due(app: &App, now: DateTime<Utc>, local: NaiveDateTime) {
     }
     let waiting = dreaming::waiting_notes(&app.memory_dir)
         .unwrap_or_default()
-        .len();
+        .iter()
+        // Others talk all day; a dream for each few notes of it would cost more
+        // than it sorts.
+        .filter(|(_, note)| !people::is_noted(note))
+        .count();
     let due = match dream_schedule::due(&app.store, now, local, waiting) {
         Ok(Some(due)) => due,
         Ok(None) => return,

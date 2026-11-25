@@ -23,6 +23,7 @@ pub mod notebook;
 pub mod notebook_place;
 pub mod notices;
 mod paths;
+pub mod people;
 pub mod permissions;
 pub mod persona;
 pub mod purchases;

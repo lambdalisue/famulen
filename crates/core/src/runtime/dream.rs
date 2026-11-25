@@ -12,6 +12,7 @@ use crate::input::{Input, Sender, Source};
 use crate::memory;
 use crate::models::Role;
 use crate::notebook_place;
+use crate::people;
 use crate::tidying;
 
 use super::keep;
@@ -87,6 +88,18 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
         }
         Err(error) => tracing::warn!(%error, "could not check the working memory"),
     }
+    match ask_about_people(app, today) {
+        Ok(None) => {}
+        Ok(Some(status)) => {
+            outcome.status = format!("{}。{status}", outcome.status);
+            if let Err(error) =
+                dreaming::add_to_night(&app.store, outcome.night, Vec::new(), &status)
+            {
+                tracing::warn!(%error, "what was asked of people was not added to its night");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not ask about people"),
+    }
     // Memory stands by now, whatever becomes of the records.
     let tidied = tidying::tidy(
         &app.store,
@@ -141,6 +154,31 @@ fn ask_about_working(app: &App, today: NaiveDate) -> anyhow::Result<Option<Strin
     )))
 }
 
+/// Have the secretary bring the parties up to date with the people noted, once
+/// a day at most. What was asked, if anything was.
+fn ask_about_people(app: &App, today: NaiveDate) -> anyhow::Result<Option<String>> {
+    let Some((text, notes)) = people::to_ask(&app.memory_dir, today)? else {
+        return Ok(None);
+    };
+    let input = Input {
+        sender: Sender::System,
+        source: Source::Schedule {
+            name: "people".into(),
+            at: today.to_string(),
+        },
+        text,
+    };
+    if !keep(&app.store, &app.inputs, &input)? {
+        return Ok(None);
+    }
+    let _hold = app.notebook.hold()?;
+    people::mark_told(&app.memory_dir, today, &notes)?;
+    Ok(Some(format!(
+        "人の気づき {} 件を、相手に反映するよう秘書に頼んだ",
+        notes.len()
+    )))
+}
+
 async fn ask(app: &App, system: String, prompt: String, schema: Value) -> anyhow::Result<Value> {
     let completion = app
         .models
@@ -156,6 +194,56 @@ mod tests {
     use super::*;
     use crate::memory::{WorkingMemory, ensure, working_memories, write_working};
     use crate::notebook::testing::TempDir;
+
+    #[test]
+    fn the_secretary_brings_the_parties_up_to_date_once_a_day() {
+        let dir = TempDir::new("dream-people");
+        let app = crate::runtime::testing::app(dir.path());
+        ensure(&app.memory_dir).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+        assert_eq!(ask_about_people(&app, today).unwrap(), None);
+        let note = |who: &str| {
+            people::write_down(
+                &app.records,
+                &app.memory_dir,
+                today.and_hms_opt(9, 0, 0).unwrap(),
+                &people::Place {
+                    feed: crate::lookout::Feed::Chat,
+                    name: "会社",
+                    workgroups: &[],
+                },
+                &[crate::lookout::Item {
+                    title: String::new(),
+                    body: String::new(),
+                }],
+                &[people::Noted {
+                    item: 0,
+                    who: who.into(),
+                    note: "経理の担当".into(),
+                }],
+            )
+            .unwrap();
+        };
+        note("田中");
+
+        let asked = ask_about_people(&app, today).unwrap().unwrap();
+
+        assert!(asked.contains("人の気づき 1 件"), "{asked}");
+        note("佐藤");
+        assert_eq!(ask_about_people(&app, today).unwrap(), None);
+        ask_about_people(&app, today.succ_opt().unwrap()).unwrap();
+        let inputs = app.store.recent_inputs(0, 10).unwrap();
+        assert_eq!(inputs.len(), 2);
+        for who in ["田中", "佐藤"] {
+            let with = inputs.iter().filter(|(i, ..)| i.input.text.contains(who));
+            assert_eq!(with.count(), 1, "{who}");
+        }
+        assert!(
+            inputs
+                .iter()
+                .all(|(i, ..)| i.input.sender == Sender::System)
+        );
+    }
 
     #[test]
     fn the_secretary_is_asked_once_a_day_of_working_memory_that_may_be_over() {
