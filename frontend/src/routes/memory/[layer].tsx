@@ -1,7 +1,8 @@
 import { createAsync, Navigate, useParams } from "@solidjs/router";
 import { createEffect, For, Match, Show, Switch } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
-import { AskAbout, EntryRow, SrcTag } from "~/components/MemoryEntry";
+import { EntryRow, SrcTag } from "~/components/MemoryEntry";
 import { EmptyState, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
 import type { Layer, MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import * as icons from "~/lib/icons";

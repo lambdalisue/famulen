@@ -39,8 +39,11 @@ test("deleting a memo asks first, then leaves for the memo list without it", asy
   await expect(row(page, "捨てるメモ")).toHaveCount(0);
 });
 
-test("opening a memo puts it beside the composer", async ({ page, request }) => {
+test("a memo opens without going beside the composer, and goes there by its button", async ({ page, request }) => {
   const memo = await record(request, "memos", "旅の持ち物");
   await visit(page, `/memos?id=${memo.id}`, "メモ · 旅の持ち物");
+  await expect(detail(page).getByLabel("題名")).toHaveValue("旅の持ち物");
+  await expect(page.locator("#selection")).toHaveCount(0);
+  await detail(page).getByRole("button", { name: "会話に添える" }).click();
   await expect(page.locator("#selection")).toContainText("メモ：旅の持ち物");
 });

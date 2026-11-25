@@ -141,8 +141,6 @@ button.tag { cursor: pointer; font-family: inherit; min-height: 24px; }
 .item.picks:has(.item-pick:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .item.picks :is(button, a, input, label, .switch-row):not(.item-pick) { position: relative; z-index: 1; }
 .item.current { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--workgroup); }
-.name-pick { cursor: pointer; }
-.name-pick:hover { text-decoration: underline; }
 .when { flex: none; min-width: 84px; }
 .pref > .list, .pref-sub > .list, .card > .list { border-radius: var(--r); }
 

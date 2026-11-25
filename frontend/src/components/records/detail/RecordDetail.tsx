@@ -1,5 +1,5 @@
 import { createAsync, revalidate, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, ErrorBoundary, For, type JSX, Show, Suspense } from "solid-js";
+import { createSignal, ErrorBoundary, For, type JSX, Show, Suspense } from "solid-js";
 import { Button, Disclosure, EmptyState, ErrorState, Keyed, Loading, whenConfirmed } from "~/components/ui";
 import type { RecordKind, SectionType } from "~/gen/famulen/v1/records_pb";
 import { act } from "~/lib/act";
@@ -9,7 +9,6 @@ import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import {
   fieldOf,
-  KIND_NAMES,
   kindsQuery,
   nameOf,
   plainField,
@@ -21,7 +20,6 @@ import {
   sectionIn,
   withField,
 } from "~/lib/records";
-import { setSelection } from "~/lib/view";
 import Backlinks from "../links/Backlinks";
 import { KnownLinks } from "../links/known";
 import RelatedLinks from "../links/RelatedLinks";
@@ -128,7 +126,6 @@ function Content(props: { record: Rec } & Extra) {
   const free = () => kind()?.free ?? false;
   const [view, setView] = createSignal("view");
   const save = useRecordEdit({ kind: props.record.kind, id: props.record.id });
-  createEffect(() => setSelection(`${KIND_NAMES[r().kind] ?? r().kind}：${r().title}（${r().code}）`));
 
   const remove = () =>
     whenConfirmed(`「${r().title}」を消す`, "消す", async () => {

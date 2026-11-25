@@ -59,6 +59,8 @@ test("a hold added in the dialog shows in the grid, opens with what it says, and
   await expect(sheet.getByRole("link", { name: "会議に入る" })).toHaveAttribute("href", "https://meet.example.com/abc");
   await expect(sheet.getByRole("link", { name: "地図" })).toHaveAttribute("href", /google\.com\/maps/);
   await expect(sheet.locator(".markdown-body strong")).toHaveText("忘れない");
+  await expect(page.locator("#selection")).toHaveCount(0);
+  await sheet.getByRole("button", { name: "会話に添える" }).click();
   await expect(page.locator("#selection")).toContainText("設計の打ち合わせ");
   await sheet.getByRole("button", { name: "設計の打ち合わせを消す" }).click();
   await agree(page, "消す");

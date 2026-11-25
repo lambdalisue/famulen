@@ -1,5 +1,6 @@
 import { A, createAsync, query } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import LogSheet from "~/components/logs/LogSheet";
 import LookoutLog from "~/components/logs/LookoutLog";
 import LookoutEdit from "~/components/LookoutEdit";
@@ -13,7 +14,7 @@ import { Role } from "~/gen/famulen/v1/settings_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
-import { setSelection, setView } from "~/lib/view";
+import { setView } from "~/lib/view";
 import {
   Dialog,
   DialogTrigger,
@@ -25,7 +26,6 @@ import {
   List,
   NumberField,
   PageHeader,
-  PickName,
   Section,
   SubSection,
   Switch,
@@ -139,10 +139,10 @@ export default function Lookout() {
           <List>
             <Keyed each={w()?.sources ?? []} by={(s) => s.id}>
               {(s) => (
-                <div class="item" role="listitem">
+                <div class="item wraps-phone" role="listitem">
                   <Icon svg={icons.eye} size={16} />
                   <div class="grow lookout-source">
-                    <PickName text={s().name} onPick={() => setSelection(`見張り ${s().name}`)} />
+                    <div class="item-title">{s().name}</div>
                     <Show when={ROUTES.find(([r]) => r === s().route)}>
                       {(route) => <span class="sub">{route()[0] === LookoutRoute.DIGEST ? "朝のまとめへ" : route()[1]}</span>}
                     </Show>
@@ -165,6 +165,7 @@ export default function Lookout() {
                     {s().enabled ? "見張っている" : "止めている"}
                     <span class="sr">（{s().name}）</span>
                   </Switch>
+                  <AskAbout framed what={`見張り ${s().name}`} />
                   <LookoutEdit source={s()} defaults={w()?.defaults ?? []} sources={w()?.sources ?? []} />
                   <IconButton
                     icon={icons.trash}

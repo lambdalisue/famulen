@@ -2,6 +2,7 @@ import { shortTime } from "~/lib/dates";
 import { createAsync, useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, type JSX, Show } from "solid-js";
 import AddService from "~/components/AddService";
+import AskAbout from "~/components/AskAbout";
 import DefinitionDiff from "~/components/DefinitionDiff";
 import PermissionSeg, { PERMISSIONS } from "~/components/PermissionSeg";
 import { CalendarsSection, ChannelsSection, LookoutSection } from "~/components/ServiceSections";
@@ -30,7 +31,7 @@ import {
 import { byName, hasWords } from "~/lib/words";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
-import { setSelection, setView } from "~/lib/view";
+import { setView } from "~/lib/view";
 import {
   Button,
   Callout,
@@ -417,7 +418,6 @@ function ToolRow(props: { t: ToolSetting; scope: string; owner: string; readOnly
   return (
     <ListRow
       class="tool-row"
-      onPick={() => setSelection(`${props.owner} の道具 ${props.t.name}`)}
       title={<span class="mono">{props.t.name}</span>}
       sub={
         <>
@@ -436,14 +436,17 @@ function ToolRow(props: { t: ToolSetting; scope: string; owner: string; readOnly
         </>
       }
       end={
-        <PermissionSeg
-          tool={props.t.name}
-          permission={props.t.permission}
-          inherited={props.t.inherited}
-          onChoose={(permission, done) =>
-            void act(() => api.connections.setPermission({ scope: props.scope, tool: props.t.name, permission }), done)
-          }
-        />
+        <>
+          <PermissionSeg
+            tool={props.t.name}
+            permission={props.t.permission}
+            inherited={props.t.inherited}
+            onChoose={(permission, done) =>
+              void act(() => api.connections.setPermission({ scope: props.scope, tool: props.t.name, permission }), done)
+            }
+          />
+          <AskAbout what={`${props.owner} の道具 ${props.t.name}`} />
+        </>
       }
     />
   );

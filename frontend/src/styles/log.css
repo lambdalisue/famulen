@@ -1,6 +1,6 @@
 .log-open { display: flex; }
 .log-day { font-size: var(--t-sm); font-weight: 600; color: var(--muted); padding: 10px 4px 0; }
-.log-turn { display: flex; flex-direction: column; gap: var(--s2); cursor: pointer; }
+.log-turn, .log-turn-head { display: flex; flex-direction: column; gap: var(--s2); cursor: pointer; }
 .log-turn .asked { font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn .reply { white-space: pre-wrap; font-size: var(--t-base); color: var(--ink2); overflow-wrap: anywhere; }
 .log-turn:not(.open) .asked { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

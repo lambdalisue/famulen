@@ -1,9 +1,8 @@
 import { Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
-import * as icons from "~/lib/icons";
-import { setSelection } from "~/lib/view";
-import { IconButton, ListRow, Tag } from "~/components/ui";
+import { ListRow, Tag } from "~/components/ui";
 
 export function SrcTag(props: { src: string }) {
   return (
@@ -13,11 +12,6 @@ export function SrcTag(props: { src: string }) {
       </Show>
     </Show>
   );
-}
-
-/** Puts a memory beside what the owner says next. */
-export function AskAbout(props: { what: string; label?: string }) {
-  return <IconButton plain icon={icons.messagePlus} label={props.label ?? "会話に添える"} onClick={() => setSelection(props.what)} />;
 }
 
 /** One remembered item with where it came from, its span, evidence and use. */

@@ -1,5 +1,6 @@
 import { createAsync, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
+import AskAbout from "~/components/AskAbout";
 import UsageChart, { type Column } from "~/components/UsageChart";
 import type { UsageRow } from "~/gen/famulen/v1/settings_pb";
 import * as icons from "~/lib/icons";
@@ -19,7 +20,6 @@ import {
   sum,
   tickName,
 } from "~/lib/usage";
-import { setSelection } from "~/lib/view";
 import { EmptyState, IconButton, PageHeader, SegmentedOf } from "~/components/ui";
 
 const BY: [By, string][] = [
@@ -54,11 +54,7 @@ export default function Usage() {
 
   const total = createMemo(() => sum(usage()?.rows ?? []));
   const pickedBucket = () => usage()?.buckets.find((b) => b.from === picked());
-  const pick = (key: string) => {
-    const next = picked() === key ? undefined : key;
-    setPicked(next);
-    if (next) setSelection(`使った量 · ${bucketName(span(), next)}`);
-  };
+  const pick = (key: string) => setPicked(picked() === key ? undefined : key);
 
   const chart = (metered: boolean) => {
     const u = usage();
@@ -198,7 +194,10 @@ export default function Usage() {
         <Show when={pickedBucket()}>
           {(b) => (
             <section class="usage-detail">
-              <h2>{bucketName(span(), b().from)}</h2>
+              <div class="row">
+                <h2 class="grow">{bucketName(span(), b().from)}</h2>
+                <AskAbout framed what={`使った量 · ${bucketName(span(), b().from)}`} />
+              </div>
               <Show when={b().rows.length > 0} fallback={<EmptyState>使っていない</EmptyState>}>
                 <div class="scroll">
                   <table class="table" aria-label={`${bucketName(span(), b().from)} の使った量`}>

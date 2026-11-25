@@ -2,7 +2,7 @@ import { createAsync, useLocation, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import AddEvent from "~/components/records/AddEvent";
 import EventPeek, { createPeek, type Peek } from "~/components/records/EventPeek";
-import EventPanel, { whenOf } from "~/components/records/EventPanel";
+import EventPanel from "~/components/records/EventPanel";
 import { Button, Callout, IconButton, Legend, LinkButton, Loading, PageHeader, SegmentedLinks, SplitPane } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import { act } from "~/lib/act";
@@ -13,7 +13,7 @@ import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { useParam, withParams } from "~/lib/params";
 import { isNarrow } from "~/lib/viewport";
-import { setSelection, setView } from "~/lib/view";
+import { setView } from "~/lib/view";
 import { workgroup } from "~/lib/workgroup";
 
 const UNITS: [Unit, string][] = [
@@ -119,7 +119,6 @@ export default function Calendar() {
   const open = (e: CalendarEvent) => {
     if (faint(e)) return;
     peek.hide();
-    setSelection(`予定：${whenOf(e)} ${label(e)}`);
     navigate(`${here()}&event=${encodeURIComponent(e.uid)}`, { scroll: false });
   };
   const close = () => navigate(here(), { scroll: false });
