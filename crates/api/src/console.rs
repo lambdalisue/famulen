@@ -415,18 +415,51 @@ impl ConsoleService for Api {
     }
 }
 
-/// The broadcast as a stream; a receiver that fell behind skips what it
-/// missed rather than ending.
+/// The broadcast as a stream. A receiver is told to read everything again when
+/// it begins, as what it read before may have changed since, and when it fell
+/// behind.
 fn as_stream(
     receiver: tokio::sync::broadcast::Receiver<Event>,
 ) -> impl futures::Stream<Item = Event> + Send + 'static {
-    futures::stream::unfold(receiver, |mut receiver| async move {
-        loop {
-            match receiver.recv().await {
-                Ok(event) => return Some((event, receiver)),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+    let told = futures::stream::unfold(receiver, |mut receiver| async move {
+        match receiver.recv().await {
+            Ok(event) => Some((event, receiver)),
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                Some((Event::Records, receiver))
             }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
         }
-    })
+    });
+    futures::stream::iter([Event::Records]).chain(told)
+}
+
+#[cfg(test)]
+mod tests {
+    use famulen_core::console_log::Event;
+    use futures::{FutureExt, StreamExt};
+    use tokio::sync::broadcast;
+
+    use super::as_stream;
+
+    #[tokio::test]
+    async fn who_begins_to_listen_is_told_to_read_again_and_then_what_changes() {
+        let (tx, rx) = broadcast::channel(4);
+        let mut events = Box::pin(as_stream(rx));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        assert_eq!(events.next().now_or_never(), None);
+        tx.send(Event::Approvals).unwrap();
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Approvals)));
+    }
+
+    #[tokio::test]
+    async fn who_fell_behind_is_told_to_read_again() {
+        let (tx, rx) = broadcast::channel(1);
+        let mut events = Box::pin(as_stream(rx));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        for _ in 0..3 {
+            tx.send(Event::Approvals).unwrap();
+        }
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Records)));
+        assert_eq!(events.next().now_or_never(), Some(Some(Event::Approvals)));
+    }
 }

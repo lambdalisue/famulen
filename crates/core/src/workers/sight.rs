@@ -250,6 +250,11 @@ impl Sights {
         std::mem::take(&mut self.lock().changed)
     }
 
+    /// Whether [`Sights::take_changed`] has a change to tell of.
+    pub(super) fn has_changed(&self) -> bool {
+        self.lock().changed
+    }
+
     pub(super) fn plan(&self, run: i64, steps: Vec<Step>) {
         self.change(run, |s| s.steps = steps);
     }

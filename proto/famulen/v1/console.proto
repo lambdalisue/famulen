@@ -162,7 +162,8 @@ message ConsoleEvent {
     ConsoleMessage message = 1;
     // The inbox (approvals, held inputs, account questions) changed.
     Empty inbox = 2;
-    // Records or settings changed.
+    // Records or settings changed, or may have: told also when the stream
+    // begins and when changes were missed.
     Empty records = 3;
   }
 }

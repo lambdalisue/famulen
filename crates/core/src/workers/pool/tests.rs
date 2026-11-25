@@ -1442,6 +1442,23 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"済んだ"
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_plan_an_agent_writes_is_told_without_waiting_for_the_next_look() {
+    let dir = TempDir::new("pool-agent-told");
+    let script = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"in_progress"}]}}]}}'
+sleep 300
+"#;
+    let (app, pool, _id) = agent_app(&dir, script, &[("Runner", "agent")]);
+    pool.tick().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), app.workers.poked())
+        .await
+        .expect("the pool is told of the plan");
+    assert_eq!(app.workers.sights.of(1).doing(), "読む");
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn cancelling_ends_an_agent_with_every_process_it_started() {
     let dir = TempDir::new("pool-agent-group");
     let script = format!(
