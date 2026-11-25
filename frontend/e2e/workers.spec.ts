@@ -209,3 +209,86 @@ test("how far a delegated task got and what its worker writes are seen as it goe
   // What was on screen stays as it was, open or folded.
   expect(await first?.evaluate((e) => e.isConnected)).toBe(true);
 });
+
+test.describe("a session that waits on the owner", () => {
+  let connection = "";
+
+  test.beforeAll(async ({ request }) => {
+    await settle(request, false);
+    const added = await call<{ connection: { id: string } }>(request, "ConnectionService", "AddConnection", {
+      target: "adroit",
+      how: "definition",
+      env: "key=k",
+    });
+    connection = added.connection.id;
+  });
+
+  test.afterAll(async ({ request }) => {
+    await call(request, "ConnectionService", "DeleteConnection", { id: connection });
+  });
+
+  type Pending = { id: string; tool: string };
+  const pending = async (request: Parameters<typeof call>[0], tool: string) =>
+    ((await call<{ approvals?: Pending[] }>(request, "ConsoleService", "GetInbox")).approvals ?? []).filter((a) => a.tool.includes(tool));
+
+  /** A delegated task whose session asks something, open on screen. */
+  async function waiting(page: Page, request: Parameters<typeof call>[0], title: string, prompt: string) {
+    const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title, request: prompt, runner: "adroit", directory: "/src" });
+    await expect.poll(() => pending(request, "start_session")).toHaveLength(1);
+    const [start] = await pending(request, "start_session");
+    await call(request, "ConsoleService", "AnswerApproval", { id: start?.id, answer: "APPROVAL_ANSWER_ALLOW" });
+    await visit(page, `/tasks?tab=delegated&id=${t.id}`, /タスク/);
+    const ask = detail(page).getByRole("group", { name: "セッションの問い" });
+    await expect(ask).toBeVisible({ timeout: 60_000 });
+    return { ask, task: t.id };
+  }
+
+  const left = (page: Page, text: string) =>
+    expect(detail(page).getByRole("region", { name: "委託の様子" })).toContainText(text, { timeout: 60_000 });
+
+  test("is answered in the owner's words on the task", async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const { ask, task } = await waiting(page, request, "言葉で答える仕事", "x");
+    await expect(ask).toContainText("このセッションを閉じますか？");
+    const words = ask.getByRole("textbox");
+    await words.fill("まだ");
+    // What is written stays as the page is read again.
+    await call(request, "RecordService", "SaveRecord", { kind: "tasks", id: task, title: "言葉で答える仕事・改" });
+    await expect(detail(page).getByRole("textbox", { name: "題名" })).toHaveValue("言葉で答える仕事・改");
+    await expect(words).toHaveValue("まだ");
+    await ask.getByRole("button", { name: "答える", exact: true }).click();
+    await expect(toast(page)).toHaveText("答えを届けた");
+    await expect(ask).toHaveCount(0);
+    await left(page, "済んだ");
+    await detail(page).getByRole("button", { name: "残したもの" }).click();
+    await left(page, "答え: --reply まだ");
+  });
+
+  test("is asked again in the conversation, and answered once from either place", async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const { ask } = await waiting(page, request, "聞き直す仕事", "x");
+    expect(await pending(request, "put_question")).toHaveLength(0);
+    for (let i = 0; i < 2; i++) {
+      await ask.getByRole("button", { name: "再度聞く" }).click();
+      await expect(toast(page)).toHaveText("もう一度尋ねた");
+      await expect(ask.getByRole("button", { name: "再度聞く" })).toBeEnabled();
+    }
+    await expect.poll(() => pending(request, "put_question")).toHaveLength(1);
+    await expect(ask).toContainText("でも尋ねている");
+    await expect(page.getByTestId("approval")).toContainText("このセッションを閉じますか？");
+    await ask.getByRole("button", { name: "残す", exact: true }).click();
+    await expect(page.getByTestId("approval")).toHaveCount(0);
+    expect(await pending(request, "put_question")).toHaveLength(0);
+    await left(page, "済んだ");
+  });
+
+  test("is allowed what it asks to do on the task", async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const { ask } = await waiting(page, request, "許しを待つ仕事", "e2e-permission");
+    await expect(ask).toContainText("rm -rf build");
+    await ask.getByRole("button", { name: "承認", exact: true }).click();
+    await left(page, "済んだ");
+    await detail(page).getByRole("button", { name: "残したもの" }).click();
+    await left(page, "答え: --allow");
+  });
+});

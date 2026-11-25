@@ -1561,3 +1561,121 @@ async fn the_end_of_a_task_no_working_memory_speaks_of_says_nothing_of_it() {
     b.pool.tick().await.unwrap();
     assert!(!b.told()[0].text.contains("Working memory"));
 }
+
+/// Adroit as far as it starts a session and tells what one asks, from a file.
+const ASKING_ADROIT: &str = r#"
+format = 1
+id = "adroit"
+name = "Adroit"
+
+[account]
+shows = { label = "Shows" }
+
+[transport.command]
+program = "perl"
+
+[[commands]]
+name = "start_session"
+description = "Start one."
+args = ["-e", "print qq({{\"id\":\"s1\"}})"]
+
+[[commands]]
+name = "read_session"
+description = "Read it."
+args = ["-e", "open my $f, '<', shift or die; print <$f>", "--", "{account.shows}"]
+read_only = true
+
+[[commands]]
+name = "put_question"
+description = "Answer it."
+args = ["-e", "1"]
+
+[commands.each_time]
+reads = "read_session"
+at = "/question"
+same = { "/question/id" = "{args.question}" }
+questions = "/input/questions"
+fills = "replies"
+
+[permissions]
+start_session = "confirm"
+read_session = "allow"
+"#;
+
+#[tokio::test]
+async fn a_request_about_what_a_session_asks_no_more_is_taken_back() {
+    let dir = TempDir::new("pool-asks-no-more");
+    let services = dir.path().join("gateway/services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(services.join("adroit.toml"), ASKING_ADROIT).unwrap();
+    let app = crate::runtime::testing::app(dir.path());
+    let shows = dir.path().join("shows");
+    let show = |state: &str, question: &str| {
+        let question = json!({ "id": question, "kind": "question", "input": { "questions": [{ "question": "どちら？" }] } });
+        std::fs::write(
+            &shows,
+            json!({ "state": state, "question": question }).to_string(),
+        )
+        .unwrap();
+    };
+    let values = [("shows".to_owned(), shows.to_str().unwrap().to_owned())];
+    app.gateway
+        .add_defined("adroit", values.into(), None)
+        .unwrap();
+    app.gateway.read_tools("adroit").await.unwrap();
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    app.records
+        .add(
+            Writer::Secretary,
+            TASKS,
+            delegated(
+                "直す",
+                &[("Runner", "adroit"), ("Directory", &at("/src/api"))],
+            ),
+        )
+        .unwrap();
+    pool.tick().await.unwrap();
+    let start = app.gateway.held_tickets().unwrap()[0].id;
+    app.gateway
+        .answer_ticket(start, Answer::Approve)
+        .await
+        .unwrap();
+    pool.tick().await.unwrap();
+    let held = || app.gateway.held_tickets().unwrap().len();
+    let look = async || {
+        app.workers.heard_of("s1").unwrap();
+        pool.tick().await.unwrap();
+    };
+
+    show("waiting", "q1");
+    look().await;
+    crate::workers::adroit::ask_again(&app, 1, "q1")
+        .await
+        .unwrap();
+    look().await;
+    assert_eq!(held(), 1, "it is asked still");
+    // What the secretary put to them, naming the session by its code.
+    let by_code = Call::new(
+        crate::permissions::SECRETARY,
+        "adroit",
+        "put_question",
+        json!({ "session": "k7", "question": "q1", "summary": "x" }),
+    );
+    app.gateway.withdraw_decided("adroit", "q1").unwrap();
+    app.gateway.call(&by_code).await.unwrap();
+    assert_eq!(held(), 1);
+    show("waiting", "q2");
+    look().await;
+    assert_eq!(held(), 0);
+    crate::workers::adroit::ask_again(&app, 1, "q2")
+        .await
+        .unwrap();
+    std::fs::write(&shows, json!({ "state": "working" }).to_string()).unwrap();
+    look().await;
+    assert_eq!(held(), 0, "answered in Adroit");
+    assert!(
+        crate::workers::adroit::ask_again(&app, 1, "q2")
+            .await
+            .is_err()
+    );
+}

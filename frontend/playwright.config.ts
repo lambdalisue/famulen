@@ -1,6 +1,6 @@
-import { cpSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { newAgeKey } from "./e2e/age-key";
 
@@ -9,6 +9,8 @@ const data = mkdtempSync(join(tmpdir(), "famulen-e2e-"));
 const config = join(data, "famulen.toml");
 writeFileSync(config, `[claude]\nbin = ${JSON.stringify(resolve("e2e/fake-claude.pl"))}\n`);
 cpSync(resolve("e2e/services"), join(data, "data", "gateway", "services"), { recursive: true });
+const adroit = join(data, "adroit");
+mkdirSync(adroit);
 
 const api = "127.0.0.1:17790";
 const console = "http://127.0.0.1:13000";
@@ -38,6 +40,9 @@ export default defineConfig({
         FAMULEN_TIMEZONE: "Asia/Tokyo",
         FAMULEN_VAULT_KEY: newAgeKey(),
         FAMULEN_E2E_CLIENT_ID: "e2e",
+        // The programs tests stand in for come before any on this machine.
+        PATH: `${resolve("e2e/bin")}${delimiter}${process.env.PATH ?? ""}`,
+        E2E_ADROIT_DIR: adroit,
       },
       reuseExistingServer: false,
       timeout: 60_000,

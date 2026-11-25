@@ -285,6 +285,15 @@ impl Runs {
         self.set(id, "state = ?2", &[&state.as_str()])
     }
 
+    /// The session it waited in was answered. One that ended meanwhile stays so.
+    pub fn answered(&self, id: i64) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "UPDATE worker_runs SET state = ?2 WHERE id = ?1 AND state = ?3",
+            rusqlite::params![id, State::Running.as_str(), State::Waiting.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// What went wrong with its start, and when it is tried again.
     pub fn failed_try(&self, id: i64, note: &str, retry_at: i64) -> anyhow::Result<()> {
         self.set(id, "note = ?2, retry_at = ?3", &[&note, &retry_at])

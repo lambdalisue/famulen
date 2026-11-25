@@ -93,6 +93,44 @@ function Whole(props: { approval: Approval }) {
   );
 }
 
+/** What is asked, when it is not answered by choosing: what the call is given, and the whole of it. */
+function Given(props: { approval: Approval }) {
+  return (
+    <>
+      <Show when={props.approval.given.length > 0} fallback={<pre>{pretty(props.approval.input)}</pre>}>
+        <Rows rows={props.approval.given} />
+      </Show>
+      <Whole approval={props.approval} />
+    </>
+  );
+}
+
+/** What a session waits for, answered where it is read. */
+export function SessionAsk(props: { approval: Approval; disabled: boolean; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
+  return (
+    <Show
+      when={props.approval.questions.length > 0}
+      fallback={
+        <>
+          <Given approval={props.approval} />
+          <div class="row">
+            <Button variant="go" small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
+              承認
+            </Button>
+            <Button small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
+              却下
+            </Button>
+          </div>
+        </>
+      }
+    >
+      <fieldset class="asked-fields" disabled={props.disabled}>
+        <Questions questions={props.approval.questions} onAnswer={(replies) => props.onAnswer(ApprovalAnswer.ALLOW, replies)} />
+      </fieldset>
+    </Show>
+  );
+}
+
 /** A call that waits for the owner's answer. */
 export default function ApprovalCard(props: { approval: Approval; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
   const r = () => props.approval;
@@ -121,14 +159,7 @@ export default function ApprovalCard(props: { approval: Approval; onAnswer: (ans
         fallback={
           <Show
             when={asks()}
-            fallback={
-              <>
-                <Show when={r().given.length > 0} fallback={<pre>{pretty(r().input)}</pre>}>
-                  <Rows rows={r().given} />
-                </Show>
-                <Whole approval={r()} />
-              </>
-            }
+            fallback={<Given approval={r()} />}
           >
             <Questions questions={r().questions} onAnswer={(replies) => props.onAnswer(ApprovalAnswer.ALLOW, replies)} />
           </Show>

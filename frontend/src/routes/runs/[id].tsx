@@ -1,6 +1,7 @@
 import { createAsync, revalidate, useParams } from "@solidjs/router";
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 import Markdown from "~/components/Markdown";
+import RunAsk from "~/components/records/RunAsk";
 import { ProgressLine, RunSteps } from "~/components/records/RunProgress";
 import { Callout, Disclosure, EmptyState, Keyed, LinkButton, Loading, PageHeader, Tag } from "~/components/ui";
 import type { WorkerLine } from "~/gen/famulen/v1/workers_pb";
@@ -117,6 +118,7 @@ export default function Run() {
               </Callout>
             )}
           </Show>
+          <RunAsk run={r()} />
           <div class="run-body">
             <section class="run-plan" aria-label="進み具合">
               <ProgressLine run={r()} />

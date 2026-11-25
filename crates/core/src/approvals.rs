@@ -199,6 +199,24 @@ impl<S: Slack> Approvals<S> {
     /// Put a ticket the gateway held to the owner: on the console, and on
     /// Slack when it is connected. A ticket already put is left alone.
     pub async fn present(&self, ticket: &Ticket) -> anyhow::Result<()> {
+        if self.lapsed(ticket)? {
+            return Ok(());
+        }
+        self.put(ticket).await?;
+        // It may have been taken back while it was being put.
+        if self.lapsed(ticket)? {
+            withdraw(&self.store, self.slack.as_ref(), ticket.id).await?;
+            self.tell_console();
+        }
+        Ok(())
+    }
+
+    fn lapsed(&self, ticket: &Ticket) -> anyhow::Result<bool> {
+        let now = self.permissions.gateway().ticket(ticket.id)?;
+        Ok(now.is_some_and(|t| t.status == "lapsed"))
+    }
+
+    async fn put(&self, ticket: &Ticket) -> anyhow::Result<()> {
         let (id, tool, input) = (ticket.id, ticket_tool(ticket), &ticket.shown);
         let added = self.store.conn().execute(
             "INSERT OR IGNORE INTO approvals (id, tool, input, status, created_at)
@@ -524,6 +542,21 @@ impl<S: Slack> Approvals<S> {
         })
         .transpose()
     }
+}
+
+/// [`withdraw`] requests the gateway took back, apart from what goes on, and
+/// tell open consoles.
+pub(crate) fn withdraw_apart(app: &crate::app::App, ids: Vec<i64>) {
+    let (store, console) = (app.store.clone(), app.console.clone());
+    let slack = app.slack.read().unwrap_or_else(|p| p.into_inner()).clone();
+    tokio::spawn(async move {
+        for id in ids {
+            if let Err(error) = withdraw(&store, slack.as_deref(), id).await {
+                tracing::warn!(%error, id, "could not take back a request");
+            }
+        }
+        console.notify(crate::console_log::Event::Approvals);
+    });
 }
 
 /// Take back a request that is asked no more: it leaves the console, and its

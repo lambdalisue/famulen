@@ -37,6 +37,7 @@ import {
 } from "~/lib/workers";
 import { workgroup } from "~/lib/workgroup";
 import RecordsFrame from "./RecordsFrame";
+import RunAsk from "./RunAsk";
 import { ProgressLine, RunSteps } from "./RunProgress";
 
 const retry = (id: string) => act(() => api.workers.retryDelegated({ id }), "並びに戻した");
@@ -259,13 +260,25 @@ export function RunResult(props: { run: WorkerRun; href?: string }) {
   );
 }
 
+/** A value, and what it was once it is no more: what is shown of it may be read while it is taken down. */
+function createLast<T>(read: () => T | undefined) {
+  return createMemo<T | undefined>((before) => read() ?? before);
+}
+
 /** How a delegated task stands, above what it says. */
 export function Delegation(props: { task: Rec }) {
   const delegated = createAsync(() => delegatedQuery({ task: props.task.id }));
   const now = () => delegated()?.queue.find((t) => t.task === props.task.id);
+  const seen = () => {
+    const t = now();
+    return t && isSeen(t) ? t.run : undefined;
+  };
+  const standing = createLast(now);
+  const run = createLast(seen);
   const line = createAsync(() => delegatedQuery());
   const place = () => placeOf(line()?.queue, props.task.id);
-  const last = () => delegated()?.ended.find((r) => r.task === props.task.id);
+  const ended = () => delegated()?.ended.find((r) => r.task === props.task.id);
+  const last = createLast(ended);
   return (
     <Show when={valueOf(props.task, "Assignee") === WORKER}>
       <Section
@@ -274,13 +287,15 @@ export function Delegation(props: { task: Rec }) {
         level={3}
         action={
           <>
-            <Show when={now()?.state === "still" || (isOver(props.task) && last())}>
+            <Show when={now()?.state === "still" || (isOver(props.task) && ended())}>
               <Button small onClick={() => void retry(props.task.id)}>
                 並びに戻す
               </Button>
             </Show>
-            <Show when={now()?.run && isSeen(now()!) ? now()!.run : undefined}>{(r) => <Watch run={r()} title={props.task.title} />}</Show>
-            <Show when={now()}>
+            <Show when={!!seen()}>
+              <Watch run={run()!} title={props.task.title} />
+            </Show>
+            <Show when={!!now()}>
               <Button small onClick={() => void cancel(props.task.id, props.task.title)}>
                 委託をやめる
               </Button>
@@ -288,38 +303,31 @@ export function Delegation(props: { task: Rec }) {
           </>
         }
       >
-        <Show when={now()}>
-          {(t) => (
-            <div class="row">
-              <Standing of={t()} />
-              <span class="sub">
-                {runnerText(t().runner)} · 並びの {place()} 番目
-              </span>
-              <Show when={t().why}>
-                <span class="sub">{t().why}</span>
-              </Show>
-              <Show when={t().run?.session}>
-                <span class="sub">セッション {t().run?.session}</span>
-              </Show>
-            </div>
-          )}
+        <Show when={!!now()}>
+          <div class="row">
+            <Standing of={standing()!} />
+            <span class="sub">
+              {runnerText(standing()!.runner)} · 並びの {place()} 番目
+            </span>
+            <Show when={standing()!.why}>
+              <span class="sub">{standing()!.why}</span>
+            </Show>
+            <Show when={standing()!.run?.session}>
+              <span class="sub">セッション {standing()!.run?.session}</span>
+            </Show>
+          </div>
         </Show>
-        <Show when={now()?.run && isSeen(now()!) ? now()!.run : undefined}>
-          {(r) => (
-            <>
-              <ProgressLine run={r()} />
-              <Show when={r().steps.length > 0}>
-                <RunSteps run={r()} />
-              </Show>
-            </>
-          )}
+        <Show when={!!seen()}>
+          <RunAsk run={run()!} />
+          <ProgressLine run={run()!} />
+          <Show when={run()!.steps.length > 0}>
+            <RunSteps run={run()!} />
+          </Show>
         </Show>
-        <Show when={last()}>
-          {(r) => (
-            <List>
-              <RunResult run={r()} />
-            </List>
-          )}
+        <Show when={!!ended()}>
+          <List>
+            <RunResult run={last()!} />
+          </List>
         </Show>
       </Section>
     </Show>

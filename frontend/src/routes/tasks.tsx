@@ -131,9 +131,9 @@ export default function Tasks() {
       back={base}
       top={(r) => (
         <>
-          <Finish task={r} />
-          <Blocked task={r} />
-          <Delegation task={r} />
+          <Finish task={r()} />
+          <Blocked task={r()} />
+          <Delegation task={r()} />
         </>
       )}
     />
@@ -165,7 +165,7 @@ export default function Tasks() {
           tools={<Tabs tab="routines" />}
           narrow={["Assignee"]}
           row={routineParts}
-          detail={(id) => <RecordDetail kind="routines" id={id} back="/tasks?tab=routines" top={(r) => <Runs routine={r} />} />}
+          detail={(id) => <RecordDetail kind="routines" id={id} back="/tasks?tab=routines" top={(r) => <Runs routine={r()} />} />}
           add={{ label: "定期タスクを足す", onAdd: () => setAdding(true) }}
           empty="定期タスクはまだない"
         />

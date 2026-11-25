@@ -12,7 +12,7 @@ use famulen_core::workgroups::ALL;
 
 use crate::pb::*;
 use crate::records::in_workgroup;
-use crate::{Api, OrFail, by_secretary, changed, fail, workgroups_for, writer};
+use crate::{Api, OWNER, OrFail, actor, by_secretary, changed, fail, workgroups_for, writer};
 
 /// How many ended runs are listed.
 const ENDED: usize = 20;
@@ -106,6 +106,29 @@ fn settings(s: Settings) -> WorkerSettings {
 }
 
 impl Api {
+    /// A run with what its session asks the owner, for the owner alone.
+    fn asking(&self, run: Run, sight: &Sight) -> anyhow::Result<WorkerRun> {
+        let question = workers::adroit::question(&self.app, &run, sight)?;
+        let mut run = seen(run, sight);
+        if let Some(q) = question {
+            let approval = self.approval(famulen_core::approvals::Request {
+                id: q.ticket,
+                tool: q.tool,
+                input: q.shown.to_string(),
+                status: "pending".into(),
+                created_at: 0,
+            });
+            run.question = Some(RunQuestion {
+                id: q.id,
+                truncated: q.truncated,
+                approval: Some(approval).into(),
+                ..Default::default()
+            })
+            .into();
+        }
+        Ok(run)
+    }
+
     /// Change a delegated task, and have the pool see it.
     fn change_delegated(&self, by: Writer, id: &str, patch: Patch) -> anyhow::Result<Record> {
         let task = self.app.records.need(TASKS, id)?;
@@ -186,7 +209,7 @@ impl WorkerService for Api {
 
     async fn list_delegated(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         request: ServiceRequest<'_, ListDelegatedRequest>,
     ) -> ServiceResult<ListDelegatedResponse> {
         let asked = request.to_owned_message();
@@ -210,24 +233,30 @@ impl WorkerService for Api {
                     .map(|o| o.runner.as_str().to_owned())
                     .unwrap_or_default();
                 let (state, why) = standing(q.placed.standing);
-                DelegatedTask {
+                let run = q
+                    .run
+                    .map(|r| {
+                        let sight = self.app.workers.sights.of(r.id);
+                        if actor(&ctx) == OWNER {
+                            self.asking(r, &sight)
+                        } else {
+                            Ok(seen(r, &sight))
+                        }
+                    })
+                    .transpose()?;
+                Ok(DelegatedTask {
                     title: q.task.title(),
                     task: q.task.id,
                     code: q.code,
                     runner,
                     state: state.into(),
                     why,
-                    run: q
-                        .run
-                        .map(|r| {
-                            let sight = self.app.workers.sights.of(r.id);
-                            seen(r, &sight)
-                        })
-                        .into(),
+                    run: run.into(),
                     ..Default::default()
-                }
+                })
             })
-            .collect();
+            .collect::<anyhow::Result<_>>()
+            .or_fail()?;
         let ended = self
             .app
             .workers
@@ -255,7 +284,7 @@ impl WorkerService for Api {
     ) -> ServiceResult<RunOutput> {
         let (run, sight, why) = workers::watch(&self.app, request.id).await.or_fail()?;
         Response::ok(RunOutput {
-            run: Some(seen(run, &sight)).into(),
+            run: Some(self.asking(run, &sight).or_fail()?).into(),
             lines: sight
                 .lines
                 .into_iter()
@@ -317,6 +346,32 @@ impl WorkerService for Api {
             )
             .or_fail()?,
         )
+    }
+
+    async fn answer_run(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, AnswerRunRequest>,
+    ) -> ServiceResult<Empty> {
+        let r = request.to_owned_message();
+        let answer = crate::console::answer_of(&r.answer)?;
+        workers::adroit::answer(&self.app, r.run, &r.question, answer, r.replies)
+            .await
+            .or_fail()?;
+        changed(self);
+        Response::ok(Empty::default())
+    }
+
+    async fn ask_run_again(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, AskRunAgainRequest>,
+    ) -> ServiceResult<Empty> {
+        workers::adroit::ask_again(&self.app, request.run, request.question)
+            .await
+            .or_fail()?;
+        changed(self);
+        Response::ok(Empty::default())
     }
 
     async fn get_worker_settings(

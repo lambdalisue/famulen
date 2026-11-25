@@ -7,10 +7,13 @@ use serde_json::{Value, json};
 use super::WORKER;
 use super::order::Order;
 use super::runners::{Began, Looked};
-use super::runs::Run;
+use super::runs::{Run, State};
+use super::sight::Sight;
 use crate::app::App;
+use crate::approvals::Answer;
 use crate::connections::{Connection, Transport};
-use crate::gateway::{Call, Outcome};
+use crate::gateway::{Call, OWNER, Outcome, Ticket};
+use crate::permissions::SECRETARY;
 
 /// The bundled definition of Adroit.
 pub const ADROIT: &str = "adroit";
@@ -19,6 +22,9 @@ pub const START: &str = "start_session";
 /// Its tools that start a session, whether anew or from an ended one. Neither
 /// the secretary nor a worker uses them.
 pub const LAUNCH: &[&str] = &[START, "resume_session"];
+/// Its tools that answer what a session waits on the owner for.
+const PUT_QUESTION: &str = "put_question";
+const ANSWER_PERMISSION: &str = "answer_permission";
 /// How much of a session's answer is kept.
 const RESULT_CHARS: usize = 6000;
 /// How long a session just started may look as if it had ended its turn
@@ -180,6 +186,9 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
             "its Adroit connection {connection} was removed; the session may go on there"
         )));
     }
+    // Those held before it is read: one held since may be about what it did
+    // not ask then.
+    let held = held_of(app, &connection, run)?;
     let session = read(
         app,
         &connection,
@@ -189,7 +198,7 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
     .await;
     match session {
         Ok(session) => {
-            app.workers.sights.read(run.id, &session);
+            take_in(app, run, &session, &held)?;
             let age = crate::store::now() - run.started_at.unwrap_or_default();
             Ok(read_standing(&session, age))
         }
@@ -201,6 +210,7 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
                 .iter()
                 .any(|s| s["id"] == run.session.as_str());
             anyhow::ensure!(!known, "{error:#}");
+            withdraw(app, &held)?;
             Ok(Looked::Failed(format!(
                 "Adroit knows no session {} any more",
                 run.session
@@ -212,6 +222,7 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
 /// Read what a run's session wrote, for whoever watches it.
 pub(super) async fn watch(app: &App, run: &Run) -> anyhow::Result<()> {
     let connection = connection_kept(app, run)?;
+    let held = held_of(app, &connection, run)?;
     let session = read(
         app,
         &connection,
@@ -219,8 +230,202 @@ pub(super) async fn watch(app: &App, run: &Run) -> anyhow::Result<()> {
         json!({ "session": run.session, "turns": WATCHED_TURNS }),
     )
     .await?;
-    app.workers.sights.read(run.id, &session);
+    take_in(app, run, &session, &held)
+}
+
+/// Take in what was read of a run's session, and take back the requests held
+/// before it was read about what it asks no more.
+fn take_in(app: &App, run: &Run, session: &Value, held: &[Ticket]) -> anyhow::Result<()> {
+    app.workers.sights.read(run.id, session);
+    let asked = &session["question"]["id"];
+    withdraw(
+        app,
+        held.iter().filter(|t| t.shown["decides"]["id"] != *asked),
+    )
+}
+
+fn withdraw<'a>(app: &App, held: impl IntoIterator<Item = &'a Ticket>) -> anyhow::Result<()> {
+    let mut over = Vec::new();
+    for ticket in held {
+        if app.gateway.withdraw_ticket(ticket.id)? {
+            over.push(ticket.id);
+        }
+    }
+    if !over.is_empty() {
+        crate::approvals::withdraw_apart(app, over);
+    }
     Ok(())
+}
+
+/// The requests that put to the owner what a run's session asks. A caller may
+/// name a session otherwise than the run does, so what it was last seen to ask
+/// tells them too.
+fn held_of(app: &App, connection: &str, run: &Run) -> anyhow::Result<Vec<Ticket>> {
+    let seen = app.workers.sights.of(run.id).question.unwrap_or_default();
+    let mut held = app.gateway.held_tickets()?;
+    held.retain(|t| {
+        t.connection == connection
+            && t.shown["decides"]["id"].is_string()
+            && (t.shown["call"]["session"] == run.session.as_str()
+                || t.shown["decides"]["id"] == seen["id"])
+    });
+    Ok(held)
+}
+
+/// What the session of a run asks the owner.
+#[derive(Debug, Clone)]
+pub struct Question {
+    pub id: String,
+    /// The tool that answers it, as requests name theirs.
+    pub tool: String,
+    /// What a request of it shows.
+    pub shown: Value,
+    /// It is not told whole or cannot be read, so it is answered in Adroit alone.
+    pub truncated: bool,
+    /// The request that puts it to the owner already, or 0.
+    pub ticket: i64,
+    call: Call,
+}
+
+/// What a run's session asks the owner, when it can be answered from here.
+pub fn question(app: &App, run: &Run, sight: &Sight) -> anyhow::Result<Option<Question>> {
+    let Some(asked) = sight
+        .question
+        .as_ref()
+        .filter(|_| run.state == State::Waiting)
+    else {
+        return Ok(None);
+    };
+    let tool = match asked["kind"].as_str() {
+        Some("question") => PUT_QUESTION,
+        Some("permission" | "plan") => ANSWER_PERMISSION,
+        _ => return Ok(None),
+    };
+    let id = asked["id"].as_str().unwrap_or_default().to_owned();
+    let connection = connection_kept(app, run)?;
+    let call = Call::new(
+        SECRETARY,
+        &connection,
+        tool,
+        json!({
+            "session": run.session,
+            "question": id,
+            "summary": format!("「{}」（{}）のセッションが答えを待っています。", run.order.title, run.order.code),
+        }),
+    );
+    let shown = json!({ "decides": asked, "call": call.input });
+    let unreadable = tool == PUT_QUESTION
+        && !app
+            .gateway
+            .questions_of(&connection, tool, &shown)
+            .is_ok_and(|questions| !questions.is_empty());
+    Ok(Some(Question {
+        tool: crate::wording::tool_of(&connection, tool),
+        shown,
+        truncated: unreadable || asked["truncated"] == true,
+        ticket: app
+            .gateway
+            .held_decided(&connection, tool, &id)?
+            .map(|t| t.id)
+            .unwrap_or_default(),
+        id,
+        call,
+    }))
+}
+
+/// The run and what it asks, which must be `id` still.
+fn asked(app: &App, run: i64, id: &str) -> anyhow::Result<(Run, Question)> {
+    let run = app
+        .workers
+        .runs
+        .get(run)?
+        .ok_or_else(|| anyhow::anyhow!("no run #{run}"))?;
+    let question = question(app, &run, &app.workers.sights.of(run.id))?
+        .filter(|q| q.id == id)
+        .ok_or_else(|| anyhow::anyhow!("この問いは、もう待たれていません"))?;
+    anyhow::ensure!(
+        !question.truncated,
+        "長くて全部は読めないので、Adroit で答えてください"
+    );
+    Ok((run, question))
+}
+
+/// Give a run's session the owner's answer to what it asks, and take back a
+/// request that puts it to them, so that no second answer comes.
+pub async fn answer(
+    app: &App,
+    run: i64,
+    id: &str,
+    answer: Answer,
+    replies: Vec<String>,
+) -> anyhow::Result<()> {
+    let (run, question) = asked(app, run, id)?;
+    anyhow::ensure!(
+        answer != Answer::AlwaysAllow,
+        "the owner is asked of every one"
+    );
+    anyhow::ensure!(
+        question.call.tool != PUT_QUESTION || answer == Answer::Approve && !replies.is_empty(),
+        "a question is answered in words"
+    );
+    anyhow::ensure!(
+        replies.iter().all(|r| !r.trim().is_empty()),
+        "a question is not answered"
+    );
+    let call = Call {
+        actor: OWNER.to_owned(),
+        ..question.call.clone()
+    };
+    // Not through a request held already: how its call went would reach the
+    // secretary, not the owner who answers here. Taken back before, so that
+    // it is not answered meanwhile.
+    let held = app.gateway.withdraw_decided(&call.connection, id)?;
+    let asked = !held.is_empty();
+    crate::approvals::withdraw_apart(app, held);
+    if let Err(error) = app
+        .gateway
+        .answer_unasked(&call, answer.into(), replies)
+        .await
+    {
+        if asked && let Err(error) = hold(app, &question.call).await {
+            tracing::warn!(%error, run = run.id, "could not put a question to the owner again");
+        }
+        return Err(error);
+    }
+    // It is answered, whatever becomes of the rest: the next look sees it.
+    app.workers.sights.answered(run.id, id);
+    let seen = app
+        .workers
+        .runs
+        .answered(run.id)
+        .and_then(|()| app.workers.heard_of(&run.session));
+    if let Err(error) = seen {
+        tracing::warn!(%error, run = run.id, "could not keep that a session was answered");
+    }
+    Ok(())
+}
+
+/// Put what a run's session asks to the owner anew, in place of any request
+/// that does already.
+pub async fn ask_again(app: &App, run: i64, id: &str) -> anyhow::Result<()> {
+    let (_, question) = asked(app, run, id)?;
+    let asked = hold(app, &question.call).await?;
+    if asked == question.ticket {
+        // Only now that it is known to be asked still and let be asked.
+        let before = app
+            .gateway
+            .withdraw_decided(&question.call.connection, id)?;
+        crate::approvals::withdraw_apart(app, before);
+        hold(app, &question.call).await?;
+    }
+    Ok(())
+}
+
+async fn hold(app: &App, call: &Call) -> anyhow::Result<i64> {
+    match app.gateway.call(call).await? {
+        Outcome::Held(ticket) => Ok(ticket.id),
+        Outcome::Done(answer) => anyhow::bail!("{}", answer.text),
+    }
 }
 
 /// How a session stands, `age` seconds after it was started.

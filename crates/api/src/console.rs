@@ -90,6 +90,19 @@ fn approval_given(given: wording::Given) -> ApprovalGiven {
     }
 }
 
+/// The owner's answer, as the console names it.
+pub(crate) fn answer_of(
+    answer: &buffa::EnumValue<pb::ApprovalAnswer>,
+) -> Result<Answer, connectrpc::ConnectError> {
+    match answer.as_known() {
+        Some(pb::ApprovalAnswer::APPROVAL_ANSWER_ALLOW) => Answer::from_name("approve"),
+        Some(pb::ApprovalAnswer::APPROVAL_ANSWER_DENY) => Answer::from_name("reject"),
+        Some(pb::ApprovalAnswer::APPROVAL_ANSWER_ALWAYS) => Answer::from_name("always"),
+        _ => None,
+    }
+    .ok_or_else(|| fail("say allow, deny or always"))
+}
+
 /// Where an input came from, as a kind and the one thing that tells it apart.
 fn source_of(source: &Source) -> (&'static str, String) {
     match source {
@@ -146,6 +159,50 @@ impl Api {
         Ok(newest.first().map(|(_, at)| *at).unwrap_or_default())
     }
 
+    /// A request in the owner's words.
+    pub(crate) fn approval(&self, r: approvals::Request) -> Approval {
+        let shown: serde_json::Value = serde_json::from_str(&r.input).unwrap_or_default();
+        let connection = self.app.permissions.connection_of(&r.tool);
+        let decided = shown.get("decides").unwrap_or(&shown);
+        Approval {
+            deed: wording::deed(&r.tool, connection.as_ref()),
+            place: place(&r.tool, connection.as_ref()),
+            given: wording::given(decided)
+                .unwrap_or_default()
+                .into_iter()
+                .map(approval_given)
+                .collect(),
+            once: approvals::once(&self.app.permissions, &r.tool),
+            questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
+                .into_iter()
+                .map(|q| pb::ApprovalQuestion {
+                    question: q.question,
+                    several: q.several,
+                    choices: q
+                        .options
+                        .into_iter()
+                        .map(|c| pb::ApprovalChoice {
+                            label: c.label,
+                            description: c.description,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            summary: approvals::summary(&shown).unwrap_or_default().to_owned(),
+            // What is decided stands apart from the secretary's words.
+            input: shown
+                .get("decides")
+                .map_or(r.input, serde_json::Value::to_string),
+            id: r.id,
+            tool: r.tool,
+            status: r.status,
+            created_at: r.created_at,
+            ..Default::default()
+        }
+    }
+
     fn inbox(&self) -> anyhow::Result<Inbox> {
         let held = self
             .app
@@ -165,48 +222,7 @@ impl Api {
             .into_iter()
             .filter(|r| r.status == "pending")
             .rev()
-            .map(|r| {
-                let shown: serde_json::Value = serde_json::from_str(&r.input).unwrap_or_default();
-                let connection = self.app.permissions.connection_of(&r.tool);
-                let decided = shown.get("decides").unwrap_or(&shown);
-                Approval {
-                    deed: wording::deed(&r.tool, connection.as_ref()),
-                    place: place(&r.tool, connection.as_ref()),
-                    given: wording::given(decided)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(approval_given)
-                        .collect(),
-                    once: approvals::once(&self.app.permissions, &r.tool),
-                    questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
-                        .into_iter()
-                        .map(|q| pb::ApprovalQuestion {
-                            question: q.question,
-                            several: q.several,
-                            choices: q
-                                .options
-                                .into_iter()
-                                .map(|c| pb::ApprovalChoice {
-                                    label: c.label,
-                                    description: c.description,
-                                    ..Default::default()
-                                })
-                                .collect(),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    summary: approvals::summary(&shown).unwrap_or_default().to_owned(),
-                    // What is decided stands apart from the secretary's words.
-                    input: shown
-                        .get("decides")
-                        .map_or(r.input, serde_json::Value::to_string),
-                    id: r.id,
-                    tool: r.tool,
-                    status: r.status,
-                    created_at: r.created_at,
-                    ..Default::default()
-                }
-            })
+            .map(|r| self.approval(r))
             .collect();
         let accounts = self
             .app
@@ -399,13 +415,7 @@ impl ConsoleService for Api {
         request: ServiceRequest<'_, AnswerApprovalRequest>,
     ) -> ServiceResult<Empty> {
         let r = request.to_owned_message();
-        let answer = match r.answer.as_known() {
-            Some(pb::ApprovalAnswer::APPROVAL_ANSWER_ALLOW) => Answer::from_name("approve"),
-            Some(pb::ApprovalAnswer::APPROVAL_ANSWER_DENY) => Answer::from_name("reject"),
-            Some(pb::ApprovalAnswer::APPROVAL_ANSWER_ALWAYS) => Answer::from_name("always"),
-            _ => None,
-        }
-        .ok_or_else(|| fail("say allow, deny or always"))?;
+        let answer = answer_of(&r.answer)?;
         let answerer = self
             .app
             .answerer

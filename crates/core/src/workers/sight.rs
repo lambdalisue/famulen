@@ -83,6 +83,11 @@ impl Line {
 pub struct Sight {
     pub steps: Vec<Step>,
     pub lines: Vec<Line>,
+    /// What an Adroit session waits on the owner for, as Adroit tells it.
+    pub question: Option<Value>,
+    /// The question answered last: what was read before it was answered may
+    /// come after.
+    answered: String,
     /// The id the newest line was given.
     last: u64,
 }
@@ -229,7 +234,7 @@ impl Sights {
     fn change(&self, run: i64, change: impl FnOnce(&mut Sight)) {
         let mut all = self.lock();
         let sight = &mut all.of(run).sight;
-        let standing = |s: &Sight| (s.steps.clone(), s.doing());
+        let standing = |s: &Sight| (s.steps.clone(), s.doing(), s.question.clone());
         let before = standing(sight);
         change(sight);
         let changed = standing(sight) != before;
@@ -271,6 +276,15 @@ impl Sights {
         self.change(run, |s| {
             s.steps = steps_of(session);
             s.take_in(lines_of(session));
+            s.question = question_of(session).filter(|q| q["id"] != s.answered.as_str());
+        });
+    }
+
+    /// A question was answered: it is asked no more.
+    pub(super) fn answered(&self, run: i64, question: &str) {
+        self.change(run, |s| {
+            s.question = None;
+            s.answered = question.to_owned();
         });
     }
 
@@ -292,6 +306,11 @@ fn text(value: &Value, key: &str) -> String {
 
 fn each<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
     value[key].as_array().into_iter().flatten()
+}
+
+fn question_of(session: &Value) -> Option<Value> {
+    let question = &session["question"];
+    (session["state"] == "waiting" && question["id"].is_string()).then(|| question.clone())
 }
 
 /// The timeline of an Adroit session.
