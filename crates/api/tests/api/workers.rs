@@ -184,7 +184,19 @@ async fn the_owner_bounds_and_pauses_the_pool_and_the_secretary_has_no_tool_for_
     ] {
         assert!(tools.iter().any(|t| t == tool), "{tool}");
     }
-    assert!(!tools.iter().any(|t| t == "set_worker_settings"));
+    for tool in ["set_worker_settings", "preview_tidying", "tidy_up"] {
+        assert!(!tools.iter().any(|t| t == tool), "{tool}");
+    }
+}
+
+#[tokio::test]
+async fn nothing_is_tidied_where_nothing_was_delegated() {
+    let dir = temp();
+    let api = open(&dir);
+    for method in ["PreviewTidying", "TidyUp"] {
+        let left = call(&api, &format!("WorkerService/{method}"), json!({})).await;
+        assert_eq!(left.get("left"), None, "{left}");
+    }
 }
 
 #[tokio::test]

@@ -5,12 +5,12 @@ import Markdown from "~/components/Markdown";
 import { RunResult } from "~/components/records/Delegated";
 import RoleModel from "~/components/RoleModel";
 import { Role } from "~/gen/famulen/v1/settings_pb";
-import type { WorkerFinish, WorkerSettings } from "~/gen/famulen/v1/workers_pb";
-import { act } from "~/lib/act";
+import type { LeftBehind, WorkerFinish, WorkerSettings } from "~/gen/famulen/v1/workers_pb";
+import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import { useParam, withParams } from "~/lib/params";
 import { setView } from "~/lib/view";
-import { delegatedQuery, workerSettingsQuery } from "~/lib/workers";
+import { delegatedQuery, fateText, sizeText, workerSettingsQuery } from "~/lib/workers";
 import * as icons from "~/lib/icons";
 import {
   Button,
@@ -233,6 +233,68 @@ function Finishes(props: { settings: WorkerSettings }) {
   );
 }
 
+/** What delegated work left on this machine: seen first, then cleared away. */
+function Tidying() {
+  const [left, setLeft] = createSignal<LeftBehind[]>();
+  const [busy, setBusy] = createSignal(false);
+  const show = async (asked: () => Promise<{ left: LeftBehind[] } | undefined>) => {
+    setBusy(true);
+    const answer = await asked();
+    setBusy(false);
+    if (answer) setLeft(answer.left);
+  };
+  const preview = () => show(() => look(() => api.workers.previewTidying({})));
+  const removable = () => left()?.filter((l) => l.fate === "removable") ?? [];
+  const tidy = () => whenConfirmed(`${removable().length} 件を片づける`, "片づける", () => show(() => act(() => api.workers.tidyUp({}), "片づけ終えた")));
+  return (
+    <Section
+      title="作業場所の片づけ"
+      label="作業場所の片づけ"
+      note="終わった仕事の作業場所と、仕事の名が付いた使い捨ての VM は、セッションを閉じたあと、何も失わないと確かめられたものからひとりでに片づく。ここでは、何が片づくかを見て、いま片づけられる。"
+      action={
+        <Button small icon={icons.refresh} disabled={busy()} onClick={() => void preview()}>
+          {busy() ? "確かめている" : "何が片づくか見る"}
+        </Button>
+      }
+    >
+      <Show when={left()}>
+        {(all) => (
+          <>
+            <List label="残っているもの">
+              <For each={all()} fallback={<EmptyState>片づけるものはない</EmptyState>}>
+                {(l) => (
+                  <ListRow
+                    title={`${l.code} ${l.title}`}
+                    sub={
+                      <>
+                        <span class="mono left-name">{l.name}</span>
+                        <Show when={l.why}>
+                          <br />
+                          {l.why}
+                        </Show>
+                      </>
+                    }
+                    end={
+                      <>
+                        {sizeText(l.bytes)} <Tag>{fateText(l)}</Tag>
+                      </>
+                    }
+                  />
+                )}
+              </For>
+            </List>
+            <Show when={removable().length}>
+              <Button icon={icons.trash} disabled={busy()} onClick={() => void tidy()}>
+                いま片づける
+              </Button>
+            </Show>
+          </>
+        )}
+      </Show>
+    </Section>
+  );
+}
+
 function Ended() {
   const delegated = createAsync(() => delegatedQuery());
   return (
@@ -268,6 +330,7 @@ export default function Worker() {
             <>
               <Pool settings={s()} />
               <Finishes settings={s()} />
+              <Tidying />
             </>
           )}
         </Show>

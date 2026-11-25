@@ -82,7 +82,7 @@ fn connection(app: &App, run: &Run) -> anyhow::Result<String> {
 
 /// What names a run's session, and no other's: it stands at the head of the
 /// session's name, so a start whose answer was lost is found again.
-fn token(run: &Run) -> String {
+pub(super) fn token(run: &Run) -> String {
     format!("{}-run{}", run.order.code, run.id)
 }
 
@@ -175,6 +175,17 @@ pub(super) async fn find(app: &App, run: &Run) -> anyhow::Result<Option<Began>> 
 /// left unanswered is not asked anew.
 fn was_asked(status: &str) -> bool {
     matches!(status, "held" | "rejected" | "lapsed")
+}
+
+/// Every session of the Adroit a run was started in, those that ended too.
+pub(super) async fn sessions(app: &App, run: &Run) -> anyhow::Result<Value> {
+    let kept = connection_kept(app, run)?;
+    let connection = if kept.is_empty() {
+        resolve(app, &run.order)?
+    } else {
+        kept
+    };
+    read(app, &connection, "list_sessions", json!({ "ended": true })).await
 }
 
 /// How a run's session stands. An error says that Adroit cannot be asked; a

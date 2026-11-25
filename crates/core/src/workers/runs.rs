@@ -175,6 +175,11 @@ impl Runs {
         self.select("WHERE state != 'ended' ORDER BY id")
     }
 
+    /// Every run by a session in Adroit, oldest first.
+    pub fn on_adroit(&self) -> anyhow::Result<Vec<Run>> {
+        self.select("WHERE runner = 'adroit' ORDER BY id")
+    }
+
     /// The newest runs, the newest first.
     pub fn recent(&self, limit: usize) -> anyhow::Result<Vec<Run>> {
         self.select(&format!("ORDER BY id DESC LIMIT {limit}"))

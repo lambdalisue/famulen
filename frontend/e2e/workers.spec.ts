@@ -140,6 +140,32 @@ test("how many run at once is saved", async ({ page, request }) => {
   await settle(request, false);
 });
 
+test("what delegated work left is seen before it is cleared away, and what stays says why", async ({ page }) => {
+  const one = { kind: "worktree", task: "t", code: "task-abc123", title: "直す", bytes: "48000000000" };
+  const kept = { ...one, name: "/src/.claude/worktrees/task-abc123-run2", fate: "kept", why: "未保存の変更がある", bytes: "0" };
+  const gone = { ...one, name: "/src/.claude/worktrees/task-abc123-run1" };
+  let removed = false;
+  await page.route(/WorkerService\/PreviewTidying$/, (route) => route.fulfill({ json: { left: [{ ...gone, fate: "removable" }, kept] } }));
+  await page.route(/WorkerService\/TidyUp$/, (route) => {
+    removed = true;
+    return route.fulfill({ json: { left: [{ ...gone, fate: "removed" }, kept] } });
+  });
+  await visit(page, "/settings/roles/worker", "設定 · 手代");
+  const tidying = page.getByRole("region", { name: "作業場所の片づけ" });
+  await expect(tidying.getByRole("button", { name: "いま片づける" })).toHaveCount(0);
+  await tidying.getByRole("button", { name: "何が片づくか見る" }).click();
+  const row = (name: string) => tidying.getByRole("listitem").filter({ hasText: name });
+  await expect(row("run1")).toContainText("片づけられる");
+  await expect(row("run1")).toContainText("48.0 GB");
+  await expect(row("run2")).toContainText("未保存の変更がある");
+  expect(removed).toBe(false);
+  await tidying.getByRole("button", { name: "いま片づける" }).click();
+  await agree(page, "片づける");
+  await expect(toast(page)).toHaveText("片づけ終えた");
+  await expect(row("run1")).toContainText("片づけた");
+  await expect(tidying.getByRole("button", { name: "いま片づける" })).toHaveCount(0);
+});
+
 test("how work on code is finished is written, rewritten and removed", async ({ page, request }) => {
   await visit(page, "/settings/roles/worker", "設定 · 手代");
   const section = page.getByRole("region", { name: "仕上げ" });

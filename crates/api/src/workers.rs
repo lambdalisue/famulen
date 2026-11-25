@@ -5,8 +5,8 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Finish, Order, Outcome, Placed, Run, Runner, Settings, Sight, Standing, State, WORKER,
-    is_delegated,
+    self, Finish, How, Left, Order, Outcome, Placed, Run, Runner, Settings, Sight, Standing, State,
+    WORKER, is_delegated,
 };
 use famulen_core::workgroups::ALL;
 
@@ -106,7 +106,35 @@ fn settings(s: Settings) -> WorkerSettings {
     }
 }
 
+fn left(l: Left) -> LeftBehind {
+    LeftBehind {
+        kind: l.kind.as_str().into(),
+        fate: l.fate.as_str().into(),
+        why: l.fate.why().into(),
+        name: l.name,
+        task: l.task,
+        code: l.code,
+        title: l.title,
+        bytes: l
+            .bytes
+            .and_then(|b| i64::try_from(b).ok())
+            .unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
 impl Api {
+    async fn tidied(&self, how: How) -> anyhow::Result<LeftBehindList> {
+        Ok(LeftBehindList {
+            left: workers::tidy(&self.app, how)
+                .await?
+                .into_iter()
+                .map(left)
+                .collect(),
+            ..Default::default()
+        })
+    }
+
     /// A run with what its session asks the owner, for the owner alone.
     fn asking(&self, run: Run, sight: &Sight) -> anyhow::Result<WorkerRun> {
         let question = workers::adroit::question(&self.app, &run, sight)?;
@@ -373,6 +401,22 @@ impl WorkerService for Api {
             .or_fail()?;
         changed(self);
         Response::ok(Empty::default())
+    }
+
+    async fn preview_tidying(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<LeftBehindList> {
+        Response::ok(self.tidied(How::Preview).await.or_fail()?)
+    }
+
+    async fn tidy_up(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<LeftBehindList> {
+        Response::ok(self.tidied(How::Remove).await.or_fail()?)
     }
 
     async fn get_worker_settings(

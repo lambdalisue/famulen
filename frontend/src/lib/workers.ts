@@ -1,5 +1,5 @@
 import { query } from "@solidjs/router";
-import type { DelegatedTask, WorkerRun, WorkerStep } from "~/gen/famulen/v1/workers_pb";
+import type { DelegatedTask, LeftBehind, WorkerRun, WorkerStep } from "~/gen/famulen/v1/workers_pb";
 import { api } from "./api";
 
 export type { DelegatedTask, WorkerRun, WorkerStep };
@@ -78,6 +78,12 @@ export function lastedText(r: WorkerRun, now: number): string {
 }
 
 export const runnerText = (runner: string) => ({ adroit: "Adroit", agent: "手代" })[runner] ?? "委託先なし";
+
+const FATES: { [fate: string]: string } = { removed: "片づけた", removable: "片づけられる", in_use: "使っている", kept: "残す" };
+
+export const fateText = (l: LeftBehind) => FATES[l.fate] ?? l.fate;
+
+export const sizeText = (bytes: bigint) => (bytes > 0n ? `${(Number(bytes) / 1e9).toFixed(1)} GB` : "");
 
 export const isBadOutcome = (outcome: string) => outcome === "failed" || outcome === "refused";
 
