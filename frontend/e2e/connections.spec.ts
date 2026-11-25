@@ -692,17 +692,17 @@ test.describe("見張り", () => {
     await page.route("**/famulen.v1.LookoutService/ListPastPurchases*", (route) => route.fulfill({ json: { mailboxes: [now] } }));
     await page.route("**/famulen.v1.LookoutService/StartPastPurchases", (route) => {
       asked.push(route.request().postDataJSON());
-      now = mailbox({ state: "PAST_PURCHASES_STATE_GOING", since: "2021-01-01", month: "2022-05-01", found: "12", left: "3", added: "4" });
+      now = mailbox({ state: "PAST_MAIL_STATE_GOING", since: "2021-01-01", month: "2022-05-01", found: "12", left: "3", added: "4" });
       return route.fulfill({ json: now });
     });
     await page.route("**/famulen.v1.LookoutService/StopPastPurchases", (route) => {
-      now = { ...now, state: "PAST_PURCHASES_STATE_STOPPED" };
+      now = { ...now, state: "PAST_MAIL_STATE_STOPPED" };
       return route.fulfill({ json: now });
     });
     await visit(page, "/settings/lookout", "設定 · 見張り");
     // The page came from the server, which has no such account; it is read anew.
     await record(request, "memos", "さかのぼりの頁を読み直させる");
-    const row = page.locator(".past-purchases");
+    const row = page.locator(".past-mail");
     await expect(row).toContainText("まださかのぼっていない");
 
     await row.getByLabel("さかのぼる年数").selectOption({ label: "5 年" });
@@ -718,6 +718,25 @@ test.describe("見張り", () => {
     await row.getByRole("button", { name: /続ける/ }).click();
     await expect(row).toContainText("2022-05 を探している");
     expect(asked[1]).toEqual({ connection: "g", since: "2021-01-01" });
+  });
+
+  test("past mail is gone back over for contracts apart from what was bought", async ({ page, request }) => {
+    const mailbox = { connection: "g", name: "Google · me@example.com" };
+    let now: object = mailbox;
+    await page.route("**/famulen.v1.LookoutService/ListPastPurchases*", (route) => route.fulfill({ json: { mailboxes: [mailbox] } }));
+    await page.route("**/famulen.v1.LookoutService/ListPastContracts*", (route) => route.fulfill({ json: { mailboxes: [now] } }));
+    await page.route("**/famulen.v1.LookoutService/StartPastContracts", (route) => {
+      now = { ...mailbox, state: "PAST_MAIL_STATE_GOING", since: "2021-01-01", month: "2022-05-01", found: "12", left: "3", added: "4" };
+      return route.fulfill({ json: now });
+    });
+    await visit(page, "/settings/lookout", "設定 · 見張り");
+    await record(request, "memos", "契約のさかのぼりの頁を読み直させる");
+    const [bought, held] = [page.locator(".past-mail").first(), page.locator(".past-mail").last()];
+    await expect(page.locator(".past-mail")).toHaveCount(2);
+    await held.getByRole("button", { name: "さかのぼる", exact: false }).click();
+    await agree(page, "さかのぼる");
+    await expect(held).toContainText("見つけたメール 12 通 · 残り 3 通 · 足した契約 4 件");
+    await expect(bought).toContainText("まださかのぼっていない");
   });
 
   test("broken JSON arguments are refused with the reason and the dialog stays open", async ({ page, request }) => {

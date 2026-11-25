@@ -14,6 +14,7 @@ use crate::app::App;
 use crate::console_log::Event;
 use crate::dream_schedule;
 use crate::dreaming;
+use crate::mail_line::{self, Line};
 use crate::models::Role;
 use crate::people;
 use crate::store::Store;
@@ -48,19 +49,29 @@ pub(super) async fn keep_finding_models(app: App) {
     }
 }
 
-/// Apart from the other chores, since a model may take long over each mail.
-pub(super) async fn read_purchases(app: App) {
+/// Apart from the other chores and from the other lines, since a model may
+/// take long over each mail.
+pub(super) async fn read_line(app: App, line: Line) {
     let mut tick = tokio::time::interval(CHORE_TICK);
+    let mut settled = None;
     loop {
         tick.tick().await;
-        if let Err(error) = crate::purchases::past::go_on(&app).await {
-            tracing::warn!(%error, "could not go back over past mail");
+        let name = line.key();
+        let today = Utc::now().with_timezone(&app.tz()).date_naive();
+        if line == Line::Contracts && settled != Some(today) {
+            match crate::contracts::settle_all(&app, today) {
+                Ok(()) => settled = Some(today),
+                Err(error) => tracing::warn!(%error, "could not see how the contracts stand"),
+            }
         }
-        if let Err(error) = crate::purchases::screen_left(&app).await {
-            tracing::warn!(%error, "could not screen the mail left for what was bought");
+        if let Err(error) = mail_line::past::go_on(&app, line).await {
+            tracing::warn!(line = name, %error, "could not go back over past mail");
         }
-        if let Err(error) = crate::purchases::read_waiting(&app).await {
-            tracing::warn!(%error, "could not read the mail of what was bought");
+        if let Err(error) = mail_line::screen_left(&app, line).await {
+            tracing::warn!(line = name, %error, "could not screen the mail left");
+        }
+        if let Err(error) = mail_line::read_waiting(&app, line).await {
+            tracing::warn!(line = name, %error, "could not read the mail in line");
         }
     }
 }

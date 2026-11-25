@@ -16,10 +16,10 @@ use serde_json::{Value, json};
 use url::Url;
 
 use super::candidates::{Candidate, Candidates, agrees, larger};
-use super::{AGAIN_AFTER, TRIES, Waiting, message, part, plain};
 use crate::app::App;
 use crate::console_log::Event;
 use crate::link_previews::{self, PAGE};
+use crate::mail_line::{AGAIN_AFTER, TRIES, Waiting, message, part, past, plain};
 use crate::models::Role;
 use crate::pictures::{Picture, id_of};
 use crate::records::HOLDINGS;
@@ -428,7 +428,7 @@ pub async fn look(app: &App, at: i64) -> anyhow::Result<()> {
         if things.is_empty() {
             continue;
         }
-        if !super::past::may_ask(app)? {
+        if !past::may_ask(app)? {
             break;
         }
         look_through(app, &mail, &things, &titles, at).await?;
@@ -537,10 +537,10 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::mail_line::tests::with_model;
+    use crate::mail_line::{Line, enqueue};
     use crate::notebook::Writer;
     use crate::notebook::testing::TempDir;
-    use crate::purchases::enqueue;
-    use crate::purchases::tests::with_model;
     use crate::records::Patch;
 
     /// A picture, unlike that of another `shade`.
@@ -614,7 +614,7 @@ mod tests {
                     })
                 })
             });
-            enqueue(&app.store, &connection, "m1").unwrap();
+            enqueue(&app.store, Line::Purchases, &connection, "m1").unwrap();
             Self {
                 app,
                 connection,

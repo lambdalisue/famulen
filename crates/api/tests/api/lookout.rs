@@ -238,7 +238,7 @@ async fn a_mailbox_is_gone_back_over_from_a_day_on_and_stopped() {
         json!({"connection": google, "since": "2024-03-01"}),
     )
     .await;
-    assert_eq!(started["state"], "PAST_PURCHASES_STATE_GOING");
+    assert_eq!(started["state"], "PAST_MAIL_STATE_GOING");
     assert_eq!(started["month"], "2024-03-01");
 
     let stopped = call(
@@ -247,5 +247,38 @@ async fn a_mailbox_is_gone_back_over_from_a_day_on_and_stopped() {
         json!({"id": google}),
     )
     .await;
-    assert_eq!(stopped["state"], "PAST_PURCHASES_STATE_STOPPED");
+    assert_eq!(stopped["state"], "PAST_MAIL_STATE_STOPPED");
+}
+
+#[tokio::test]
+async fn a_mailbox_is_gone_back_over_for_contracts_apart_from_what_was_bought() {
+    let dir = temp();
+    let api = open(&dir);
+    let google = api
+        .app()
+        .gateway
+        .add_defined("google", Default::default(), None)
+        .unwrap()
+        .id;
+
+    let started = call(
+        &api,
+        "LookoutService/StartPastContracts",
+        json!({"connection": google, "since": "2020-01-01"}),
+    )
+    .await;
+    assert_eq!(started["state"], "PAST_MAIL_STATE_GOING");
+
+    let bought = call(&api, "LookoutService/ListPastPurchases", json!({})).await;
+    assert!(bought["mailboxes"][0]["state"].is_null(), "{bought}");
+    let contracts = call(&api, "LookoutService/ListPastContracts", json!({})).await;
+    assert_eq!(contracts["mailboxes"][0]["month"], "2020-01-01");
+
+    let stopped = call(
+        &api,
+        "LookoutService/StopPastContracts",
+        json!({"id": google}),
+    )
+    .await;
+    assert_eq!(stopped["state"], "PAST_MAIL_STATE_STOPPED");
 }

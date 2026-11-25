@@ -672,6 +672,54 @@ CREATE TABLE IF NOT EXISTS purchase_settled (
     holding TEXT NOT NULL,
     PRIMARY KEY (mail, holding)
 );
+-- the same as purchase_mails and what hangs on it, for contracts
+CREATE TABLE IF NOT EXISTS contract_mails (
+    id         INTEGER PRIMARY KEY,
+    connection TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    at         INTEGER NOT NULL,
+    state      TEXT NOT NULL DEFAULT 'waiting',
+    tries      INTEGER NOT NULL DEFAULT 0,
+    next_at    INTEGER NOT NULL DEFAULT 0,
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL DEFAULT '',
+    UNIQUE (connection, message)
+);
+CREATE TABLE IF NOT EXISTS contract_away (
+    mail  INTEGER PRIMARY KEY,
+    since INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS contract_past (
+    connection TEXT PRIMARY KEY,
+    since      TEXT NOT NULL,
+    month      TEXT NOT NULL,
+    until      TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    problem    TEXT NOT NULL DEFAULT '',
+    next_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS contract_past_mails (
+    mail INTEGER PRIMARY KEY
+);
+-- the contracts added from mail; it outlives the record
+CREATE TABLE IF NOT EXISTS contracts (
+    contract   TEXT PRIMARY KEY,
+    mail       INTEGER NOT NULL,
+    provider   TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    plan       TEXT NOT NULL,
+    number     TEXT NOT NULL,
+    workgroups TEXT NOT NULL,
+    -- what Famulen wrote last, to leave what the owner changed since
+    wrote      TEXT NOT NULL
+);
+-- what each mail told of a contract
+CREATE TABLE IF NOT EXISTS contract_events (
+    contract TEXT NOT NULL,
+    mail     INTEGER NOT NULL,
+    event    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS contract_events_of ON contract_events (contract);
 CREATE TABLE IF NOT EXISTS attachments (
     id   TEXT PRIMARY KEY,
     at   INTEGER NOT NULL,
