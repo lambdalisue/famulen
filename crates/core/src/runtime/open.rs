@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use famulen_executor::Executors;
 use tokio::sync::Notify;
 
 use super::dream::DREAMING_KEY;
@@ -32,8 +33,31 @@ pub fn open_app(config: &Config) -> anyhow::Result<App> {
 pub(super) fn sealed_places(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
     Ok(vec![
         config.gateway_dir(),
+        executors_dir(config),
         std::env::current_dir()?.join(".env"),
     ])
+}
+
+/// Where the processes agents run under keep what they keep and are asked.
+fn executors_dir(config: &Config) -> PathBuf {
+    config.data_dir.join("executors")
+}
+
+fn executors(config: &Config, store: &Store) -> anyhow::Result<Executors> {
+    const KEY: &str = "executors.key";
+    let key = match store.state(KEY)? {
+        Some(key) => key,
+        None => {
+            let key = format!("{:032x}", rand::random::<u128>());
+            store.set_state(KEY, &key)?;
+            key
+        }
+    };
+    Ok(Executors::new(
+        executors_dir(config),
+        key,
+        crate::workers::executor_program()?,
+    ))
 }
 
 /// Claude Code's own directory on this system.
@@ -156,6 +180,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         workers: crate::workers::Workers::new(
             store.clone(),
             config.data_dir.join("workers"),
+            executors(config, &store)?,
             sealed_from_workers(config)?,
         ),
         lookout: lookout.clone(),

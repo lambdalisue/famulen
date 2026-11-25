@@ -7,6 +7,7 @@ import { Callout, Disclosure, EmptyState, Keyed, LinkButton, Loading, PageHeader
 import type { WorkerLine } from "~/gen/famulen/v1/workers_pb";
 import { shortTime } from "~/lib/dates";
 import { useOwner } from "~/lib/owner";
+import { usedText } from "~/lib/usage";
 import { setView } from "~/lib/view";
 import { isBadOutcome, lastedText, runnerText, runOutputQuery, runText, type WorkerRun } from "~/lib/workers";
 
@@ -106,6 +107,9 @@ export default function Run() {
                 <Show when={lastedText(r(), now())}>{(text) => <span>{text()}</span>}</Show>
                 <Show when={r().session}>
                   <span>セッション {r().session}</span>
+                </Show>
+                <Show when={(output()?.usage.length ?? 0) > 0}>
+                  <span>{usedText(output()?.usage ?? [])}</span>
                 </Show>
               </span>
             }

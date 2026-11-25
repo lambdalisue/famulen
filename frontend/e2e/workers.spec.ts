@@ -35,6 +35,12 @@ test("a delegated task waits while paused, runs once let go, and its end reaches
   await expect(page.getByRole("region", { name: "済んだ仕事" }).getByText("相場を調べる")).toBeVisible();
   const { inputs } = await call<{ inputs: { source: string; detail: string }[] }>(request, "ConsoleService", "ListInputs");
   expect(inputs.filter((i) => i.source === "worker" && i.detail === t.code)).toHaveLength(1);
+
+  await visit(page, "/settings/usage", "設定 · 使った量");
+  const used = page.getByRole("table", { name: "委託ごとの使った量" });
+  await expect(used.getByRole("row").filter({ hasText: "相場を調べる" })).toContainText("1 回");
+  await used.getByRole("link", { name: "相場を調べる" }).click();
+  await expect(page.locator(".run-about")).toContainText("入力 1・出力 1");
 });
 
 test("the owner delegates a task on its page, sees what is missing, and cancels it", async ({ page, request }) => {

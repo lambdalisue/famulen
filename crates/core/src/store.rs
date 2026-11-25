@@ -639,6 +639,33 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
     output_tokens      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS conversation_turns_at ON conversation_turns (at);
+-- which run of a delegated task used it
+CREATE TABLE IF NOT EXISTS usage_runs (
+    usage INTEGER PRIMARY KEY,
+    run   INTEGER NOT NULL
+);
+-- each answer of a model in an Adroit session of a delegated task
+CREATE TABLE IF NOT EXISTS session_usage (
+    id            TEXT PRIMARY KEY,
+    run           INTEGER NOT NULL,
+    at            INTEGER NOT NULL,
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cached_tokens INTEGER NOT NULL,
+    calls         INTEGER NOT NULL,
+    cost_yen      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_usage_at ON session_usage (at);
+CREATE INDEX IF NOT EXISTS session_usage_run ON session_usage (run);
+-- how far the logs those are read from were read
+CREATE TABLE IF NOT EXISTS session_files (
+    path       TEXT PRIMARY KEY,
+    read_bytes INTEGER NOT NULL,
+    -- what answers where the next line is
+    model      TEXT NOT NULL,
+    counted    INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS console_messages (
     id    INTEGER PRIMARY KEY,
     at    INTEGER NOT NULL,

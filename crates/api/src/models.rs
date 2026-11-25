@@ -335,7 +335,22 @@ impl ModelService for Api {
         let now = Utc::now();
         let (span, day) = asked_period(&request.to_owned_message(), now.with_timezone(&tz))?;
         let report = self.app.models.usage(span, day, tz, now).or_fail()?;
+        let mut runs = Vec::new();
+        for used in report.runs {
+            let Some(run) = self.app.workers.runs.get(used.run).or_fail()? else {
+                continue;
+            };
+            runs.push(RunUsage {
+                run: run.id,
+                task: run.task,
+                code: run.order.code,
+                title: run.order.title,
+                rows: used.rows.into_iter().filter_map(usage_row).collect(),
+                ..Default::default()
+            });
+        }
         Response::ok(Usage {
+            runs,
             from: report.period.from.to_string(),
             to: report.period.to.to_string(),
             today: report.today.to_string(),
@@ -380,7 +395,7 @@ fn asked_period(
     Ok((span, day))
 }
 
-fn usage_row(row: famulen_core::models::UsageRow) -> Option<UsageRow> {
+pub(crate) fn usage_row(row: famulen_core::models::UsageRow) -> Option<UsageRow> {
     let (role, _, _) = ROLES.iter().find(|(_, r, _)| *r == row.role)?;
     Some(UsageRow {
         role: (*role).into(),
@@ -390,6 +405,7 @@ fn usage_row(row: famulen_core::models::UsageRow) -> Option<UsageRow> {
         output_tokens: row.output_tokens,
         yen: row.cost_yen,
         metered: row.metered,
+        cached_tokens: row.cached_tokens,
         ..Default::default()
     })
 }

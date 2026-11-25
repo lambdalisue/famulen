@@ -134,6 +134,21 @@ pub enum When {
     Now,
 }
 
+/// The agents there is an adapter for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agent {
+    Claude,
+}
+
+impl Agent {
+    pub fn adapter(self) -> &'static dyn Adapter {
+        match self {
+            Agent::Claude => &claude::Claude,
+        }
+    }
+}
+
 /// One kind of agent.
 pub trait Adapter: Send + Sync {
     /// What it can do, whichever version is installed.

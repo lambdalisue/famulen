@@ -6,6 +6,7 @@ import "famulen/v1/common.proto";
 import "famulen/v1/console.proto";
 import "famulen/v1/options.proto";
 import "famulen/v1/records.proto";
+import "famulen/v1/settings.proto";
 
 message DelegateTaskRequest {
   string title = 1;
@@ -147,6 +148,8 @@ message RunOutput {
   repeated WorkerLine lines = 2;
   // Why it could not be read anew.
   string why = 3;
+  // All that it used so far.
+  repeated UsageRow usage = 4;
 }
 
 // A delegated task that is not over.

@@ -1,4 +1,4 @@
-import { createAsync, useSearchParams } from "@solidjs/router";
+import { A, createAsync, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import ConversationUsage from "~/components/ConversationUsage";
@@ -21,12 +21,15 @@ import {
   sum,
   tickName,
 } from "~/lib/usage";
-import { EmptyState, IconButton, PageHeader, SegmentedOf } from "~/components/ui";
+import { Button, EmptyState, IconButton, PageHeader, SegmentedOf } from "~/components/ui";
 
 const BY: [By, string][] = [
   ["agent", "エージェントごと"],
   ["model", "モデルごと"],
 ];
+
+/** How many delegated tasks are listed until the owner asks for all. */
+const MOST_RUNS = 20;
 
 function plainNumber(v: number): string {
   return v.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
@@ -41,6 +44,9 @@ export default function Usage() {
   const usage = createAsync(() => usageQuery(wanted(), params.day ?? ""));
   const models = createAsync(() => modelsQuery());
   const [picked, setPicked] = createSignal<string>();
+
+  const [allRuns, setAllRuns] = createSignal(false);
+  const runs = () => (usage()?.runs ?? []).slice(0, allRuns() ? undefined : MOST_RUNS);
 
   const show = (next: { by?: string; span?: string; day?: string }) => {
     setPicked(undefined);
@@ -92,17 +98,19 @@ export default function Usage() {
       <>
         <td class="mono num">{plainNumber(s().calls)} 回</td>
         <td class="mono num">{shortTokens(s().inputTokens)}</td>
+        <td class="mono num">{s().cachedTokens === undefined ? "—" : shortTokens(s().cachedTokens ?? 0)}</td>
         <td class="mono num">{shortTokens(s().outputTokens)}</td>
         <td class="mono num">{cost(props.rows)}</td>
       </>
     );
   };
-  const Head = () => (
+  const Head = (props: { first?: string }) => (
     <thead>
       <tr>
-        <th>{by() === "agent" ? "エージェント" : "モデル"}</th>
+        <th>{props.first ?? (by() === "agent" ? "エージェント" : "モデル")}</th>
         <th class="num">回数</th>
         <th class="num">入力</th>
+        <th class="num">うちキャッシュ</th>
         <th class="num">出力</th>
         <th class="num">金額</th>
       </tr>
@@ -252,6 +260,41 @@ export default function Usage() {
             </table>
           </div>
         </section>
+        <Show when={(usage()?.runs.length ?? 0) > 0}>
+          <section class="usage-detail">
+            <h2>委託ごと</h2>
+            <div class="scroll">
+              <table class="table" aria-label="委託ごとの使った量">
+                <Head first="委託" />
+                <For each={runs()}>
+                  {(r) => (
+                    <tbody>
+                      <tr class="usage-group">
+                        <td>
+                          <A href={`/runs/${r.run}`}>{r.title}</A> <span class="mono sub">#{String(r.run)}</span>
+                        </td>
+                        <Cells rows={r.rows} />
+                      </tr>
+                      <For each={r.rows}>
+                        {(row) => (
+                          <tr class="usage-part">
+                            <td>{label("model", row.model)}</td>
+                            <Cells rows={[row]} />
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  )}
+                </For>
+              </table>
+            </div>
+            <Show when={runs().length < (usage()?.runs.length ?? 0)}>
+              <Button small onClick={() => setAllRuns(true)}>
+                すべての委託を出す（{usage()?.runs.length} 件）
+              </Button>
+            </Show>
+          </section>
+        </Show>
         <ConversationUsage span={wanted()} day={params.day ?? ""} />
       </Show>
     </section>

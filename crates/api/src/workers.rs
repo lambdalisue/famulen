@@ -313,7 +313,12 @@ impl WorkerService for Api {
         request: ServiceRequest<'_, ReadRunRequest>,
     ) -> ServiceResult<RunOutput> {
         let (run, sight, why) = workers::watch(&self.app, request.id).await.or_fail()?;
+        let usage = self.app.models.run_usage(run.id).or_fail()?;
         Response::ok(RunOutput {
+            usage: usage
+                .into_iter()
+                .filter_map(crate::models::usage_row)
+                .collect(),
             run: Some(self.asking(run, &sight).or_fail()?).into(),
             lines: sight
                 .lines
