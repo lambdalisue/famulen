@@ -187,28 +187,28 @@ message GiveFeedbackRequest {
   bool wanted = 2;
 }
 
-// How going back over a mailbox for what the owner bought stands.
-enum PastPurchasesState {
+// How going back over a mailbox stands.
+enum PastMailState {
   // It was never started.
-  PAST_PURCHASES_STATE_UNSPECIFIED = 0;
-  PAST_PURCHASES_STATE_GOING = 1;
-  PAST_PURCHASES_STATE_STOPPED = 2;
-  PAST_PURCHASES_STATE_DONE = 3;
+  PAST_MAIL_STATE_UNSPECIFIED = 0;
+  PAST_MAIL_STATE_GOING = 1;
+  PAST_MAIL_STATE_STOPPED = 2;
+  PAST_MAIL_STATE_DONE = 3;
 }
 
 // One mailbox that can be gone back over.
-message PastPurchases {
+message PastMail {
   string connection = 1;
   // The connection's name and account.
   string name = 2;
-  PastPurchasesState state = 3;
+  PastMailState state = 3;
   // From which day on, and the month that is searched next: YYYY-MM-DD.
   string since = 4;
   string month = 5;
   // Mails found, and those still to be read.
   int64 found = 6;
   int64 left = 7;
-  // Things added from them.
+  // Records added from them.
   int64 added = 8;
   // Why it does not get on, or empty.
   string problem = 9;
@@ -216,11 +216,11 @@ message PastPurchases {
   bool searched = 10;
 }
 
-message PastPurchasesList {
-  repeated PastPurchases mailboxes = 1;
+message PastMailList {
+  repeated PastMail mailboxes = 1;
 }
 
-message StartPastPurchasesRequest {
+message StartPastMailRequest {
   string connection = 1;
   // YYYY-MM-DD.
   string since = 2;
@@ -250,10 +250,19 @@ service LookoutService {
   }
   rpc GiveFeedback(GiveFeedbackRequest) returns (Empty);
   // The mailboxes that can be gone back over for what the owner bought.
-  rpc ListPastPurchases(Empty) returns (PastPurchasesList) {
+  rpc ListPastPurchases(Empty) returns (PastMailList) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
   // Go back over a mailbox, or go on; mail read before is not read again.
-  rpc StartPastPurchases(StartPastPurchasesRequest) returns (PastPurchases);
-  rpc StopPastPurchases(ByName) returns (PastPurchases);
+  rpc StartPastPurchases(StartPastMailRequest) returns (PastMail);
+  rpc StopPastPurchases(ByName) returns (PastMail);
+  // The mailboxes that can be gone back over for the owner's contracts:
+  // subscriptions, lines, insurance and the like.
+  rpc ListPastContracts(Empty) returns (PastMailList) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Go back over a mailbox for contracts, or go on. Mail read for what the
+  // owner bought is read; mail read for contracts is not read again.
+  rpc StartPastContracts(StartPastMailRequest) returns (PastMail);
+  rpc StopPastContracts(ByName) returns (PastMail);
 }

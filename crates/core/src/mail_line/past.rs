@@ -1,25 +1,25 @@
-//! Going back over a mailbox for what the owner bought before. Mail that may
-//! tell of it is put in line a month at a time, oldest first, so that an
+//! Going back over a mailbox for what came before. Mail that may tell of what
+//! a line reads is put in it a month at a time, oldest first, so that an
 //! order stands before its delivery and return.
 
 use chrono::{Datelike, Months, NaiveDate};
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
-use super::SCREENED;
+use super::{Line, SCREENED};
 use crate::app::App;
 use crate::arrivals;
 use crate::models::{CapUnit, Role};
 use crate::store::{Store, now};
 
-/// What narrows the mail, before any model is asked: Gmail's own category,
-/// or words shops put in their subjects.
-const LIKELY: &str = "(category:purchases OR subject:(注文 OR 購入 OR 発送 OR 出荷 OR 配達 OR お届け OR 返品 OR 返金 OR キャンセル OR order OR ordered OR shipped OR delivered OR refund))";
 const SEARCH: &str = "search_messages";
 /// The most pages one month is read in.
 const PAGES: usize = 50;
 /// Mail before this has no shop to tell of.
 const EARLIEST: i32 = 1995;
+
+/// Mail of a connection found going back.
+const PAST: &str = "id IN (SELECT mail FROM {p}past_mails) AND connection = ?1";
 
 /// How going back over a mailbox stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +68,7 @@ fn first_of(day: NaiveDate) -> NaiveDate {
 /// earlier day; mail that could not be read is tried anew.
 pub fn start(
     store: &Store,
+    line: Line,
     connection: &str,
     since: NaiveDate,
     today: NaiveDate,
@@ -79,15 +80,17 @@ pub fn start(
     let mut conn = store.conn();
     let tx = conn.transaction()?;
     let resumed = tx.execute(
-        "UPDATE purchase_past SET state = 'going', problem = '', next_at = 0
+        &line.sql(
+            "UPDATE {p}past SET state = 'going', problem = '', next_at = 0
          WHERE connection = ?1 AND since = ?2 AND state = 'stopped'",
+        ),
         params![connection, since.to_string()],
     )?;
     if resumed == 0 {
         tx.execute(
-            "INSERT INTO purchase_past (connection, since, month, until, state) VALUES (?1, ?2, ?3, ?4, 'going')
+            &line.sql("INSERT INTO {p}past (connection, since, month, until, state) VALUES (?1, ?2, ?3, ?4, 'going')
              ON CONFLICT (connection) DO UPDATE SET
-                 since = ?2, month = ?3, until = ?4, state = 'going', problem = '', next_at = 0",
+                 since = ?2, month = ?3, until = ?4, state = 'going', problem = '', next_at = 0"),
             params![
                 connection,
                 since.to_string(),
@@ -96,20 +99,19 @@ pub fn start(
             ],
         )?;
     }
-    let past = "id IN (SELECT mail FROM purchase_past_mails) AND connection = ?1";
     tx.execute(
-        &format!(
-            "DELETE FROM purchase_away WHERE mail IN (SELECT id FROM purchase_mails WHERE {past})"
-        ),
+        &line.sql(&format!(
+            "DELETE FROM {{p}}away WHERE mail IN (SELECT id FROM {{p}}mails WHERE {PAST})"
+        )),
         [connection],
     )?;
     // What is screened has no title any more.
     tx.execute(
-        &format!(
-            "UPDATE purchase_mails SET tries = 0, next_at = 0,
+        &line.sql(&format!(
+            "UPDATE {{p}}mails SET tries = 0, next_at = 0,
                  state = CASE WHEN title = '' THEN 'waiting' ELSE 'unscreened' END
-             WHERE {past} AND state = 'failed'"
-        ),
+             WHERE {PAST} AND state = 'failed'"
+        )),
         [connection],
     )?;
     tx.commit()?;
@@ -117,27 +119,31 @@ pub fn start(
 }
 
 /// Stop. What was found and not read waits until it is started again.
-pub fn stop(store: &Store, connection: &str) -> anyhow::Result<()> {
+pub fn stop(store: &Store, line: Line, connection: &str) -> anyhow::Result<()> {
     store.conn().execute(
-        "UPDATE purchase_past SET state = 'stopped', problem = ''
+        &line.sql(
+            "UPDATE {p}past SET state = 'stopped', problem = ''
          WHERE connection = ?1 AND state = 'going'",
+        ),
         [connection],
     )?;
     Ok(())
 }
 
-pub fn of(store: &Store, connection: &str) -> anyhow::Result<Option<Past>> {
+pub fn of(store: &Store, line: Line, connection: &str) -> anyhow::Result<Option<Past>> {
     let conn = store.conn();
     let row = conn
         .query_row(
-            "SELECT since, month, until, state, problem,
-                 (SELECT COUNT(*) FROM purchase_past_mails p JOIN purchase_mails m ON m.id = p.mail
+            &line.sql(
+                "SELECT since, month, until, state, problem,
+                 (SELECT COUNT(*) FROM {p}past_mails p JOIN {p}mails m ON m.id = p.mail
                       WHERE m.connection = ?1),
-                 (SELECT COUNT(*) FROM purchase_past_mails p JOIN purchase_mails m ON m.id = p.mail
+                 (SELECT COUNT(*) FROM {p}past_mails p JOIN {p}mails m ON m.id = p.mail
                       WHERE m.connection = ?1 AND m.state IN ('unscreened', 'waiting')),
-                 (SELECT COUNT(*) FROM purchases a JOIN purchase_past_mails p ON p.mail = a.mail
-                      JOIN purchase_mails m ON m.id = p.mail WHERE m.connection = ?1)
-             FROM purchase_past WHERE connection = ?1",
+                 (SELECT COUNT(*) FROM {added} a JOIN {p}past_mails p ON p.mail = a.mail
+                      JOIN {p}mails m ON m.id = p.mail WHERE m.connection = ?1)
+             FROM {p}past WHERE connection = ?1",
+            ),
             [connection],
             |r| {
                 Ok((
@@ -177,7 +183,7 @@ pub fn of(store: &Store, connection: &str) -> anyhow::Result<Option<Past>> {
 
 /// Whether going back may use the model now. It leaves half of a day's cap to
 /// what arrives.
-pub(super) fn may_ask(app: &App) -> anyhow::Result<bool> {
+pub(crate) fn may_ask(app: &App) -> anyhow::Result<bool> {
     let Some(assignment) = app.models.assignment(Role::Lookout)? else {
         return Ok(false);
     };
@@ -196,35 +202,35 @@ pub(super) fn may_ask(app: &App) -> anyhow::Result<bool> {
 
 /// Search the next month of each mailbox that is gone back over, once what
 /// was found before is screened.
-pub async fn go_on(app: &App) -> anyhow::Result<()> {
+pub async fn go_on(app: &App, line: Line) -> anyhow::Result<()> {
     let at = now();
     let going: Vec<String> = {
         let conn = app.store.conn();
         let mut stmt = conn.prepare(
-            "SELECT connection FROM purchase_past WHERE state = 'going' AND next_at <= ?1",
+            &line.sql("SELECT connection FROM {p}past WHERE state = 'going' AND next_at <= ?1"),
         )?;
         stmt.query_map([at], |r| r.get(0))?
             .collect::<Result<_, _>>()?
     };
     for connection in going {
         if app.connections.get(&connection)?.is_none() {
-            stop(&app.store, &connection)?;
+            stop(&app.store, line, &connection)?;
             continue;
         }
-        let Some(past) = of(&app.store, &connection)? else {
+        let Some(past) = of(&app.store, line, &connection)? else {
             continue;
         };
         if past.searched {
             if past.left == 0 {
-                done(&app.store, &past)?;
+                done(&app.store, line, &past)?;
                 app.console.notify(crate::console_log::Event::Records);
             }
             continue;
         }
-        if unscreened(&app.store, &connection)? >= SCREENED as i64 {
+        if unscreened(&app.store, line, &connection)? >= SCREENED as i64 {
             continue;
         }
-        let (problem, wait) = match month(app, &past).await {
+        let (problem, wait) = match month(app, line, &past).await {
             Ok(()) => (String::new(), 0),
             Err(error) => {
                 tracing::warn!(%connection, %error, "could not search past mail");
@@ -232,8 +238,10 @@ pub async fn go_on(app: &App) -> anyhow::Result<()> {
             }
         };
         app.store.conn().execute(
-            "UPDATE purchase_past SET problem = ?2, next_at = ?3
+            &line.sql(
+                "UPDATE {p}past SET problem = ?2, next_at = ?3
              WHERE connection = ?1 AND since = ?4 AND state = 'going'",
+            ),
             params![connection, problem, at + wait, past.since.to_string()],
         )?;
         app.console.notify(crate::console_log::Event::Records);
@@ -243,26 +251,30 @@ pub async fn go_on(app: &App) -> anyhow::Result<()> {
 
 /// All was searched and read: returns of what was not known then are read
 /// again, as it may be known now.
-fn done(store: &Store, past: &Past) -> anyhow::Result<()> {
+fn done(store: &Store, line: Line, past: &Past) -> anyhow::Result<()> {
     let mut conn = store.conn();
     let tx = conn.transaction()?;
     tx.execute(
-        "UPDATE purchase_past SET state = 'done' WHERE connection = ?1 AND since = ?2 AND state = 'going'",
+        &line.sql("UPDATE {p}past SET state = 'done' WHERE connection = ?1 AND since = ?2 AND state = 'going'"),
         params![past.connection, past.since.to_string()],
     )?;
     tx.execute(
-        "UPDATE purchase_mails SET state = 'waiting', tries = 0, next_at = 0
+        &line.sql(
+            "UPDATE {p}mails SET state = 'waiting', tries = 0, next_at = 0
          WHERE connection = ?1 AND state = 'unmatched'",
+        ),
         [&past.connection],
     )?;
     tx.commit()?;
     Ok(())
 }
 
-fn unscreened(store: &Store, connection: &str) -> anyhow::Result<i64> {
+fn unscreened(store: &Store, line: Line, connection: &str) -> anyhow::Result<i64> {
     Ok(store.conn().query_row(
-        "SELECT COUNT(*) FROM purchase_past_mails p JOIN purchase_mails m ON m.id = p.mail
+        &line.sql(
+            "SELECT COUNT(*) FROM {p}past_mails p JOIN {p}mails m ON m.id = p.mail
          WHERE m.connection = ?1 AND m.state = 'unscreened'",
+        ),
         [connection],
         |r| r.get(0),
     )?)
@@ -270,13 +282,14 @@ fn unscreened(store: &Store, connection: &str) -> anyhow::Result<i64> {
 
 /// Put the mail of a month in line, some at a time; the month is left once
 /// all of it is.
-async fn month(app: &App, past: &Past) -> anyhow::Result<()> {
+async fn month(app: &App, line: Line, past: &Past) -> anyhow::Result<()> {
     let next = past.month + Months::new(1);
     let from = past.month.max(past.since);
     // What came since it was started is the lookout's.
     let before = next.min(past.until);
     let query = format!(
-        "{LIKELY} -in:chats after:{} before:{}",
+        "{} -in:chats after:{} before:{}",
+        line.likely(),
         from.format("%Y/%m/%d"),
         before.format("%Y/%m/%d")
     );
@@ -304,7 +317,7 @@ async fn month(app: &App, past: &Past) -> anyhow::Result<()> {
     let mut put = 0;
     // Gmail lists the newest first.
     for id in ids.iter().rev() {
-        if known(&app.store, &past.connection, id)? {
+        if known(&app.store, line, &past.connection, id)? {
             continue;
         }
         if put == SCREENED {
@@ -318,12 +331,14 @@ async fn month(app: &App, past: &Past) -> anyhow::Result<()> {
             Err(error) if arrivals::is_gone(&error) => continue,
             Err(error) => return Err(error),
         };
-        add(&app.store, &past.connection, id, &message)?;
+        add(&app.store, line, &past.connection, id, &message)?;
         put += 1;
     }
     // The owner may have stopped it or started it anew meanwhile.
     app.store.conn().execute(
-        "UPDATE purchase_past SET month = ?3 WHERE connection = ?1 AND month = ?2 AND since = ?4",
+        &line.sql(
+            "UPDATE {p}past SET month = ?3 WHERE connection = ?1 AND month = ?2 AND since = ?4",
+        ),
         params![
             past.connection,
             past.month.to_string(),
@@ -334,26 +349,34 @@ async fn month(app: &App, past: &Past) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn known(store: &Store, connection: &str, message: &str) -> anyhow::Result<bool> {
+fn known(store: &Store, line: Line, connection: &str, message: &str) -> anyhow::Result<bool> {
     Ok(store.conn().query_row(
-        "SELECT EXISTS (SELECT 1 FROM purchase_mails WHERE connection = ?1 AND message = ?2)",
+        &line.sql("SELECT EXISTS (SELECT 1 FROM {p}mails WHERE connection = ?1 AND message = ?2)"),
         [connection, message],
         |r| r.get(0),
     )?)
 }
 
-fn add(store: &Store, connection: &str, id: &str, message: &Value) -> anyhow::Result<()> {
+fn add(
+    store: &Store,
+    line: Line,
+    connection: &str,
+    id: &str,
+    message: &Value,
+) -> anyhow::Result<()> {
     let item = arrivals::mail_item(message);
     let mut conn = store.conn();
     let tx = conn.transaction()?;
     let added = tx.execute(
-        "INSERT OR IGNORE INTO purchase_mails (connection, message, at, state, title, body)
+        &line.sql(
+            "INSERT OR IGNORE INTO {p}mails (connection, message, at, state, title, body)
          VALUES (?1, ?2, ?3, 'unscreened', ?4, ?5)",
+        ),
         params![connection, id, now(), item.title, item.body],
     )?;
     if added > 0 {
         tx.execute(
-            "INSERT INTO purchase_past_mails (mail) VALUES (last_insert_rowid())",
+            &line.sql("INSERT INTO {p}past_mails (mail) VALUES (last_insert_rowid())"),
             [],
         )?;
     }
@@ -364,8 +387,8 @@ fn add(store: &Store, connection: &str, id: &str, message: &Value) -> anyhow::Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::purchases::tests::with_model;
-    use crate::purchases::{read_waiting, screen_left, waiting};
+    use crate::mail_line::tests::with_model;
+    use crate::mail_line::{read_waiting, screen_left, waiting};
 
     fn day(text: &str) -> NaiveDate {
         text.parse().unwrap()
@@ -405,23 +428,30 @@ mod tests {
     async fn a_mailbox_is_gone_over_a_month_at_a_time_oldest_first_and_each_mail_once() {
         let dir = crate::notebook::testing::TempDir::new("past-months");
         let (app, id) = mailbox(dir.path()).await;
-        start(&app.store, &id, day("2026-10-20"), day("2026-11-25")).unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-10-20"),
+            day("2026-11-25"),
+        )
+        .unwrap();
 
-        go_on(&app).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
 
         assert_eq!(lined_up(&app), ["old", "new"]);
-        let past = of(&app.store, &id).unwrap().unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert_eq!(
             (past.month, past.standing),
             (day("2026-11-01"), Standing::Going)
         );
         assert_eq!((past.found, past.left), (2, 2));
 
-        go_on(&app).await.unwrap();
-        go_on(&app).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
 
         assert_eq!(lined_up(&app).len(), 2);
-        let past = of(&app.store, &id).unwrap().unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert!(past.searched);
         assert_eq!(past.standing, Standing::Going, "two are still to be read");
     }
@@ -431,16 +461,16 @@ mod tests {
         let dir = crate::notebook::testing::TempDir::new("past-resume");
         let (app, id) = mailbox(dir.path()).await;
         let (since, today) = (day("2026-08-10"), day("2026-11-25"));
-        start(&app.store, &id, since, today).unwrap();
-        go_on(&app).await.unwrap();
-        stop(&app.store, &id).unwrap();
+        start(&app.store, Line::Purchases, &id, since, today).unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        stop(&app.store, Line::Purchases, &id).unwrap();
 
-        start(&app.store, &id, since, today).unwrap();
+        start(&app.store, Line::Purchases, &id, since, today).unwrap();
 
-        let past = of(&app.store, &id).unwrap().unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert_eq!(past.month, day("2026-09-01"));
-        start(&app.store, &id, day("2026-07-10"), today).unwrap();
-        let past = of(&app.store, &id).unwrap().unwrap();
+        start(&app.store, Line::Purchases, &id, day("2026-07-10"), today).unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert_eq!(past.month, day("2026-07-01"));
     }
 
@@ -449,12 +479,23 @@ mod tests {
         let dir = crate::notebook::testing::TempDir::new("past-stop-reading");
         let (app, id) = mailbox(dir.path()).await;
         with_model(&app, json!({ "purchases": [0, 1] })).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        screen_left(&app).await.unwrap();
-        go_on(&app).await.unwrap();
-        stop(&app.store, &id).unwrap();
-        assert!(waiting(&app.store, i64::MAX, true).unwrap().is_empty());
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        stop(&app.store, Line::Purchases, &id).unwrap();
+        assert!(
+            waiting(&app.store, Line::Purchases, i64::MAX, true)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -462,20 +503,33 @@ mod tests {
         let dir = crate::notebook::testing::TempDir::new("past-return");
         let (app, id) = mailbox(dir.path()).await;
         with_model(&app, json!({ "purchases": [] })).await;
-        super::super::enqueue(&app.store, &id, "return").unwrap();
-        let mail = waiting(&app.store, i64::MAX, true).unwrap().remove(0);
-        super::super::unmatched(&app.store, mail.id).unwrap();
-        assert!(waiting(&app.store, i64::MAX, true).unwrap().is_empty());
+        super::super::enqueue(&app.store, Line::Purchases, &id, "return").unwrap();
+        let mail = waiting(&app.store, Line::Purchases, i64::MAX, true)
+            .unwrap()
+            .remove(0);
+        super::super::unmatched(&app.store, Line::Purchases, mail.id).unwrap();
+        assert!(
+            waiting(&app.store, Line::Purchases, i64::MAX, true)
+                .unwrap()
+                .is_empty()
+        );
 
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        screen_left(&app).await.unwrap();
-        go_on(&app).await.unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
 
-        let w = waiting(&app.store, i64::MAX, true).unwrap();
+        let w = waiting(&app.store, Line::Purchases, i64::MAX, true).unwrap();
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].message, "return");
-        let past = of(&app.store, &id).unwrap().unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert_eq!(past.standing, Standing::Done);
     }
 
@@ -483,13 +537,20 @@ mod tests {
     async fn one_that_arrives_after_it_was_come_upon_is_no_longer_past() {
         let dir = crate::notebook::testing::TempDir::new("past-arrived");
         let (app, id) = mailbox(dir.path()).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        stop(&app.store, &id).unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        stop(&app.store, Line::Purchases, &id).unwrap();
 
-        super::super::enqueue(&app.store, &id, "new").unwrap();
+        super::super::enqueue(&app.store, Line::Purchases, &id, "new").unwrap();
 
-        let w = waiting(&app.store, i64::MAX, false).unwrap();
+        let w = waiting(&app.store, Line::Purchases, i64::MAX, false).unwrap();
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].message, "new");
     }
@@ -498,28 +559,47 @@ mod tests {
     async fn what_could_not_be_read_is_tried_anew_when_started_again() {
         let dir = crate::notebook::testing::TempDir::new("past-anew");
         let (app, id) = mailbox(dir.path()).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
         app.store
             .conn()
             .execute("UPDATE purchase_mails SET state = 'failed', tries = 6", [])
             .unwrap();
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        assert_eq!(of(&app.store, &id).unwrap().unwrap().left, 2);
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        assert_eq!(
+            of(&app.store, Line::Purchases, &id).unwrap().unwrap().left,
+            2
+        );
     }
 
     #[test]
     fn what_arrived_does_not_wait_for_past_mail() {
         let store = Store::open_in_memory().unwrap();
-        add(&store, "g", "old", &mail("old")).unwrap();
-        super::super::enqueue(&store, "g", "return").unwrap();
-        let arrived = waiting(&store, i64::MAX, false).unwrap().remove(0);
-        assert!(!super::super::earlier_waits(&store, &arrived).unwrap());
+        add(&store, Line::Purchases, "g", "old", &mail("old")).unwrap();
+        super::super::enqueue(&store, Line::Purchases, "g", "return").unwrap();
+        let arrived = waiting(&store, Line::Purchases, i64::MAX, false)
+            .unwrap()
+            .remove(0);
+        assert!(!super::super::earlier_waits(&store, Line::Purchases, &arrived).unwrap());
         let past = super::super::Waiting {
             past: true,
             ..arrived
         };
-        assert!(super::super::earlier_waits(&store, &past).unwrap());
+        assert!(super::super::earlier_waits(&store, Line::Purchases, &past).unwrap());
     }
 
     #[tokio::test]
@@ -527,24 +607,54 @@ mod tests {
         let dir = crate::notebook::testing::TempDir::new("past-stop");
         let (app, id) = mailbox(dir.path()).await;
         with_model(&app, json!({ "purchases": [0, 1] })).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        start(&app.store, &id, day("2026-09-01"), day("2026-11-25")).unwrap();
-        stop(&app.store, &id).unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-09-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        stop(&app.store, Line::Purchases, &id).unwrap();
 
-        go_on(&app).await.unwrap();
-        screen_left(&app).await.unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
 
-        let past = of(&app.store, &id).unwrap().unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert_eq!(
             (past.month, past.standing),
             (day("2026-09-01"), Standing::Stopped)
         );
-        assert!(waiting(&app.store, i64::MAX, true).unwrap().is_empty());
+        assert!(
+            waiting(&app.store, Line::Purchases, i64::MAX, true)
+                .unwrap()
+                .is_empty()
+        );
 
-        start(&app.store, &id, day("2026-09-01"), day("2026-11-25")).unwrap();
-        screen_left(&app).await.unwrap();
-        assert_eq!(waiting(&app.store, i64::MAX, true).unwrap().len(), 2);
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-09-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
+        assert_eq!(
+            waiting(&app.store, Line::Purchases, i64::MAX, true)
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -552,12 +662,19 @@ mod tests {
         let dir = crate::notebook::testing::TempDir::new("past-after");
         let (app, id) = mailbox(dir.path()).await;
         with_model(&app, json!({ "purchases": [0, 1] })).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        screen_left(&app).await.unwrap();
-        super::super::enqueue(&app.store, &id, "just now").unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
+        super::super::enqueue(&app.store, Line::Purchases, &id, "just now").unwrap();
 
-        let first = &waiting(&app.store, i64::MAX, true).unwrap()[0];
+        let first = &waiting(&app.store, Line::Purchases, i64::MAX, true).unwrap()[0];
 
         assert_eq!(first.message, "just now");
     }
@@ -570,14 +687,23 @@ mod tests {
         app.models
             .assign(Role::Lookout, "m", Some(2.0), None)
             .unwrap();
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
 
-        screen_left(&app).await.unwrap();
-        read_waiting(&app).await.unwrap();
+        screen_left(&app, Line::Purchases).await.unwrap();
+        read_waiting(&app, Line::Purchases).await.unwrap();
 
         assert_eq!(
-            waiting(&app.store, i64::MAX, true).unwrap().len(),
+            waiting(&app.store, Line::Purchases, i64::MAX, true)
+                .unwrap()
+                .len(),
             2,
             "screening used its half"
         );
@@ -588,9 +714,16 @@ mod tests {
     async fn a_mailbox_that_cannot_be_searched_says_why_and_is_tried_again() {
         let dir = crate::notebook::testing::TempDir::new("past-problem");
         let (app, id) = arrivals::tests::with_google(dir.path(), vec![]).await;
-        start(&app.store, &id, day("2026-11-01"), day("2026-11-25")).unwrap();
-        go_on(&app).await.unwrap();
-        let past = of(&app.store, &id).unwrap().unwrap();
+        start(
+            &app.store,
+            Line::Purchases,
+            &id,
+            day("2026-11-01"),
+            day("2026-11-25"),
+        )
+        .unwrap();
+        go_on(&app, Line::Purchases).await.unwrap();
+        let past = of(&app.store, Line::Purchases, &id).unwrap().unwrap();
         assert!(!past.problem.is_empty());
         assert_eq!(
             (past.month, past.standing),
@@ -602,8 +735,8 @@ mod tests {
     fn today_a_day_to_come_and_one_before_there_were_shops_are_refused() {
         let store = Store::open_in_memory().unwrap();
         let today = day("2026-11-25");
-        assert!(start(&store, "g", day("2026-11-26"), today).is_err());
-        assert!(start(&store, "g", today, today).is_err());
-        assert!(start(&store, "g", day("1994-01-01"), today).is_err());
+        assert!(start(&store, Line::Purchases, "g", day("2026-11-26"), today).is_err());
+        assert!(start(&store, Line::Purchases, "g", today, today).is_err());
+        assert!(start(&store, Line::Purchases, "g", day("1994-01-01"), today).is_err());
     }
 }

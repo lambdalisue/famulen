@@ -70,7 +70,9 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     let tools = surface.tools(&app);
     app.permissions.record_own_tools(&tools.list())?;
     tokio::spawn(chores::chores(app.clone()));
-    tokio::spawn(chores::read_purchases(app.clone()));
+    for line in crate::mail_line::Line::ALL {
+        tokio::spawn(chores::read_line(app.clone(), line));
+    }
     tokio::spawn(chores::keep_pictures(app.clone()));
     tokio::spawn(chores::keep_holding_pictures(app.clone()));
     tokio::spawn(chores::keep_finding_models(app.clone()));

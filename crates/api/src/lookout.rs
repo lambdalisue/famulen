@@ -3,8 +3,8 @@
 use connectrpc::{ConnectError, RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::connections::Transport;
 use famulen_core::lookout::{ARRIVED, Feed, Outcome, Route, arrived_in};
+use famulen_core::mail_line::{Line, past};
 use famulen_core::models::Role as CoreRole;
-use famulen_core::purchases::past;
 use famulen_core::workgroups::MemberKind;
 
 use crate::connections::is_slack;
@@ -309,29 +309,30 @@ impl Api {
         Ok(presets)
     }
 
-    fn past_purchases(
+    fn past_mail(
         &self,
+        line: Line,
         c: &famulen_core::connections::Connection,
-    ) -> anyhow::Result<PastPurchases> {
+    ) -> anyhow::Result<PastMail> {
         let name = if c.account.is_empty() {
             c.name.clone()
         } else {
             format!("{} · {}", c.name, c.account)
         };
-        let Some(p) = past::of(&self.app.store, &c.id)? else {
-            return Ok(PastPurchases {
+        let Some(p) = past::of(&self.app.store, line, &c.id)? else {
+            return Ok(PastMail {
                 connection: c.id.clone(),
                 name,
                 ..Default::default()
             });
         };
-        Ok(PastPurchases {
+        Ok(PastMail {
             connection: c.id.clone(),
             name,
             state: match p.standing {
-                past::Standing::Going => PastPurchasesState::PAST_PURCHASES_STATE_GOING,
-                past::Standing::Stopped => PastPurchasesState::PAST_PURCHASES_STATE_STOPPED,
-                past::Standing::Done => PastPurchasesState::PAST_PURCHASES_STATE_DONE,
+                past::Standing::Going => PastMailState::PAST_MAIL_STATE_GOING,
+                past::Standing::Stopped => PastMailState::PAST_MAIL_STATE_STOPPED,
+                past::Standing::Done => PastMailState::PAST_MAIL_STATE_DONE,
             }
             .into(),
             since: p.since.to_string(),
@@ -343,6 +344,36 @@ impl Api {
             searched: p.searched,
             ..Default::default()
         })
+    }
+
+    fn past_mailboxes(&self, line: Line) -> anyhow::Result<PastMailList> {
+        let list = self.app.connections.list()?;
+        let mailboxes = list
+            .iter()
+            .filter(|c| famulen_core::arrivals::is_google(c))
+            .map(|c| self.past_mail(line, c))
+            .collect::<anyhow::Result<_>>()?;
+        Ok(PastMailList {
+            mailboxes,
+            ..Default::default()
+        })
+    }
+
+    fn start_past(&self, line: Line, connection: &str, since: &str) -> anyhow::Result<PastMail> {
+        let mailbox = self.need_mailbox(connection)?;
+        let today = chrono::Utc::now()
+            .with_timezone(&self.app.tz())
+            .date_naive();
+        past::start(&self.app.store, line, &mailbox.id, since.parse()?, today)?;
+        changed(self);
+        self.past_mail(line, &mailbox)
+    }
+
+    fn stop_past(&self, line: Line, connection: &str) -> anyhow::Result<PastMail> {
+        let mailbox = self.need_mailbox(connection)?;
+        past::stop(&self.app.store, line, &mailbox.id)?;
+        changed(self);
+        self.past_mail(line, &mailbox)
     }
 
     fn need_mailbox(&self, id: &str) -> anyhow::Result<famulen_core::connections::Connection> {
@@ -548,44 +579,50 @@ impl LookoutService for Api {
         &self,
         _ctx: RequestContext,
         _request: ServiceRequest<'_, Empty>,
-    ) -> ServiceResult<PastPurchasesList> {
-        let list = self.app.connections.list().or_fail()?;
-        let mailboxes = list
-            .iter()
-            .filter(|c| famulen_core::arrivals::is_google(c))
-            .map(|c| self.past_purchases(c))
-            .collect::<anyhow::Result<_>>()
-            .or_fail()?;
-        Response::ok(PastPurchasesList {
-            mailboxes,
-            ..Default::default()
-        })
+    ) -> ServiceResult<PastMailList> {
+        Response::ok(self.past_mailboxes(Line::Purchases).or_fail()?)
     }
 
     async fn start_past_purchases(
         &self,
         _ctx: RequestContext,
-        request: ServiceRequest<'_, StartPastPurchasesRequest>,
-    ) -> ServiceResult<PastPurchases> {
-        let mailbox = self.need_mailbox(request.connection).or_fail()?;
-        let since = request.since.parse().map_err(fail)?;
-        let today = chrono::Utc::now()
-            .with_timezone(&self.app.tz())
-            .date_naive();
-        past::start(&self.app.store, &mailbox.id, since, today).or_fail()?;
-        changed(self);
-        Response::ok(self.past_purchases(&mailbox).or_fail()?)
+        request: ServiceRequest<'_, StartPastMailRequest>,
+    ) -> ServiceResult<PastMail> {
+        let started = self.start_past(Line::Purchases, request.connection, request.since);
+        Response::ok(started.or_fail()?)
     }
 
     async fn stop_past_purchases(
         &self,
         _ctx: RequestContext,
         request: ServiceRequest<'_, ByName>,
-    ) -> ServiceResult<PastPurchases> {
-        let mailbox = self.need_mailbox(request.id).or_fail()?;
-        past::stop(&self.app.store, &mailbox.id).or_fail()?;
-        changed(self);
-        Response::ok(self.past_purchases(&mailbox).or_fail()?)
+    ) -> ServiceResult<PastMail> {
+        Response::ok(self.stop_past(Line::Purchases, request.id).or_fail()?)
+    }
+
+    async fn list_past_contracts(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<PastMailList> {
+        Response::ok(self.past_mailboxes(Line::Contracts).or_fail()?)
+    }
+
+    async fn start_past_contracts(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, StartPastMailRequest>,
+    ) -> ServiceResult<PastMail> {
+        let started = self.start_past(Line::Contracts, request.connection, request.since);
+        Response::ok(started.or_fail()?)
+    }
+
+    async fn stop_past_contracts(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<PastMail> {
+        Response::ok(self.stop_past(Line::Contracts, request.id).or_fail()?)
     }
 
     async fn give_feedback(

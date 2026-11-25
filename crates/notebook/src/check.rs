@@ -278,6 +278,11 @@ fn check_memory(notebook: &Notebook, known: &Known, layer: Layer, findings: &mut
     }
 }
 
+/// Whether a text holds what looks like a secret.
+pub fn looks_secret(text: &str) -> bool {
+    !secrets::secrets(text).is_empty()
+}
+
 /// What is wrong with any text: links to nothing and secrets.
 fn text_findings(names: &Names, text: &str, findings: &mut Findings) {
     for secret in secrets::secrets(text) {

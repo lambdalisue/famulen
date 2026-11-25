@@ -6,6 +6,7 @@ use super::keep;
 use crate::app::App;
 use crate::console_log::Event;
 use crate::lookout::{self, Feed, Item, LookoutSource, More, Reading};
+use crate::mail_line::{Line, leave, mark};
 use crate::memory;
 use crate::models::Role;
 use crate::people;
@@ -35,10 +36,25 @@ notify (the owner should know today: a vulnerability in what they use, a sale on
 or digest (worth a line in tomorrow morning's summary). \
 Give each group a short title and say why in one short sentence, both in Japanese. \
 Every item that concerns the owner belongs to one group.
-Apart from that, list in purchases the index of every mail that tells of something the owner bought: \
-an order taken, shipped, delivered, returned or cancelled, whether or not it concerns them now; not advertising.
-What the owner cares about, and what they said does not concern them:
 ";
+const CARES: &str = "What the owner cares about, and what they said does not concern them:
+";
+
+/// What the lookout's model is told, with what the owner cares about last.
+fn screen(profile: &str) -> String {
+    let lines: String = Line::ALL
+        .iter()
+        .map(|l| {
+            format!(
+                "Apart from that, list in {} the index of every mail that tells of {}, \
+                 whether or not it concerns them now; not advertising.\n",
+                l.key(),
+                l.tells()
+            )
+        })
+        .collect();
+    format!("{SCREEN}{lines}{CARES}{profile}")
+}
 
 /// What the lookout judges relevance by: records (open tasks, people,
 /// holdings) and semantic memory, where the owner's word that something does
@@ -298,16 +314,18 @@ pub(super) async fn poll_lookout(app: &App) -> anyhow::Result<()> {
         let source_ref = &source;
         let open = move |url: String| async move { open_page(app, source_ref, &url).await };
         let model = async |items: Vec<Item>| {
-            let mut system = format!("{SCREEN}{profile}");
+            let mut system = screen(&profile);
             let mut schema = lookout::verdict_schema();
             if tells_of_people(source_ref) {
                 system.insert_str(0, people::ASK);
                 schema = people::with_people(schema);
             }
             let answer = ask_lookout(app, tz, &system, &items, &schema).await;
-            match &answer {
-                Ok(Some(answer)) => crate::purchases::mark(&app.store, source_ref, &items, answer)?,
-                _ => crate::purchases::leave(&app.store, source_ref, &items)?,
+            for line in Line::ALL {
+                match &answer {
+                    Ok(Some(answer)) => mark(&app.store, line, source_ref, &items, answer)?,
+                    _ => leave(&app.store, line, source_ref, &items)?,
+                }
             }
             let answer = answer?;
             if let Some(answer) = &answer

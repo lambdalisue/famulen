@@ -13,6 +13,7 @@ impl Records {
     /// Turn the deadlines of things and contracts due soon into
     /// tasks, each once. What was let go or has ended is left alone.
     pub fn remind_deadlines(&self, today: NaiveDate) -> anyhow::Result<Vec<Record>> {
+        let held = self.hold()?;
         let mut made = Vec::new();
         for kind in [HOLDINGS, CONTRACTS] {
             for record in self.list(kind)? {
@@ -37,7 +38,7 @@ impl Records {
                     })
                     .collect();
                 for (at, what, on) in due {
-                    let task = self.add(
+                    let task = held.add(
                         Writer::Secretary,
                         TASKS,
                         Patch {
@@ -55,7 +56,6 @@ impl Records {
                         .with("Assignee", OWNER)
                         .with("Related", titled_link(kind, &record.id, &record.title())),
                     )?;
-                    let _writing = self.writing()?;
                     let mut record = self.need(kind, &record.id)?;
                     record
                         .body

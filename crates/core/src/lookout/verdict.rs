@@ -90,9 +90,10 @@ pub fn verdict_schema() -> Value {
                     "additionalProperties": false
                 }
             },
-            "purchases": { "type": "array", "items": { "type": "integer" } }
+            "purchases": { "type": "array", "items": { "type": "integer" } },
+            "contracts": { "type": "array", "items": { "type": "integer" } }
         },
-        "required": ["items", "groups", "purchases"],
+        "required": ["items", "groups", "purchases", "contracts"],
         "additionalProperties": false
     })
 }
@@ -176,7 +177,10 @@ mod tests {
     #[test]
     fn a_group_goes_to_the_secretary_or_the_digest_and_nowhere_else() {
         let schema = verdict_schema();
-        assert_eq!(schema["required"], json!(["items", "groups", "purchases"]));
+        assert_eq!(
+            schema["required"],
+            json!(["items", "groups", "purchases", "contracts"])
+        );
         assert_eq!(
             schema["properties"]["groups"]["items"]["properties"]["outcome"]["enum"],
             json!(["act", "notify", "digest"])
