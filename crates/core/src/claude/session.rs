@@ -28,7 +28,7 @@ use crate::store::Store;
 
 /// From where on Claude Code compacts a conversation: it does so some way below
 /// this many tokens, instead of close to the model's own window.
-const COMPACT_WINDOW: &str = "120000";
+const COMPACT_WINDOW: &str = "160000";
 /// How long a process told that nothing more comes may take to end.
 const END_LIMIT: Duration = Duration::from_secs(10);
 
