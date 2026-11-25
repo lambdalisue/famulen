@@ -49,6 +49,10 @@ pub enum Event {
 /// How far back a message is looked for.
 const RECENT: usize = 1000;
 
+/// How many rows are read at a time, so that the store is not held from
+/// others while a long conversation is searched.
+const CHUNK: usize = 500;
+
 #[derive(Clone)]
 pub struct ConsoleLog {
     store: Store,
@@ -119,25 +123,48 @@ impl ConsoleLog {
 
     /// The latest messages, oldest first.
     pub fn recent(&self, limit: usize) -> anyhow::Result<Vec<Message>> {
+        self.before(0, limit, |_| true)
+    }
+
+    /// The latest messages `shown` says yes to that are older than the one
+    /// with id `before`, oldest first; `0` starts from the newest.
+    pub fn before(
+        &self,
+        before: i64,
+        limit: usize,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<Vec<Message>> {
+        let mut from = if before == 0 { i64::MAX } else { before };
+        let mut found = vec![];
+        while found.len() < limit {
+            let rows = self.rows(from, CHUNK)?;
+            let Some(last) = rows.last() else { break };
+            from = last.id;
+            found.extend(rows.into_iter().filter(&shown).take(limit - found.len()));
+        }
+        found.reverse();
+        Ok(found)
+    }
+
+    /// The messages older than the one with id `before`, newest first.
+    fn rows(&self, before: i64, limit: usize) -> anyhow::Result<Vec<Message>> {
         let conn = self.store.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, at, who, text, meta FROM console_messages ORDER BY id DESC LIMIT ?1",
+            "SELECT id, at, who, text, meta FROM console_messages
+             WHERE id < ?1 ORDER BY id DESC LIMIT ?2",
         )?;
-        let mut rows: Vec<Message> = stmt
-            .query_map([limit as i64], |r| {
-                let who: String = r.get(2)?;
-                let meta: String = r.get(4)?;
-                Ok(Message {
-                    id: r.get(0)?,
-                    at: r.get(1)?,
-                    who: if who == "aide" { Who::Aide } else { Who::Owner },
-                    text: r.get(3)?,
-                    meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
-                })
-            })?
-            .collect::<Result<_, _>>()?;
-        rows.reverse();
-        Ok(rows)
+        let rows = stmt.query_map(params![before, limit as i64], |r| {
+            let who: String = r.get(2)?;
+            let meta: String = r.get(4)?;
+            Ok(Message {
+                id: r.get(0)?,
+                at: r.get(1)?,
+                who: if who == "aide" { Who::Aide } else { Who::Owner },
+                text: r.get(3)?,
+                meta: serde_json::from_str(&meta).unwrap_or(Value::Null),
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 }
 
@@ -168,5 +195,21 @@ mod tests {
         }
         let texts: Vec<_> = log.recent(3).unwrap().into_iter().map(|m| m.text).collect();
         assert_eq!(texts, ["2", "3", "4"]);
+    }
+
+    #[test]
+    fn before_reads_back_past_what_is_not_shown() {
+        let log = ConsoleLog::new(Store::open_in_memory().unwrap());
+        let ids: Vec<i64> = (0..6)
+            .map(|i| log.add(Who::Owner, format!("{i}"), Value::Null).unwrap().id)
+            .collect();
+        let even = |m: &Message| m.text.parse::<i64>().unwrap() % 2 == 0;
+        let texts = |before, limit| -> Vec<String> {
+            let found = log.before(before, limit, even).unwrap();
+            found.into_iter().map(|m| m.text).collect()
+        };
+        assert_eq!(texts(0, 2), ["2", "4"]);
+        assert_eq!(texts(ids[2], 2), ["0"]);
+        assert!(texts(ids[0], 2).is_empty());
     }
 }

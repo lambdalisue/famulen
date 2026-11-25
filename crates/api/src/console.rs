@@ -118,6 +118,9 @@ fn input_item(stored: StoredInput, at: i64) -> InputItem {
     }
 }
 
+/// The most messages one answer holds, whatever is asked.
+const MOST_MESSAGES: usize = 1000;
+
 /// Whether a message shows while `workgroup` is chosen: one said in another
 /// workgroup is left out, one said in すべて is kept.
 fn shown_in(m: &console_log::Message, workgroup: &str) -> bool {
@@ -267,20 +270,23 @@ impl ConsoleService for Api {
         request: ServiceRequest<'_, ListMessagesRequest>,
     ) -> ServiceResult<ListMessagesResponse> {
         let r = request.to_owned_message();
-        let limit = if r.limit > 0 { r.limit as usize } else { 120 };
-        let mut all: Vec<console_log::Message> = self
+        let limit = match r.limit {
+            n if n > 0 => (n as usize).min(MOST_MESSAGES),
+            _ => 120,
+        };
+        // One past the limit tells whether more remain.
+        let mut found = self
             .app
             .console
-            .recent(1000)
-            .or_fail()?
-            .into_iter()
-            .filter(|m| shown_in(m, &r.workgroup))
-            .filter(|m| r.before == 0 || m.id < r.before)
-            .collect();
-        all.sort_by_key(|m| m.id);
-        let start = all.len().saturating_sub(limit);
+            .before(r.before, limit + 1, |m| shown_in(m, &r.workgroup))
+            .or_fail()?;
+        let more = found.len() > limit;
+        if more {
+            found.remove(0);
+        }
         Response::ok(ListMessagesResponse {
-            messages: all[start..].iter().map(message).collect(),
+            messages: found.iter().map(message).collect(),
+            more,
             ..Default::default()
         })
     }

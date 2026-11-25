@@ -5,6 +5,7 @@ mod attention;
 mod builtin_permissions;
 mod channels;
 mod connections;
+mod conversation;
 mod definitions;
 mod destinations;
 mod dream_settings;

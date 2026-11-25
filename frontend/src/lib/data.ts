@@ -11,9 +11,5 @@ export const notebookSharingQuery = query(() => api.settings.getNotebookSharing(
 export const slackAppsQuery = query(async () => (await api.settings.listSlackApps({})).apps, "slackApps");
 export const slackNamesQuery = query(async () => (await api.channels.listSlackNames({})).names, "slackNames");
 export const noticesQuery = query((endpoint: string) => api.notices.getNotices({ endpoint }), "notices");
-export const messagesQuery = query(
-  async (workgroup: string) => (await api.console.listMessages({ workgroup, limit: 120 })).messages,
-  "messages",
-);
 /** The home of the user Famulen runs as, written in full; `~/` in a path the owner writes is read from it. */
 export const homeQuery = query(async () => (await api.settings.getFolder({ path: "" })).path, "home");
