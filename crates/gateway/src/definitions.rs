@@ -337,6 +337,30 @@ pub enum CommandArg {
     },
 }
 
+impl Definition {
+    /// Why only the owner may add a connection made from it: it needs a key
+    /// or another secret, or it reaches more than what it asks over HTTP.
+    pub fn only_by_owner(&self) -> Option<&'static str> {
+        let http = self.transport.http.as_ref();
+        if self.login.is_some() {
+            Some("it needs a login")
+        } else if self.app_spec.is_some() {
+            Some("it needs a registered app")
+        } else if self.fields.iter().any(|f| f.secret || f.generated) {
+            Some("it needs a secret")
+        } else if http.is_none() {
+            Some("it is not reached over HTTP")
+        } else if http.is_some_and(|h| h.openapi.is_some()) {
+            // Its place may be a file of this machine.
+            Some("it reads an API description")
+        } else if !self.receive.is_empty() {
+            Some("it opens a receiver")
+        } else {
+            None
+        }
+    }
+}
+
 impl CommandTool {
     pub fn marks(&self) -> Marks {
         Marks {

@@ -434,6 +434,7 @@ async fn a_connection_whose_definition_does_not_read_says_why() {
             Transport::Defined {
                 definition: "chat".into(),
                 values: BTreeMap::new(),
+                public: false,
             },
             Secret::default(),
             "",

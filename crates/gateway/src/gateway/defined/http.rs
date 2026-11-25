@@ -99,7 +99,7 @@ impl Gateway {
             return Ok(ops.clone());
         }
         let text = if place.starts_with("http://") || place.starts_with("https://") {
-            let mut request = self.http.get(&place);
+            let mut request = self.http_client(&ctx, &place)?.get(&place);
             if let Some((name, value)) = self.auth_header(def, &ctx, None) {
                 request = request.header(name, value);
             }
@@ -273,6 +273,30 @@ impl Gateway {
         Ok(text_result(text, failed))
     }
 
+    /// The client to ask `url` with, for the connection `ctx` is of.
+    fn http_client(&self, ctx: &Context, url: &str) -> anyhow::Result<reqwest::Client> {
+        if ctx.public {
+            return self.public.client_for(url);
+        }
+        Ok(self.http.clone())
+    }
+
+    /// [`Self::http_client`] that follows where it is sent on only on the host of
+    /// `base`.
+    fn http_client_on(
+        &self,
+        ctx: &Context,
+        base: url::Url,
+        url: &str,
+        timeout: std::time::Duration,
+    ) -> anyhow::Result<reqwest::Client> {
+        let mut builder = reqwest::Client::builder().timeout(timeout);
+        if ctx.public {
+            builder = self.public.guard(builder, url)?;
+        }
+        Ok(builder.redirect(staying_on(base)).build()?)
+    }
+
     /// Send one request a definition describes, its strings filled from
     /// `ctx`; the status and the body.
     pub(super) async fn send_defined(
@@ -324,9 +348,9 @@ impl Gateway {
                 on_host(&base, &url::Url::parse(&url)?),
                 "{url} is not on the service's host"
             );
-            following_on(base, PAGE_TIMEOUT)?
+            self.http_client_on(ctx, base, &url, PAGE_TIMEOUT)?
         } else {
-            self.http.clone()
+            self.http_client(ctx, &url)?
         };
         let mut request = http
             .request(reqwest::Method::from_bytes(method.as_bytes())?, &url)
@@ -344,6 +368,9 @@ impl Gateway {
             !same_host || is_text(response.headers()),
             "{url} is not text"
         );
+        if ctx.public {
+            return Ok((status, text_within(response).await?));
+        }
         Ok((status, response.text().await?))
     }
 
@@ -366,14 +393,15 @@ impl Gateway {
             .render_text(&tool.path)
             .ok_or_else(|| anyhow::anyhow!("the request names a value it does not have"))?;
         let url = url::Url::parse(&url_of(&base, &target))?;
-        let mut request = following_on(url.clone(), FILE_TIMEOUT)?
+        let mut request = self
+            .http_client_on(ctx, url.clone(), url.as_str(), FILE_TIMEOUT)?
             .get(url.clone())
             .header(reqwest::header::USER_AGENT, AGENT)
             .query(&ctx.render_map(&tool.query).iter().collect::<Vec<_>>());
         if let Some((name, value)) = self.auth_header(def, ctx, auth) {
             request = request.header(name, value);
         }
-        let mut response = match request.send().await {
+        let response = match request.send().await {
             Ok(response) => response,
             Err(error) if error.is_redirect() => {
                 return Ok(text_result(SENT_ELSEWHERE.to_owned(), true));
@@ -392,14 +420,7 @@ impl Gateway {
             .unwrap_or("application/octet-stream")
             .trim()
             .to_owned();
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
-            anyhow::ensure!(
-                bytes.len() + chunk.len() <= MAX_FILE_BYTES,
-                "the file is larger than {MAX_FILE_BYTES} bytes"
-            );
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = all_of(response).await?;
         Ok(Fetched { mime, bytes }.into_result(url.as_str()))
     }
 
@@ -426,6 +447,34 @@ impl Gateway {
     }
 }
 
+/// The whole body, when it is not too large.
+async fn all_of(mut response: reqwest::Response) -> anyhow::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        anyhow::ensure!(
+            bytes.len() + chunk.len() <= MAX_FILE_BYTES,
+            "the file is larger than {MAX_FILE_BYTES} bytes"
+        );
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+/// The body as text in the charset the server names, when it is not too large.
+async fn text_within(response: reqwest::Response) -> anyhow::Result<String> {
+    let kind = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .cloned();
+    let mut whole = axum::http::Response::new(all_of(response).await?);
+    if let Some(kind) = kind {
+        whole
+            .headers_mut()
+            .insert(reqwest::header::CONTENT_TYPE, kind);
+    }
+    Ok(reqwest::Response::from(whole).text().await?)
+}
+
 fn is_url(target: &str) -> bool {
     target.starts_with("http://") || target.starts_with("https://")
 }
@@ -445,20 +494,17 @@ fn url_of(base: &str, target: &str) -> String {
     }
 }
 
-/// A client that follows where it is sent on only on the host of `base`.
-fn following_on(base: url::Url, timeout: std::time::Duration) -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .redirect(reqwest::redirect::Policy::custom(move |to| {
-            if to.previous().len() > MAX_REDIRECTS {
-                to.error("too many redirects")
-            } else if on_host(&base, to.url()) {
-                to.follow()
-            } else {
-                to.error(SENT_ELSEWHERE)
-            }
-        }))
-        .build()
+/// Following where a request is sent on only on the host of `base`.
+fn staying_on(base: url::Url) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |to| {
+        if to.previous().len() > MAX_REDIRECTS {
+            to.error("too many redirects")
+        } else if on_host(&base, to.url()) {
+            to.follow()
+        } else {
+            to.error(SENT_ELSEWHERE)
+        }
+    })
 }
 
 /// Whether `url` is on the host of `base`, where http may become https but

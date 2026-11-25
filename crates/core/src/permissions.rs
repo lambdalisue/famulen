@@ -82,6 +82,9 @@ const JUDGED_ON_ARRIVAL: &[&str] = &[
     "propose_definition_change",
 ];
 
+/// Famulen's own tool that adds a connection which needs no secret.
+const ADD_KEYLESS: &str = "add_keyless_connection";
+
 /// Built-in tools the auto permission always asks about: a shell command
 /// reaches whatever the shell can, which its input does not show. Claude Code
 /// offers `PowerShell` on Windows.
@@ -206,7 +209,10 @@ impl Permissions {
             }
             Some((connection, _)) if connection != hub::SERVER_NAME => return Ok(Decision::Allow),
             Some((_, tool)) if JUDGED_ON_ARRIVAL.contains(&tool) => return Ok(Decision::Allow),
-            Some((connection, tool)) => Call::new(SECRETARY, connection, tool, input.clone()),
+            Some((connection, tool)) => Call {
+                refuse: self.refusal_of_adding(tool, input),
+                ..Call::new(SECRETARY, connection, tool, input.clone())
+            },
             None if LAUNCHERS.contains(&tool_name) => Call {
                 refuse: Some(DELEGATE_INSTEAD.to_owned()),
                 ..Call::new(SECRETARY, "", tool_name, input.clone())
@@ -227,6 +233,25 @@ impl Permissions {
             Verdict::Hold(ticket) => Decision::Held(ticket.id),
             Verdict::Deny { reason } => Decision::Forbid(format!("{tool_name}: {reason}")),
         })
+    }
+
+    /// Why a connection could not be added, before the owner is asked of it.
+    fn refusal_of_adding(&self, tool: &str, input: &Value) -> Option<String> {
+        if tool != ADD_KEYLESS {
+            return None;
+        }
+        let values = input["values"].as_object().into_iter().flatten();
+        let values = values
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_owned()))
+            .collect();
+        self.gateway
+            .check_keyless(
+                input["definition"].as_str().unwrap_or_default(),
+                values,
+                input["name"].as_str(),
+            )
+            .err()
+            .map(|error| format!("{error:#}"))
     }
 
     /// Decide one call of a worker's model, refused when `refuse` says why. A

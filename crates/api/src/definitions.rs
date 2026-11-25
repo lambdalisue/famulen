@@ -70,6 +70,7 @@ impl Api {
                     .and_then(|l| l.key.as_ref())
                     .map(|k| k.label.clone())
                     .unwrap_or_default(),
+                only_by_owner: d.only_by_owner().unwrap_or_default().into(),
                 about: d.about.clone().unwrap_or_default(),
                 ..Default::default()
             })

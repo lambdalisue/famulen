@@ -300,6 +300,7 @@ const NAMES: &[(&str, &str)] = &[
     ("truncated", "途中で切れている"),
     ("url", "URL"),
     ("user", "ユーザー"),
+    ("values", "値"),
     ("why", "わけ"),
     ("workgroup", "ワークグループ"),
     ("worktree", "新しいワークツリー"),
