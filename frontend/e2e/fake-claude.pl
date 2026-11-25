@@ -4,7 +4,8 @@
 # message holding `e2e-bash` first asks to run Bash, one holding
 # `e2e-work` searches the web for some seconds, one holding
 # `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
-# tells of a plan and writes for some seconds.
+# tells of a plan and writes for some seconds, and one holding `e2e-hold` goes
+# on until it is stopped.
 #
 # Asked once for a dream plan (--json-schema with the dream's prompt), it
 # forgets the long-term item whose id starts with `e2e-done`, so a night with
@@ -57,6 +58,7 @@ while (my $line = <STDIN>) {
         print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"x"}]}}\n);
         sleep 2;
     }
+    sleep 600 if $line =~ /e2e-hold/;
     if ($line =~ /e2e-plan/) {
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"まず読む"}]}}\n);
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"},{"content":"書く","status":"in_progress"}]}}]}}\n);

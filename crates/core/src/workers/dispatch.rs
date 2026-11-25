@@ -184,9 +184,13 @@ pub fn plan(candidates: &[Candidate], limits: &Limits, now: NaiveDateTime) -> Ve
     order
         .into_iter()
         .map(|c| {
-            let standing = standing(c, &limits, now);
+            let mut standing = standing(c, &limits, now);
             let start = match standing {
-                Standing::Retrying if going < limits.slots => {
+                Standing::Retrying if going >= limits.slots => {
+                    standing = Standing::Next;
+                    false
+                }
+                Standing::Retrying => {
                     going += 1;
                     c.retry_due
                 }
@@ -370,6 +374,11 @@ mod tests {
             },
         ];
         assert!(started(&tasks, limits(1)).is_empty());
+        assert_eq!(
+            plan(&tasks, &limits(1), now())[0].standing,
+            Standing::Next,
+            "it waits for a slot, not for the time to try again"
+        );
         assert_eq!(started(&tasks, limits(2)), ["a"]);
         assert_eq!(started(&tasks, limits(3)), ["a", "c"]);
     }

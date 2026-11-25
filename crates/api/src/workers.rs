@@ -5,7 +5,7 @@ use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Finish, Order, Outcome, Run, Runner, Settings, Sight, Standing, State, WORKER,
+    self, Finish, Order, Outcome, Placed, Run, Runner, Settings, Sight, Standing, State, WORKER,
     is_delegated,
 };
 use famulen_core::workgroups::ALL;
@@ -65,8 +65,9 @@ fn seen(r: Run, sight: &Sight) -> WorkerRun {
     }
 }
 
-fn standing(s: Standing) -> (&'static str, String) {
-    let name = match s {
+fn standing(placed: Placed) -> (&'static str, String) {
+    let name = match placed.standing {
+        Standing::Next | Standing::Approved if placed.start => "starting",
         Standing::Next => "queued",
         Standing::Paused => "paused",
         Standing::Capped => "capped",
@@ -232,7 +233,7 @@ impl WorkerService for Api {
                 let runner = Order::of(&q.task, &q.code)
                     .map(|o| o.runner.as_str().to_owned())
                     .unwrap_or_default();
-                let (state, why) = standing(q.placed.standing);
+                let (state, why) = standing(q.placed);
                 let run = q
                     .run
                     .map(|r| {

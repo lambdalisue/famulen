@@ -13,12 +13,13 @@ export const runHref = (run: WorkerRun) => `/runs/${run.id}`;
 
 const STATES: { [state: string]: string } = {
   queued: "順番待ち",
+  starting: "まもなく始まる",
   paused: "一時停止中",
   capped: "今日の上限",
-  later: "始める日を待つ",
-  blocked: "ほかのタスクを待つ",
+  later: "始める日時を待つ",
+  blocked: "先の仕事を待つ",
   unfit: "委ね方が足りない",
-  asking: "承認待ち",
+  asking: "あなたの承認待ち",
   approved: "承認済み・順番待ち",
   retrying: "もう一度始める",
   unreachable: "Adroit に届かない",
@@ -82,16 +83,24 @@ export const isBadOutcome = (outcome: string) => outcome === "failed" || outcome
 
 export const isBad = (t: DelegatedTask) => t.state === "unfit" || t.state === "unreachable" || (t.state === "still" && isBadOutcome(t.run?.outcome ?? ""));
 
-type Stage = "owner" | "running" | "next";
+type Stage = "owner" | "running" | "soon" | "next" | "held";
 
-/** What a delegated task waits for, in the order the queue shows it: the owner, its end, or its turn. */
+/** What a delegated task waits for, in the order the queue shows it: the owner, its end, nothing, a free slot, or something else in its way. */
 export const STAGES: [Stage, string][] = [
   ["owner", "あなたを待っている"],
   ["running", "動いている"],
+  ["soon", "まもなく始まる"],
   ["next", "順番を待っている"],
+  ["held", "始まりを待っている"],
 ];
 
 export function stageOf(t: DelegatedTask): Stage {
   if (t.state === "running") return "running";
-  return ["asking", "waiting", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "next";
+  if (t.state === "starting") return "soon";
+  if (["queued", "approved"].includes(t.state)) return "next";
+  return ["asking", "waiting", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "held";
 }
+
+/** Its place among those that wait for a free slot; 0 when it does not. */
+export const placeOf = (queue: DelegatedTask[] | undefined, task: string) =>
+  (queue ?? []).filter((t) => stageOf(t) === "next").findIndex((t) => t.task === task) + 1;

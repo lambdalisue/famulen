@@ -17,17 +17,18 @@ import {
 } from "~/components/ui";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { shortTime } from "~/lib/dates";
+import { dateText, shortTime } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { useParam, withParams } from "~/lib/params";
-import { isOver, type Rec, recordsQuery, valueOf, WORKER } from "~/lib/records";
+import { hrefOf, isOver, type Rec, recordsQuery, valueOf, WORKER } from "~/lib/records";
 import {
   type DelegatedTask,
   delegatedQuery,
   isBad,
   isBadOutcome,
   outcomeText,
+  placeOf,
   runHref,
   runnerText,
   stageOf,
@@ -49,8 +50,6 @@ const cancel = (id: string, title: string) =>
     "まだ始まっていなければ始まらず、手代が動いていれば止まる。",
   );
 
-const placeOf = (queue: DelegatedTask[] | undefined, task: string) => (queue ?? []).findIndex((t) => t.task === task) + 1;
-
 /** Whether a task has a run under way that can be watched. */
 const isSeen = (t: DelegatedTask) => !!t.run && ["running", "waiting", "unreachable"].includes(t.state);
 
@@ -68,8 +67,32 @@ function Standing(props: { of: DelegatedTask }) {
   return <Tag tone={tone()}>{standingText(props.of)}</Tag>;
 }
 
+/** What a delegated task that may not start yet waits for. */
+function Awaits(props: { of: DelegatedTask; task: Rec | undefined; class?: string }) {
+  return (
+    <>
+      <Show when={props.of.state === "blocked" && (props.task?.blockers.length ?? 0) > 0}>
+        <span class={props.class}>
+          <For each={props.task?.blockers}>
+            {(b, i) => (
+              <>
+                {i() > 0 ? "、" : ""}
+                <a href={hrefOf(b.kind, b.id)}>{b.title}</a>
+              </>
+            )}
+          </For>
+          の完了を待っている
+        </span>
+      </Show>
+      <Show when={props.of.state === "later" && props.task}>
+        {(task) => <span class={props.class}>{dateText(valueOf(task(), "Start"))} から</span>}
+      </Show>
+    </>
+  );
+}
+
 /** One delegated task in the queue: how it stands, with what, and why it does not go on. */
-function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; number: number }) {
+function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; place: number; task: Rec | undefined }) {
   const t = () => props.of;
   return (
     <ListRow
@@ -77,7 +100,7 @@ function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; nu
       class="delegated-row"
       href={props.href}
       current={props.current}
-      lead={<span class="delegated-number mono">{props.number}</span>}
+      lead={<span class="delegated-number mono">{props.place || ""}</span>}
       title={t().title}
       sub={
         <>
@@ -86,6 +109,7 @@ function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; nu
           <Show when={(t().run?.attempt ?? 0) > 1}>
             <span>{t().run?.attempt} 回目</span>
           </Show>
+          <Awaits of={t()} task={props.task} />
           <Show when={t().why}>
             <span>{t().why}</span>
           </Show>
@@ -161,7 +185,7 @@ export function DelegatedPage(props: { tools: JSX.Element; detail: (id: string) 
           actions={<span class="d-only">{props.tools}</span>}
           note={
             <>
-              手代か外のエージェントに委ねたタスク。上から順に動く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>
+              手代か外のエージェントに委ねたタスク。上から順に動く。順番を待つものには順番が付く。同時に動く数と一時停止は<a href="/settings/roles/worker">手代の設定</a>
               で決める。
             </>
           }
@@ -184,7 +208,8 @@ export function DelegatedPage(props: { tools: JSX.Element; detail: (id: string) 
                               of={t}
                               href={withParams(base, { id: t.task })}
                               current={t.task === id()}
-                              number={placeOf(line()?.queue, t.task)}
+                              place={placeOf(line()?.queue, t.task)}
+                              task={tasks()?.find((r) => r.id === t.task)}
                             />
                           )}
                         </For>
@@ -307,8 +332,10 @@ export function Delegation(props: { task: Rec }) {
           <div class="row">
             <Standing of={standing()!} />
             <span class="sub">
-              {runnerText(standing()!.runner)} · 並びの {place()} 番目
+              {runnerText(standing()!.runner)}
+              <Show when={place() > 0}> · 並びの {place()} 番目</Show>
             </span>
+            <Awaits of={standing()!} task={props.task} class="sub" />
             <Show when={standing()!.why}>
               <span class="sub">{standing()!.why}</span>
             </Show>

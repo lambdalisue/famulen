@@ -122,7 +122,7 @@ async fn a_delegated_task_is_cancelled_and_put_back_in_the_queue() {
 
     call(&api, "WorkerService/RetryDelegated", json!({ "id": code })).await;
     let listed = call(&api, "WorkerService/ListDelegated", json!({})).await;
-    assert_eq!(listed["queue"][0]["state"], "queued");
+    assert_eq!(listed["queue"][0]["state"], "starting");
 
     let own = call(
         &api,
@@ -243,6 +243,32 @@ async fn the_delegated_tasks_of_one_workgroup_or_one_task_alone_are_listed() {
             .unwrap_or_default();
         assert_eq!(titles, expected, "{asked}");
     }
+}
+
+#[tokio::test]
+async fn only_a_task_no_slot_is_free_for_is_queued() {
+    let dir = temp();
+    let api = open(&dir);
+    call(
+        &api,
+        "WorkerService/SetWorkerSettings",
+        json!({ "slots": 1 }),
+    )
+    .await;
+    let first = call(&api, "WorkerService/DelegateTask", agent("先の仕事")).await;
+    let mut after = agent("後の仕事");
+    after["blockedBy"] = json!([first["code"]]);
+    call(&api, "WorkerService/DelegateTask", after).await;
+    call(&api, "WorkerService/DelegateTask", agent("次の仕事")).await;
+
+    let listed = call(&api, "WorkerService/ListDelegated", json!({})).await;
+    let states: Vec<_> = listed["queue"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["state"].as_str().unwrap())
+        .collect();
+    assert_eq!(states, ["starting", "blocked", "queued"]);
 }
 
 #[tokio::test]

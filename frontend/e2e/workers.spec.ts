@@ -1,10 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
-import { agree, call, detail, expectView, record, toast, visit } from "./support";
+import { agree, call, dayFromToday, detail, expectView, record, toast, visit } from "./support";
 
 const queued = (page: Page, title: string) => page.locator(".delegated-row").filter({ hasText: title });
 
-async function settle(request: Parameters<typeof call>[0], paused: boolean) {
-  await call(request, "WorkerService", "SetWorkerSettings", { slots: 2, paused });
+async function settle(request: Parameters<typeof call>[0], paused: boolean, slots = 2) {
+  await call(request, "WorkerService", "SetWorkerSettings", { slots, paused });
 }
 
 test("a delegated task waits while paused, runs once let go, and its end reaches the secretary", async ({ page, request }) => {
@@ -58,30 +58,64 @@ test("the owner delegates a task on its page, sees what is missing, and cancels 
   await settle(request, false);
 });
 
-test("only the delegated tasks of the workgroup on screen are listed", async ({ page, request }) => {
-  await settle(request, true);
-  const made: string[] = [];
-  for (const [title, workgroup] of [["職場の調べもの", "work"], ["家の調べもの", "personal"]]) {
-    const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title, request: "調べる。", runner: "agent", workgroups: [workgroup] });
-    made.push(t.id);
-  }
-  const list = "/tasks?tab=delegated";
-  await visit(page, list, "タスク · 委託");
-  const place = queued(page, "家の調べもの").locator(".delegated-number");
-  await expect(place).toHaveText(/^[1-9]/);
-  const before = (await place.textContent()) ?? "";
-  await page.evaluate(() => {
-    document.cookie = "famulen_workgroup=personal; path=/";
-  });
-  await visit(page, list, "タスク · 委託");
-  await expect(queued(page, "職場の調べもの")).toHaveCount(0);
-  await expect(place).toHaveText(before);
-  await queued(page, "家の調べもの").getByRole("link").click();
-  await expect(detail(page).getByRole("region", { name: "委託の様子" })).toContainText(`並びの ${before} 番目`);
-  await visit(page, "/tasks", "タスク");
-  await expect(page.getByRole("link", { name: /委ねた仕事/ })).toContainText("1 件");
-  for (const id of made) await call(request, "WorkerService", "CancelDelegated", { id });
+test("what keeps a delegated task from starting is told, and none has a place while a slot is free", async ({ page, request }) => {
   await settle(request, false);
+  const first = await record(request, "tasks", "先に済ませる仕事", {});
+  const delegate = (title: string, more: Record<string, unknown>) =>
+    call<{ id: string }>(request, "WorkerService", "DelegateTask", { title, request: "調べる。", runner: "agent", ...more });
+  const made = [await delegate("後の仕事", { blockedBy: [first.id] }), await delegate("先の日の仕事", { start: dayFromToday(3) })];
+  await visit(page, "/tasks?tab=delegated", "タスク · 委託");
+  const held = page.getByRole("region", { name: "始まりを待っている" });
+  await expect(held).toContainText("後の仕事");
+  await expect(page.getByRole("region", { name: "順番を待っている" })).toHaveCount(0);
+  await expect(queued(page, "先の日の仕事")).toContainText("始める日時を待つ");
+  await expect(queued(page, "先の日の仕事")).toContainText("日 から");
+  await expect(queued(page, "後の仕事")).toContainText("先に済ませる仕事の完了を待っている");
+  await expect(queued(page, "後の仕事").locator(".delegated-number")).toHaveText("");
+
+  await queued(page, "後の仕事").getByRole("link", { name: "後の仕事", exact: true }).click();
+  const how = detail(page).getByRole("region", { name: "委託の様子" });
+  await expect(how).toContainText("先に済ませる仕事の完了を待っている");
+  await expect(how).not.toContainText("番目");
+  await how.getByRole("link", { name: "先に済ませる仕事" }).click();
+  await expectView(page, "タスク · 先に済ませる仕事");
+  for (const { id } of made) await call(request, "WorkerService", "CancelDelegated", { id });
+  await call(request, "RecordService", "SaveRecord", { kind: "tasks", id: first.id, fields: [{ name: "Status", value: "cancelled" }] });
+});
+
+test("only the delegated tasks of the workgroup on screen are listed", async ({ page, request }) => {
+  await settle(request, false, 1);
+  const made: string[] = [];
+  // It keeps the one slot until it is cancelled.
+  const busy = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title: "長い仕事", request: "e2e-hold", runner: "agent", workgroups: ["work"] });
+  made.push(busy.id);
+  try {
+    const states = async () => (await call<{ queue?: { state: string }[] }>(request, "WorkerService", "ListDelegated", { task: busy.id })).queue?.map((t) => t.state);
+    await expect.poll(states).toEqual(["running"]);
+    for (const [title, workgroup] of [["職場の調べもの", "work"], ["家の調べもの", "personal"]]) {
+      const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title, request: "調べる。", runner: "agent", workgroups: [workgroup] });
+      made.push(t.id);
+    }
+    const list = "/tasks?tab=delegated";
+    await visit(page, list, "タスク · 委託");
+    const place = queued(page, "家の調べもの").locator(".delegated-number");
+    await expect(page.getByRole("region", { name: "順番を待っている" })).toContainText("家の調べもの");
+    await expect(queued(page, "家の調べもの")).toContainText("順番待ち");
+    await expect(place).toHaveText("2");
+    await page.evaluate(() => {
+      document.cookie = "famulen_workgroup=personal; path=/";
+    });
+    await visit(page, list, "タスク · 委託");
+    await expect(queued(page, "職場の調べもの")).toHaveCount(0);
+    await expect(place).toHaveText("2");
+    await queued(page, "家の調べもの").getByRole("link").click();
+    await expect(detail(page).getByRole("region", { name: "委託の様子" })).toContainText("並びの 2 番目");
+    await visit(page, "/tasks", "タスク");
+    await expect(page.getByRole("link", { name: /委ねた仕事/ })).toContainText("1 件");
+  } finally {
+    for (const id of made.reverse()) await call(request, "WorkerService", "CancelDelegated", { id });
+    await settle(request, false);
+  }
 });
 
 test("how many run at once is saved", async ({ page, request }) => {
