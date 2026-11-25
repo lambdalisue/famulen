@@ -710,7 +710,15 @@ impl ConnectionService for Api {
         }
         // The gateway alone holds the connection's key and judges its tools.
         let tool = format!("http_{}", r.method.to_ascii_lowercase());
-        let call = Call::new(actor(&ctx), &c.id, &tool, input.into());
+        let actor = actor(&ctx);
+        let origin = match actor {
+            crate::SECRETARY => self.app.store.call_origin().or_fail()?,
+            _ => None,
+        };
+        let call = Call {
+            origin,
+            ..Call::new(actor, &c.id, &tool, input.into())
+        };
         let answer = unless_held(self.app.gateway.call(&call).await.or_fail()?)?;
         if answer.is_error {
             return Err(fail(answer.text));

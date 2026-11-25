@@ -3,6 +3,7 @@
 //! and logged like any other call.
 
 use std::future::Future;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -16,6 +17,77 @@ pub struct Outgoing {
     pub text: String,
     pub blocks: Option<Value>,
     pub thread_ts: Option<String>,
+}
+
+/// A conversation on Slack, and who hears what is said in it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Room {
+    /// Empty when it is not known, or it has none.
+    pub name: String,
+    /// Whether only those in it can read it. Not known for one that Slack
+    /// tells nothing of.
+    pub private: Option<bool>,
+    /// People of other organizations are in it.
+    pub shared: bool,
+    pub members: Option<u64>,
+}
+
+/// How long Slack is waited for when it is asked about a conversation.
+const ROOM_PATIENCE: Duration = Duration::from_secs(8);
+
+impl Room {
+    /// As Slack tells of a channel.
+    pub fn of(channel: &Value) -> Self {
+        let flag = |key: &str| channel.get(key).and_then(Value::as_bool);
+        let talk = ["is_im", "is_mpim"].iter().any(|k| flag(k) == Some(true));
+        let private = match flag("is_private") {
+            _ if talk => Some(true),
+            Some(false) if flag("is_group") == Some(true) => Some(true),
+            told => told,
+        };
+        Self {
+            name: channel["name"]
+                .as_str()
+                .filter(|_| !talk)
+                .unwrap_or_default()
+                .to_owned(),
+            private,
+            shared: [
+                "is_shared",
+                "is_ext_shared",
+                "is_org_shared",
+                "is_pending_ext_shared",
+            ]
+            .iter()
+            .any(|k| flag(k) == Some(true)),
+            members: channel["num_members"].as_u64(),
+        }
+    }
+
+    /// In the owner's words, for them to weigh who would read it.
+    pub fn described(&self) -> String {
+        let what = match self.private {
+            Some(false) => "公開のチャンネル",
+            Some(true) if self.name.is_empty() => "ほかの人との DM",
+            Some(true) => "非公開のチャンネル",
+            None => "公開かどうか分からない場（公開として扱う）",
+        };
+        let name = match self.name.as_str() {
+            "" => String::new(),
+            name => format!(" #{name}"),
+        };
+        let mut about = Vec::new();
+        if self.shared {
+            about.push("外部と共有".to_owned());
+        }
+        if let Some(members) = self.members {
+            about.push(format!("{members} 人"));
+        }
+        match about.is_empty() {
+            true => format!("{what}{name}"),
+            false => format!("{what}{name}（{}）", about.join("、")),
+        }
+    }
 }
 
 /// What Famulen does on Slack. A trait so the rest can be tested without it.
@@ -49,6 +121,23 @@ pub trait Slack: Send + Sync {
 
     /// The direct-message channel with `user`.
     fn open_dm(&self, user: &str) -> impl Future<Output = anyhow::Result<String>> + Send;
+
+    /// What Slack tells of a conversation.
+    fn room(&self, channel: &str) -> impl Future<Output = anyhow::Result<Room>> + Send;
+
+    /// [`Slack::room`], or one nothing is known of when Slack does not tell.
+    fn room_or_unknown(&self, channel: &str) -> impl Future<Output = Room> + Send {
+        async move {
+            match tokio::time::timeout(ROOM_PATIENCE, self.room(channel)).await {
+                Ok(Ok(room)) => room,
+                Ok(Err(error)) => {
+                    tracing::debug!(%error, %channel, "Slack did not tell of a conversation");
+                    Room::default()
+                }
+                Err(_) => Room::default(),
+            }
+        }
+    }
 
     /// Show `status` under the thread of a message; empty takes it away.
     fn set_status(
@@ -235,6 +324,13 @@ impl Slack for GatewaySlack {
             .and_then(Value::as_str)
             .map(str::to_owned)
             .ok_or_else(|| anyhow::anyhow!("open_dm answered no channel"))
+    }
+
+    async fn room(&self, channel: &str) -> anyhow::Result<Room> {
+        let answer = self
+            .call("channel_info", json!({ "channel": channel }))
+            .await?;
+        Ok(Room::of(&answer["channel"]))
     }
 
     async fn set_status(&self, channel: &str, thread: &str, status: &str) -> anyhow::Result<()> {

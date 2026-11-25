@@ -19,7 +19,7 @@ use crate::store::StoredInput;
 /// What a guest's session has, as Famulen names it and as the model CLI does:
 /// the answer, and asking the owner first.
 const ANSWER: &str = "send_slack";
-const ANSWER_TOOL: &str = "mcp__famulen__send_slack";
+pub(super) const ANSWER_TOOL: &str = "mcp__famulen__send_slack";
 /// How long the asker's and the channel's names are waited for.
 const PATIENCE: Duration = Duration::from_secs(8);
 

@@ -252,6 +252,7 @@ impl Api {
         let shown: serde_json::Value = serde_json::from_str(&r.input).unwrap_or_default();
         let connection = self.app.permissions.connection_of(&r.tool);
         let decided = shown.get("decides").unwrap_or(&shown);
+        let ticket = self.app.gateway.ticket(r.id).ok().flatten();
         Approval {
             deed: wording::deed(&r.tool, connection.as_ref()),
             place: place(&r.tool, connection.as_ref()),
@@ -260,7 +261,8 @@ impl Api {
                 .into_iter()
                 .map(approval_given)
                 .collect(),
-            once: approvals::once(&self.app.permissions, &r.tool),
+            once: approvals::once(&self.app.permissions, &r.tool)
+                || ticket.as_ref().is_some_and(approvals::discloses),
             questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
                 .into_iter()
                 .map(|q| pb::ApprovalQuestion {
@@ -278,7 +280,11 @@ impl Api {
                     ..Default::default()
                 })
                 .collect(),
-            summary: approvals::summary(&shown).unwrap_or_default().to_owned(),
+            summary: ticket
+                .as_ref()
+                .and_then(approvals::summary)
+                .unwrap_or_default()
+                .to_owned(),
             // What is decided stands apart from the secretary's words.
             input: shown
                 .get("decides")

@@ -325,6 +325,14 @@ mod tests {
     }
 
     #[test]
+    fn every_tool_told_to_answer_nothing_in_confidence_is_one() {
+        let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
+        for plain in famulen_core::disclosure::PLAIN {
+            assert!(tools.iter().any(|t| t.def.name == *plain), "{plain}");
+        }
+    }
+
+    #[test]
     fn the_secretary_has_no_tool_that_changes_a_permission() {
         let tools = tools_from(crate::DESCRIPTOR_SET).unwrap();
         for owners in ["set_permission", "set_permissions", "set_vault_permission"] {

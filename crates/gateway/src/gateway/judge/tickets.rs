@@ -163,6 +163,15 @@ impl Gateway {
         Ok(true)
     }
 
+    /// Whether the call an answered ticket let run was not made yet.
+    pub fn has_pass(&self, ticket: i64) -> anyhow::Result<bool> {
+        Ok(self.store.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM passes WHERE ticket = ?1 AND used = 0)",
+            [ticket],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Tickets new from now on, as they are held.
     pub fn subscribe_held(&self) -> tokio::sync::broadcast::Receiver<Ticket> {
         self.held.subscribe()

@@ -148,32 +148,40 @@ impl ModelAssessor {
     }
 
     async fn weigh(&self, call: &Call) -> anyhow::Result<Assessment> {
-        let tz = self.settings.timezone();
-        if self.models.assignment(Role::Assess)?.is_none() {
-            return Ok(Assessment::Ask {
-                reason: "見極めにモデルが割り当てられていない".into(),
-            });
-        }
-        if !self.models.within_cap(Role::Assess, tz, Utc::now())? {
-            return Ok(Assessment::Ask {
-                reason: "見極めが今日の上限に達した".into(),
-            });
-        }
         let prompt = prompt(call, self.request()?.as_deref(), &self.memory());
-        let completion = match self
-            .models
-            .complete_brief(Role::Assess, tz, INSTRUCTION, &prompt, Some(&schema()))
-            .await
-        {
-            Ok(completion) => completion,
-            Err(error) => {
-                return Ok(Assessment::Ask {
-                    reason: format!("見極めのモデルが使えなかった（{error:#}）"),
-                });
-            }
-        };
-        Ok(read_answer(completion.json.as_ref()))
+        let tz = self.settings.timezone();
+        Ok(
+            match judge(&self.models, tz, INSTRUCTION, &prompt, &schema()).await {
+                Ok(answer) => read_answer(answer.as_ref()),
+                Err(reason) => Assessment::Ask { reason },
+            },
+        )
     }
+}
+
+/// What the assessor's model answers; why it could not, in the owner's words.
+pub(crate) async fn judge(
+    models: &Models,
+    tz: chrono_tz::Tz,
+    instruction: &str,
+    prompt: &str,
+    schema: &Value,
+) -> Result<Option<Value>, String> {
+    let broken = |error: anyhow::Error| format!("見極めのモデルが使えなかった（{error:#}）");
+    if models.assignment(Role::Assess).map_err(broken)?.is_none() {
+        return Err("見極めにモデルが割り当てられていない".into());
+    }
+    if !models
+        .within_cap(Role::Assess, tz, Utc::now())
+        .map_err(broken)?
+    {
+        return Err("見極めが今日の上限に達した".into());
+    }
+    models
+        .complete_brief(Role::Assess, tz, instruction, prompt, Some(schema))
+        .await
+        .map(|completion| completion.json)
+        .map_err(broken)
 }
 
 impl Assessor for ModelAssessor {

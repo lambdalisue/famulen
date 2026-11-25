@@ -49,11 +49,12 @@ const KEYS: &[&str] = &[
 const KEY_CHARS: usize = 32;
 
 /// Whether a request is asked only in the owner's DM: it changes the vault or
-/// a definition, carries questions or words from elsewhere that the owner
+/// a definition, tells what was read in confidence, carries questions or words from elsewhere that the owner
 /// decides on, or may show a secret.
 pub(super) fn kept_to_dm(ticket: &Ticket) -> bool {
     matches!(ticket.connection.as_str(), VAULT | DEFINITIONS)
         || super::asked::is_ask(ticket)
+        || super::discloses(ticket)
         || ticket.shown.get("decides").is_some()
         || may_hold_secret(&ticket.shown)
 }
