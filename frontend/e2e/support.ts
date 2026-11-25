@@ -28,6 +28,20 @@ export async function expectView(page: Page, view: string | RegExp) {
   await expect(page.locator("#composer .view")).toHaveText(view);
 }
 
+/**
+ * Come to a page by its tab, so that the browser and not the server reads what
+ * it shows: what a test answers in the backend's place reaches it only so. The
+ * tabs are there on a wide screen.
+ */
+export async function throughTab(page: Page, path: string) {
+  const size = page.viewportSize();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await visit(page, "/memos", /^メモ/);
+  await page.locator(`a[href="${path}"]:visible`).first().click();
+  await page.waitForURL(`**${path}`);
+  if (size) await page.setViewportSize(size);
+}
+
 /** Open an agent's log from the button at the foot of its settings page. */
 export async function openLog(page: Page, path: string, view: string | RegExp, title: string, button = "ログを見る") {
   await visit(page, path, view);

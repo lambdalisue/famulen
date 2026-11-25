@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { agree, call, dayFromToday, detail, field, record, row, toast, visit } from "./support";
+import { agree, call, dayFromToday, detail, field, record, row, throughTab, toast, visit } from "./support";
 
 const deadline = (what: string, days: number) => [{ name: "Deadlines", items: [{ text: what, fields: [{ name: "On", value: dayFromToday(days) }] }] }];
 
@@ -173,13 +173,7 @@ async function pictured(page: Page, id: string, picture: string) {
     for (const r of json.records ?? [json]) if (r.id === id) r.picture = picture;
     await route.fulfill({ response: answer, json });
   });
-  await visit(page, "/memos", /^メモ/);
-  await page.evaluate(() => {
-    const a = document.createElement("a");
-    a.href = "/things";
-    document.querySelector("main")?.append(a);
-    a.click();
-  });
+  await throughTab(page, "/things");
 }
 
 for (const [name, viewport] of [
