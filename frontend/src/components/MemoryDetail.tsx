@@ -10,7 +10,7 @@ import { Button, EmptyState, ErrorState, LinkButton, List, ListRow, Loading, Sid
 import type { FileChange, MemoryDetail as Detail } from "~/gen/famulen/v1/memory_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { workgroupsQuery } from "~/lib/data";
+import { useWorkgroups } from "~/lib/workgroups";
 import { dateTimeText } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { dreamsQuery, itemHref, memoryQuery, splitMessage, splitSources } from "~/lib/memory";
@@ -121,7 +121,7 @@ function Nights(props: { detail: Detail }) {
 /** Everything that is known of a memory. `history` adds what changed it. */
 export default function MemoryDetail(props: { detail: Detail; history?: boolean; onGone?: () => void }) {
   const owner = useOwner();
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   const d = () => props.detail;
   const item = () => props.detail.item;
   const attrs = () => item()?.attrs ?? {};

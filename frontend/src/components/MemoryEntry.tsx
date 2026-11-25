@@ -1,10 +1,10 @@
-import { createAsync, useNavigate } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { Show } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import { LinkButton, ListRow, Tag } from "~/components/ui";
-import { workgroupsQuery } from "~/lib/data";
+import { useWorkgroups } from "~/lib/workgroups";
 import * as icons from "~/lib/icons";
 import { itemHref } from "~/lib/memory";
 import { workgroupNames } from "~/lib/records";
@@ -51,7 +51,7 @@ export function usePick() {
 /** One remembered item with where it came from, its span, evidence and use. */
 export function EntryRow(props: { item: MemoryItem }) {
   const pick = usePick();
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   const meta = () => {
     const a = props.item.attrs;
     return [spanOf(a), a.ev && `根拠 ${a.ev}`, a.uses && `使った ${a.uses} 回`, workgroupNames(workgroups(), workgroupIds(a))]

@@ -1,7 +1,7 @@
 import { shortTime, weekday, WEEKDAYS } from "~/lib/dates";
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createSignal, For, Show } from "solid-js";
-import type { RoutineRun } from "~/gen/famulen/v1/settings_pb";
+import type { Routine, RoutineRun } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
@@ -11,9 +11,11 @@ import { workgroup } from "~/lib/workgroup";
 import { Button, Callout, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
 import type { RowParts } from "./Row";
 
-const useRuns = () => {
+type RunsOf = (id: string) => Routine | undefined;
+
+const useRuns = (): RunsOf => {
   const routines = createAsync(() => routinesQuery());
-  return (id: string) => routines()?.find((r) => r.id === id);
+  return (id) => routines()?.find((r) => r.id === id);
 };
 
 const skip = (routine: string, run: RoutineRun) =>
@@ -41,10 +43,9 @@ function Running(props: { routine: Rec }) {
 const isOn = (r: Rec) => valueOf(r, "Enabled") !== "no";
 
 /** When a routine next runs, with a way to leave that run out. */
-function Next(props: { routine: Rec }) {
-  const runs = useRuns();
+function Next(props: { routine: Rec; runs: RunsOf }) {
   const owner = useOwner();
-  const next = () => (isOn(props.routine) ? runs(props.routine.id)?.runs[0] : undefined);
+  const next = () => (isOn(props.routine) ? props.runs(props.routine.id)?.runs[0] : undefined);
   const aides = () => (valueOf(props.routine, "Assignee") || OWNER) === SECRETARY;
   return (
     <span class="rec-side">
@@ -76,9 +77,8 @@ function Next(props: { routine: Rec }) {
   );
 }
 
-function When(props: { routine: Rec }) {
-  const runs = useRuns();
-  const info = () => runs(props.routine.id);
+function When(props: { routine: Rec; runs: RunsOf }) {
+  const info = () => props.runs(props.routine.id);
   return (
     <>
       <span>{info()?.when}</span>
@@ -87,14 +87,15 @@ function When(props: { routine: Rec }) {
   );
 }
 
-/** One routine in a list. */
-export function routineParts(r: () => Rec): RowParts {
-  return {
+/** One routine in a list. The runs are read once for all rows, as a row drawn later would have the page wait for a reading of its own. */
+export function useRoutineParts(): (r: () => Rec) => RowParts {
+  const runs = useRuns();
+  return (r) => ({
     lead: () => <Running routine={r()} />,
     title: () => <span classList={{ quiet: !isOn(r()) }}>{r().title}</span>,
-    sub: () => <When routine={r()} />,
-    end: () => <Next routine={r()} />,
-  };
+    sub: () => <When routine={r()} runs={runs} />,
+    end: () => <Next routine={r()} runs={runs} />,
+  });
 }
 
 /** The runs to come, each skipped or put back on its own. */

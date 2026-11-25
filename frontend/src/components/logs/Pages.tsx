@@ -1,6 +1,6 @@
-import { createAsync } from "@solidjs/router";
 import { createSignal } from "solid-js";
 import { Pager } from "~/components/ui";
+import { createLate } from "~/lib/kept";
 
 /** Rows on one page of a log in the log sheet. */
 export const PAGE = 30;
@@ -16,7 +16,7 @@ export type Page<T> = { rows: T[]; more: boolean };
 export function createPages<T extends { id: bigint }>(read: (before: number) => Promise<Page<T>>) {
   // Ids stay numbers here: a query's key is JSON, which cannot hold a bigint.
   const [cursors, setCursors] = createSignal<number[]>([0]);
-  const page = createAsync(() => read(cursors().at(-1) ?? 0));
+  const page = createLate(() => read(cursors().at(-1) ?? 0));
   return {
     rows: () => page()?.rows ?? [],
     loaded: () => page() !== undefined,

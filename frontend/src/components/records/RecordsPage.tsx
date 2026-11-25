@@ -105,7 +105,8 @@ export default function RecordsPage(props: {
     }
     return by.size > 1 ? [...by.values()].sort((a, b) => b.size - a.size || byName(a.name, b.name)) : [];
   });
-  const tab = () => (tabs().some((t) => t.name === asked()) ? asked() : "");
+  // Remembered, as each reading brings the tabs anew and the list is put at its top only by another tab.
+  const tab = createMemo(() => (tabs().some((t) => t.name === asked()) ? asked() : ""));
   const tabHref = (name: string) => (props.tabs ? withParams(props.base, { [props.tabs.param]: name }) : props.base);
   const base = () => tabHref(tab());
   const shown = createMemo(() => (tab() ? n.found().filter((r) => props.tabs?.of(r) === tab()) : n.found()));

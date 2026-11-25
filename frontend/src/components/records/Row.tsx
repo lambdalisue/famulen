@@ -1,7 +1,6 @@
-import { createAsync } from "@solidjs/router";
 import { For, type JSX, Show } from "solid-js";
 import { ListRow, Tag } from "~/components/ui";
-import { workgroupsQuery } from "~/lib/data";
+import { useWorkgroups } from "~/lib/workgroups";
 import { type Rec, workgroupNames } from "~/lib/records";
 
 /** How one record reads in a list, beyond its title. */
@@ -16,7 +15,7 @@ export type RowParts = {
 
 /** What every kind ends its line with: its labels and workgroups. */
 export function RowTags(props: { record: Rec }) {
-  const workgroups = createAsync(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   return (
     <>
       <For each={props.record.labels}>{(l) => <Tag tone="label">{l}</Tag>}</For>

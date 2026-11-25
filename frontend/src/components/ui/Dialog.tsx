@@ -1,8 +1,9 @@
 import { Dialog as Ark } from "@ark-ui/solid/dialog";
-import { type JSX, Show } from "solid-js";
+import { type JSX, Show, Suspense } from "solid-js";
 import { Portal } from "solid-js/web";
 import * as icons from "~/lib/icons";
 import { Button, type ButtonVariant, buttonClass } from "./Button";
+import { Loading } from "./feedback";
 import Icon from "./Icon";
 
 /** A dialog over the page, opened by its trigger or by `open`. */
@@ -44,7 +45,7 @@ export function Dialog(props: {
             <Show when={"description" in props}>
               <Ark.Description class="sub">{props.description}</Ark.Description>
             </Show>
-            {props.children}
+            <Suspense fallback={<Loading />}>{props.children}</Suspense>
           </Ark.Content>
         </Ark.Positioner>
       </Portal>
