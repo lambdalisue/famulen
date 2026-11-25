@@ -6,6 +6,7 @@
 // message itself, the form connectrpc documents for that case.
 #![allow(refining_impl_trait)]
 
+mod attachments;
 mod calendar;
 mod channels;
 mod connections;
@@ -96,9 +97,10 @@ impl Api {
     }
 
     /// The router as an axum app, with a plain liveness probe and the
-    /// notebook's Git.
+    /// notebook's Git and the files the owner attaches.
     pub fn axum(self) -> axum::Router {
         sharing::router()
+            .merge(attachments::router())
             .with_state(self.clone())
             .route("/health", axum::routing::get(|| async { "OK" }))
             .fallback_service(self.router().into_axum_service())

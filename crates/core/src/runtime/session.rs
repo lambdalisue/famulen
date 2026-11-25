@@ -7,11 +7,12 @@ use chrono::Utc;
 use tokio::sync::Notify;
 
 use super::RESTART_AFTER;
+use crate::app::App;
 use crate::claude::session::{self, InFlight, Options, Services};
-use crate::console_log::{ConsoleLog, Event};
+use crate::console_log::Event;
 use crate::input::{Input, Source};
 use crate::slack::web::GatewaySlack;
-use crate::store::Store;
+use crate::store::{Store, StoredInput};
 use crate::workgroups::{ALL, MemberKind, Workgroups};
 
 /// How long a new session waits for the last one's tool calls to finish.
@@ -21,12 +22,12 @@ pub(super) const RELOAD_KEY: &str = "engine.reload";
 
 /// What outlives one engine and ties its sessions together: the tool calls
 /// still running, the session loop's word that the engine may be rebuilt,
-/// and the console it tells of inputs held for the owner.
+/// and the Famulen they run in.
 #[derive(Clone)]
 pub(super) struct SessionLinks {
     pub(super) in_flight: InFlight,
     pub(super) reload_now: Arc<Notify>,
-    pub(super) console: ConsoleLog,
+    pub(super) app: App,
 }
 
 /// The workgroup an input belongs to.
@@ -101,7 +102,7 @@ pub(super) async fn run_session(
         let (handle, task) = match session::spawn(&options, services.clone()) {
             Ok(started) => {
                 if recover_interrupted(&store, settled)?.is_some() && !settled {
-                    links.console.notify(Event::Approvals);
+                    links.app.console.notify(Event::Approvals);
                 }
                 started
             }
@@ -129,7 +130,7 @@ pub(super) async fn run_session(
             // end. The store lets only one input run, so this holds however
             // the turn ends.
             if store.running()?.is_none()
-                && let Some(row) = store.next_pending()?
+                && let Some(row) = next_input(&links.app).await?
             {
                 let (workgroup, text) = deliverable(
                     &workgroups,
@@ -162,6 +163,20 @@ pub(super) async fn run_session(
         }
         tokio::time::sleep(RESTART_AFTER).await;
     }
+}
+
+/// The next input, with what was attached to it here.
+async fn next_input(app: &App) -> anyhow::Result<Option<StoredInput>> {
+    let Some(row) = app.store.next_pending()? else {
+        return Ok(None);
+    };
+    if row.input.attached().is_empty() {
+        return Ok(Some(row));
+    }
+    if let Err(error) = super::files::settle(app, row.id).await {
+        tracing::warn!(%error, id = row.id, "could not fetch what was attached");
+    }
+    app.store.get(row.id)
 }
 
 /// An input given again after its turn was cut off, told so: the turn may
@@ -221,6 +236,7 @@ mod tests {
                 workgroup: "work".into(),
                 view: "タスク".into(),
                 selection: None,
+                attached: Vec::new(),
             },
             text: "これは".into(),
         };
@@ -236,6 +252,7 @@ mod tests {
                 thread_ts: None,
                 user: "U".into(),
                 unmentioned: false,
+                attached: Vec::new(),
             },
             text: "x".into(),
         };
@@ -256,6 +273,7 @@ mod tests {
                 workgroup: "work".into(),
                 view: "タスク".into(),
                 selection: None,
+                attached: Vec::new(),
             },
             text: "x".into(),
         };
@@ -288,6 +306,7 @@ mod tests {
                 workgroup: "work".into(),
                 view: String::new(),
                 selection: None,
+                attached: Vec::new(),
             },
             text: "x".into(),
         };

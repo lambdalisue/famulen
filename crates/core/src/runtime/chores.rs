@@ -78,6 +78,9 @@ pub(super) async fn chores(app: App) {
             app.refresh_calendars().await;
             app.console.notify(Event::Records);
         }
+        if let Err(error) = app.attachments.forget_old(now.timestamp()) {
+            tracing::warn!(%error, "could not throw away old attachments");
+        }
         app.read_every_mail().await;
         app.renew_google_watches(app.receive_url.as_deref()).await;
         if let Err(error) = app.gateway.refresh_due().await {

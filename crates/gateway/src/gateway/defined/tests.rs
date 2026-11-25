@@ -1012,3 +1012,131 @@ async fn a_trade_whose_caller_went_away_still_keeps_the_next_value() {
     .unwrap();
     assert_eq!(seen.lock().unwrap().len(), 1);
 }
+
+/// A service of one file tool, whose `path` is below `base`.
+fn files(base: &str) -> (Gateway, Connection) {
+    let definition = format!(
+        r#"
+format = 1
+id = "files"
+name = "Files"
+
+[login.key]
+label = "Key"
+header = "Authorization"
+value = "Bearer {{token}}"
+
+[transport]
+http = {{ base = "http://127.0.0.1:1" }}
+
+[[tools]]
+name = "fetch"
+description = "Fetch a file."
+method = "GET"
+path = "{base}/{{args.path}}"
+input = {{ type = "object", properties = {{ path = {{ type = "string" }} }}, required = ["path"] }}
+file = true
+"#
+    );
+    let store = Store::open_in_memory().unwrap();
+    let g = Gateway::new(
+        store.clone(),
+        Connections::new(store),
+        reqwest::Client::new(),
+        Some(super::super::vault::tests::scratch()),
+    )
+    .with_definitions(None, &[("files.toml".into(), definition)]);
+    let c = g.add_defined("files", Default::default(), None).unwrap();
+    g.set_api_key(&c.id, "secret-key", "").unwrap();
+    (g, c)
+}
+
+async fn file_host(away: String) -> (String, Arc<Mutex<Vec<String>>>) {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let kept = seen.clone();
+    let app = axum::Router::new().fallback(move |uri: axum::http::Uri, headers: HeaderMap| {
+        kept.lock().unwrap().push(
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned(),
+        );
+        let to = |place: String| (StatusCode::FOUND, [("location", place)]).into_response();
+        let answer = match uri.path() {
+            "/moved" => to("/shot.png".into()),
+            "/away" => to(format!("{away}/login")),
+            "/missing" => StatusCode::NOT_FOUND.into_response(),
+            "/huge" => vec![0_u8; MAX_FILE_BYTES + 1].into_response(),
+            _ => (
+                [("content-type", "image/png; x=1")],
+                vec![0x89, b'P', 0xff, 0],
+            )
+                .into_response(),
+        };
+        async move { answer }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (base, seen)
+}
+
+#[tokio::test]
+async fn a_file_tool_answers_the_bytes_unchanged_and_with_the_login() {
+    let (base, seen) = file_host(String::new()).await;
+    let (g, c) = files(&base);
+
+    for path in ["shot.png", "moved"] {
+        let result = g
+            .call_as_owner(&c, "fetch", json!({ "path": path }))
+            .await
+            .unwrap();
+        let file = Fetched::of(&result).unwrap();
+        assert_eq!(file.mime, "image/png", "{path}");
+        assert_eq!(file.bytes, [0x89, b'P', 0xff, 0], "{path}");
+    }
+    assert_eq!(seen.lock().unwrap()[0], "Bearer secret-key");
+}
+
+#[tokio::test]
+async fn a_file_tool_is_not_sent_on_to_another_host_and_refuses_failures_and_too_much() {
+    let (elsewhere, touched) = file_host(String::new()).await;
+    let (base, _) = file_host(elsewhere).await;
+    let (g, c) = files(&base);
+    let fetch = async |path: &str| g.call_as_owner(&c, "fetch", json!({ "path": path })).await;
+
+    let away = fetch("away").await.unwrap();
+    assert!(away.is_error && away.text == SENT_ELSEWHERE);
+    assert!(fetch("huge").await.is_err());
+    assert!(fetch("missing").await.unwrap().is_error);
+    assert!(touched.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_tool_is_a_get_tool_without_ok_or_same_host() {
+    let written = |method: &str, extra: &str| {
+        crate::definitions::parse(&format!(
+            r#"
+format = 1
+id = "files"
+name = "Files"
+[transport]
+http = {{ base = "https://files.example" }}
+[[tools]]
+name = "fetch"
+description = "Fetch a file."
+method = "{method}"
+path = "/x"
+file = true
+{extra}
+"#
+        ))
+    };
+    assert!(written("GET", "").is_ok());
+    assert!(written("POST", "").is_err());
+    assert!(written("GET", r#"ok = "{/ok}""#).is_err());
+    assert!(written("GET", "same_host = true").is_err());
+}

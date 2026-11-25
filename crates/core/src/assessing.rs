@@ -121,14 +121,14 @@ impl ModelAssessor {
         }
     }
 
-    /// The text of the owner's newest input.
+    /// What the owner's newest input says.
     fn request(&self) -> anyhow::Result<Option<String>> {
         Ok(self
             .store
             .recent_inputs(0, RECENT_INPUTS)?
             .into_iter()
             .find(|(stored, _)| stored.input.sender == Sender::Owner)
-            .map(|(stored, _)| stored.input.text))
+            .map(|(stored, _)| stored.input.gist()))
     }
 
     /// A short summary of what long-term memory holds.

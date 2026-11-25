@@ -2,7 +2,8 @@
 
 use std::sync::Mutex;
 
-use super::web::{Outgoing, Slack};
+use super::web::{Outgoing, Refused, Slack};
+use crate::gateway::Fetched;
 
 #[derive(Default)]
 pub struct FakeSlack {
@@ -12,6 +13,8 @@ pub struct FakeSlack {
     pub updates: Mutex<Vec<(String, String, Outgoing)>>,
     pub reactions: Mutex<Vec<(String, String, String)>>,
     pub statuses: Mutex<Vec<(String, String, String)>>,
+    /// What each file's path holds; any other cannot be fetched.
+    pub files: Mutex<Vec<(String, Fetched)>>,
     pub fail: bool,
     /// Slack refuses messages for one person.
     pub no_ephemeral: bool,
@@ -67,6 +70,21 @@ impl Slack for &FakeSlack {
             .unwrap()
             .push((channel.into(), ts.into(), message));
         Ok(())
+    }
+
+    async fn download(&self, path: &str) -> anyhow::Result<Fetched> {
+        let files = self.files.lock().unwrap();
+        let found = files.iter().find(|(p, _)| p == path);
+        found.map(|(_, file)| file.clone()).ok_or_else(|| {
+            Refused {
+                tool: "download_file".into(),
+                why: match path {
+                    "away" => crate::gateway::SENT_ELSEWHERE.into(),
+                    _ => "answered 404 Not Found".into(),
+                },
+            }
+            .into()
+        })
     }
 
     async fn open_dm(&self, user: &str) -> anyhow::Result<String> {

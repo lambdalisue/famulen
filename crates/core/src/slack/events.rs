@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+use crate::attachments::Attached;
 use crate::input::{Input, Sender, Source};
 
 /// What one Socket Mode frame asks of Famulen.
@@ -20,6 +21,48 @@ pub struct Envelope {
     pub mention: bool,
 }
 
+/// Where Slack keeps files. The bot's token goes nowhere else.
+const FILE_HOST: &str = "https://files.slack.com/";
+
+/// The files of a message.
+fn files(event: &Value) -> Vec<Attached> {
+    event
+        .get("files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|file| {
+            let text = |key: &str| file.get(key).and_then(Value::as_str);
+            let name = text("name").or_else(|| text("title")).unwrap_or_default();
+            // Files of shared channels come without their names and places.
+            if text("file_access") == Some("check_file_info") {
+                return Attached::missing(name, "ほかの組織と共有したチャンネルのファイル");
+            }
+            let external = file.get("is_external").and_then(Value::as_bool) == Some(true);
+            let path = text("url_private_download")
+                .or_else(|| text("url_private"))
+                .filter(|_| !external)
+                .and_then(|url| url.strip_prefix(FILE_HOST));
+            let Some(path) = path else {
+                return Attached::missing(name, "Slack に置かれたファイルではない");
+            };
+            Attached::OnSlack {
+                name: name.to_owned(),
+                mime: text("mimetype").unwrap_or_default().to_owned(),
+                size: file.get("size").and_then(Value::as_u64).unwrap_or_default(),
+                path: path.to_owned(),
+            }
+        })
+        .collect()
+}
+
+/// Whether someone wrote the message, rather than edited it, joined or the
+/// like. One with files may say so in its subtype.
+fn is_written(event: &Value) -> bool {
+    let field = |key: &str| event.get(key).and_then(Value::as_str);
+    matches!(field("subtype"), None | Some("file_share")) && field("bot_id").is_none()
+}
+
 /// A plain message in a channel: what the channel weighs when it is
 /// attending that channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +73,8 @@ pub struct Said {
     pub user: String,
     pub text: String,
     pub by_owner: bool,
+    /// The files in it, when the owner wrote it.
+    pub files: Vec<Attached>,
 }
 
 /// A message the secretary overheard.
@@ -143,21 +188,23 @@ pub fn read_envelope(
 
 fn said_in_channel(event: &Value, owner: &str) -> Option<Said> {
     let field = |key: &str| event.get(key).and_then(Value::as_str);
+    let user = field("user")?;
+    let by_owner = !owner.is_empty() && user == owner;
     let plain = field("type")? == "message"
-        && field("subtype").is_none()
-        && field("bot_id").is_none()
+        && is_written(event)
+        && (by_owner || field("subtype").is_none())
         && matches!(field("channel_type"), Some("channel" | "group"));
     if !plain {
         return None;
     }
-    let user = field("user")?;
     Some(Said {
         channel: field("channel")?.to_owned(),
         ts: field("ts")?.to_owned(),
         thread_ts: field("thread_ts").map(str::to_owned),
         user: user.to_owned(),
         text: field("text").unwrap_or_default().to_owned(),
-        by_owner: !owner.is_empty() && user == owner,
+        by_owner,
+        files: if by_owner { files(event) } else { Vec::new() },
     })
 }
 
@@ -248,9 +295,8 @@ fn message(
         "app_mention" => true,
         _ => false,
     };
-    let is_plain = field("subtype").is_none() && field("bot_id").is_none();
     let user = field("user")?;
-    if !addressed || !is_plain || owner.is_empty() || user != owner {
+    if !addressed || !is_written(event) || owner.is_empty() || user != owner {
         return None;
     }
     Some(Input {
@@ -262,6 +308,7 @@ fn message(
             thread_ts: field("thread_ts").map(str::to_owned),
             user: user.to_owned(),
             unmentioned: false,
+            attached: files(event),
         },
         text: field("text").unwrap_or_default().to_owned(),
     })
@@ -325,6 +372,7 @@ mod tests {
                 user: "U1".into(),
                 text: "それで".into(),
                 by_owner: true,
+                files: Vec::new(),
             }
         );
         let other = said(
@@ -375,6 +423,7 @@ mod tests {
                 thread_ts: None,
                 user: "U1".into(),
                 unmentioned: false,
+                attached: Vec::new(),
             }
         );
     }
@@ -422,6 +471,96 @@ mod tests {
         let mut event = dm("U1");
         event["bot_id"] = json!("B1");
         assert_eq!(read_envelope(&frame(event), "w1", "U1", None).input, None);
+    }
+
+    fn shot() -> Value {
+        json!({
+            "id": "F1", "name": "画面.png", "mimetype": "image/png", "size": 12, "mode": "hosted", "is_external": false,
+            "url_private": "https://files.slack.com/files-pri/T1-F1/shot.png",
+            "url_private_download": "https://files.slack.com/files-pri/T1-F1/download/shot.png",
+        })
+    }
+
+    #[test]
+    fn a_direct_message_with_files_is_an_input_however_slack_marks_it() {
+        for subtype in [None, Some("file_share")] {
+            let mut event = dm("U1");
+            event["files"] = json!([shot()]);
+            if let Some(subtype) = subtype {
+                event["subtype"] = json!(subtype);
+            }
+            let envelope = read_envelope(&frame(event.clone()), "w1", "U1", None);
+            let input = envelope.input.unwrap();
+            assert_eq!(input.text, "hi");
+            assert_eq!(
+                input.attached(),
+                [Attached::OnSlack {
+                    name: "画面.png".into(),
+                    mime: "image/png".into(),
+                    size: 12,
+                    path: "files-pri/T1-F1/download/shot.png".into(),
+                }]
+            );
+            event["text"] = json!("");
+            let envelope = read_envelope(&frame(event.clone()), "w1", "U1", None);
+            assert!(envelope.input.is_some(), "files alone are a message too");
+            event["user"] = json!("U2");
+            let other = read_envelope(&frame(event), "w1", "U1", None);
+            assert!(other.input.is_none());
+        }
+    }
+
+    #[test]
+    fn a_mention_with_files_carries_them() {
+        let event = json!({ "type": "app_mention", "subtype": "file_share", "channel": "C1", "user": "U1", "ts": "2.2", "text": "<@B1> これ", "files": [shot()] });
+        let envelope = read_envelope(&frame(event), "w1", "U1", None);
+        assert!(envelope.mention);
+        assert_eq!(envelope.input.unwrap().attached().len(), 1);
+    }
+
+    #[test]
+    fn only_the_owners_files_said_in_a_channel_are_taken() {
+        let said = |user: &str| {
+            let event = json!({ "type": "message", "subtype": "file_share", "channel_type": "channel", "channel": "C1", "user": user, "ts": "3.1", "text": "これ", "files": [shot()] });
+            read_envelope(&frame(event), "w1", "U1", None).said
+        };
+        assert_eq!(said("U1").unwrap().files.len(), 1);
+        assert_eq!(said("U2"), None);
+        let plain = json!({ "type": "message", "channel_type": "channel", "channel": "C1", "user": "U2", "ts": "3.2", "text": "これ", "files": [shot()] });
+        let said = read_envelope(&frame(plain), "w1", "U1", None).said.unwrap();
+        assert!(said.files.is_empty());
+    }
+
+    #[test]
+    fn a_file_kept_outside_slack_has_nowhere_to_be_fetched() {
+        let place = |file: Value| {
+            let mut event = dm("U1");
+            event["files"] = json!([file]);
+            match &read_envelope(&frame(event), "w1", "U1", None)
+                .input
+                .unwrap()
+                .attached()[0]
+            {
+                Attached::OnSlack { path, .. } => Some(path.clone()),
+                _ => None,
+            }
+        };
+        let mut external = shot();
+        external["is_external"] = json!(true);
+        assert_eq!(place(external), None);
+        for url in [
+            "https://evil.example/files.slack.com/x.png",
+            "https://files.slack.com.evil.example/x.png",
+            "http://files.slack.com/x.png",
+        ] {
+            let mut elsewhere = shot();
+            elsewhere["url_private_download"] = json!(url);
+            assert_eq!(place(elsewhere), None, "{url}");
+        }
+        assert_eq!(
+            place(json!({ "id": "F2", "file_access": "check_file_info" })),
+            None
+        );
     }
 
     #[test]

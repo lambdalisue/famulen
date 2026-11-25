@@ -38,6 +38,7 @@ pub struct App {
     pub calendars: Calendars,
     pub connections: Connections,
     pub console: ConsoleLog,
+    pub attachments: crate::attachments::Attachments,
     pub permissions: Permissions,
     pub models: Models,
     pub workers: crate::workers::Workers,

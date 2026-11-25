@@ -28,6 +28,7 @@ mod redefining;
 mod secrets;
 mod vault;
 pub use commands::{Choice, Question};
+pub use defined::*;
 pub use judge::*;
 pub use keeping::{DELETE_SECRET, DESCRIBE_SECRET, Holder, PUT_SECRET, VAULT};
 pub use model_keys::model_key_name;

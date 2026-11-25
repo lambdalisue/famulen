@@ -64,6 +64,7 @@ impl Api {
                     .unwrap_or_else(|| ALL.to_owned()),
                 view: "タスク".to_owned(),
                 selection: Some(format!("タスク {code}：{title}")),
+                attached: Vec::new(),
             },
             text: format!(
                 "タスク {code}「{title}」をあなたに任せます。進めて、状態と経過を save_record で書いてください。"

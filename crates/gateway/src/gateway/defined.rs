@@ -13,6 +13,7 @@ use crate::template::Context;
 
 mod http;
 mod login;
+pub use http::*;
 
 /// How the gateway names itself to the services it calls; some refuse a
 /// request that does not say.

@@ -5,6 +5,7 @@ pub mod approvals;
 pub mod arrivals;
 pub mod asking;
 pub mod assessing;
+pub mod attachments;
 pub mod calendars;
 pub mod channel;
 pub mod claude;

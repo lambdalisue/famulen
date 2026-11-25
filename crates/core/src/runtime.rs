@@ -6,6 +6,7 @@
 mod chores;
 mod dream;
 mod engine;
+mod files;
 mod open;
 mod prompt;
 mod receive;
@@ -79,7 +80,7 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     let links = SessionLinks {
         in_flight: InFlight::default(),
         reload_now: Arc::new(Notify::new()),
-        console: app.console.clone(),
+        app: app.clone(),
     };
 
     loop {

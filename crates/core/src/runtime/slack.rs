@@ -6,8 +6,9 @@ use super::keep;
 use super::session::workgroup_of;
 use crate::app::App;
 use crate::approvals;
+use crate::attachments;
 use crate::claude::session::Services;
-use crate::console_log::{ConsoleLog, Who};
+use crate::console_log::Who;
 use crate::gateway::Arrival;
 use crate::input::{Input, Sender, Source};
 use crate::lookout::{Item, title_of};
@@ -17,7 +18,6 @@ use crate::slack::clients::SlackClients;
 use crate::slack::events::{self, Said};
 use crate::slack::presence;
 use crate::slack::web::{GatewaySlack, Slack};
-use crate::workgroups::Workgroups;
 
 /// Read one thing the gateway handed the channel from a Slack workspace: the
 /// owner's words become an input, marked as received at once; what others
@@ -53,24 +53,16 @@ pub(super) async fn read_channel(
             take_attended(app, slack, workspace, said, asked, judge, received).await?
             && input.sender == Sender::Owner
         {
-            show_on_console(
-                &app.console,
-                &app.workgroups,
-                &input,
-                &app.workspace_label(workspace),
-            );
+            show_on_console(app, &input, &app.workspace_label(workspace));
+            fetch_files(app, &input);
         }
     }
     if let Some(input) = kept {
         if let Some(slack) = client_of(clients, workspace) {
             show_working(app, slack, &input, received);
         }
-        show_on_console(
-            &app.console,
-            &app.workgroups,
-            &input,
-            &app.workspace_label(workspace),
-        );
+        show_on_console(app, &input, &app.workspace_label(workspace));
+        fetch_files(app, &input);
     }
     for action in actions {
         match services.approvals.answer(&action).await {
@@ -82,6 +74,26 @@ pub(super) async fn read_channel(
         }
     }
     Ok(())
+}
+
+/// Fetch the files of `input`, without holding back what arrives next. Its
+/// turn waits for them all the same.
+fn fetch_files(app: &App, input: &Input) {
+    if input.attached().is_empty() {
+        return;
+    }
+    let (app, key) = (app.clone(), input.dedup_key());
+    tokio::spawn(async move {
+        let settled = async {
+            match app.store.id_of(&key)? {
+                Some(id) => super::files::settle(&app, id).await,
+                None => Ok(()),
+            }
+        };
+        if let Err(error) = settled.await {
+            tracing::warn!(%error, "could not fetch what was attached");
+        }
+    });
 }
 
 fn client_of(
@@ -270,7 +282,8 @@ where
     J: FnOnce(Item, Vec<String>) -> F,
     F: std::future::Future<Output = anyhow::Result<Option<bool>>>,
 {
-    let item = item_of(&said.channel, &said.user, &said.ts, &said.text);
+    let words = attachments::with_names(&said.text, &said.files);
+    let item = item_of(&said.channel, &said.user, &said.ts, &words);
     let before = attention::context(&app.store, workspace, &said.channel)?;
     let addressed = app
         .triage
@@ -301,6 +314,7 @@ where
                     thread_ts: said.thread_ts.clone(),
                     user: said.user.clone(),
                     unmentioned: true,
+                    attached: said.files,
                 },
                 text,
             };
@@ -312,7 +326,7 @@ where
                 &app.store,
                 workspace,
                 &said.channel,
-                &format!("<@{}>: {}", said.user, said.text),
+                &format!("<@{}>: {words}", said.user),
             )?;
             Ok(None)
         }
@@ -441,15 +455,17 @@ async fn learn_bot_dm(
 }
 
 /// Put what the owner said on Slack into the console's one conversation.
-fn show_on_console(console: &ConsoleLog, workgroups: &Workgroups, input: &Input, workspace: &str) {
+pub(super) fn show_on_console(app: &App, input: &Input, workspace: &str) {
     if !matches!(input.source, Source::Slack { .. }) {
         return;
     }
     let meta = serde_json::json!({
         "origin": format!("Slack · {workspace}"),
-        "workgroup": workgroup_of(workgroups, input),
+        "workgroup": workgroup_of(&app.workgroups, input),
+        "input": app.store.id_of(&input.dedup_key()).ok().flatten(),
+        "attached": input.attached(),
     });
-    if let Err(error) = console.add(Who::Owner, &input.text, meta) {
+    if let Err(error) = app.console.add(Who::Owner, &input.text, meta) {
         tracing::warn!(%error, "could not show the Slack message on the console");
     }
 }
@@ -758,6 +774,7 @@ mod tests {
             user: user.into(),
             text: text.into(),
             by_owner: user == "U1",
+            files: Vec::new(),
         }
     }
 
@@ -802,6 +819,39 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn a_file_alone_is_weighed_by_its_name_and_goes_along() {
+        let dir = crate::notebook::testing::TempDir::new("runtime-attend-file");
+        let app = channel_app(dir.path());
+        attention::attend(&app.store, "slack", "C1", Utc::now()).unwrap();
+        let file = attachments::Attached::OnSlack {
+            name: "画面.png".into(),
+            mime: "image/png".into(),
+            size: 12,
+            path: "x".into(),
+        };
+        let mut said = said("U1", "9.7", "");
+        said.files = vec![file.clone()];
+        let mut weighed = String::new();
+
+        let input = attend_to(
+            &app,
+            "slack",
+            said,
+            |item, _| {
+                weighed = item.body;
+                std::future::ready(Ok(Some(true)))
+            },
+            Utc::now(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(weighed.contains("画面.png"));
+        assert_eq!(input.attached(), [file]);
     }
 
     #[tokio::test]

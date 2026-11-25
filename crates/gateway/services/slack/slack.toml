@@ -19,7 +19,7 @@ app_token = { env = "FAMULEN_SLACK_APP_TOKEN", secret = true }
 [login.oauth2]
 authorize = "https://slack.com/oauth/v2/authorize"
 token = "https://slack.com/api/oauth.v2.access"
-query = { scope = "app_mentions:read,channels:history,chat:write,chat:write.customize,groups:history,im:history,im:read,im:write,reactions:write", user_scope = "channels:history,channels:read,groups:history,groups:read,im:history,mpim:history,search:read,users:read" }
+query = { scope = "app_mentions:read,channels:history,chat:write,chat:write.customize,files:read,groups:history,im:history,im:read,im:write,reactions:write", user_scope = "channels:history,channels:read,groups:history,groups:read,im:history,mpim:history,search:read,users:read" }
 tokens = { bot = "{/access_token}", user = "{/authed_user/access_token}" }
 values = { team = "{/team/id}", team_name = "{/team/name}", user = "{/authed_user/id}", bot_user = "{/bot_user_id}", app = "{/app_id}" }
 same = ["team"]
@@ -138,6 +138,14 @@ input = { type = "object", properties = { user = { type = "string", title = "人
 auth = "user"
 ok = "{/ok}"
 
+[[tools]]
+name = "download_file"
+description = "Download a file kept on Slack; `path` is what follows the host in its URL."
+method = "GET"
+path = "https://files.slack.com/{args.path}"
+input = { type = "object", properties = { path = { type = "string", title = "ファイルの場所", description = "ファイルの URL の files.slack.com/ より後" } }, required = ["path"] }
+file = true
+
 [receive.events]
 destination = "channel"
 
@@ -153,3 +161,4 @@ post_ephemeral = "confirm"
 update_message = "allow"
 open_dm = "allow"
 add_reaction = "allow"
+download_file = "confirm"

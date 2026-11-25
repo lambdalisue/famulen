@@ -6,8 +6,8 @@ use std::future::Future;
 
 use serde_json::{Value, json};
 
-use crate::connections::Connections;
-use crate::gateway::Gateway;
+use crate::connections::{Connection, Connections};
+use crate::gateway::{Fetched, Gateway};
 use crate::slack::looks::Looks;
 
 /// A message to post: plain text, and Block Kit blocks when it needs more.
@@ -44,6 +44,9 @@ pub trait Slack: Send + Sync {
         message: Outgoing,
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 
+    /// Fetch the file at `path` below Slack's host of files.
+    fn download(&self, path: &str) -> impl Future<Output = anyhow::Result<Fetched>> + Send;
+
     /// The direct-message channel with `user`.
     fn open_dm(&self, user: &str) -> impl Future<Output = anyhow::Result<String>> + Send;
 
@@ -76,9 +79,9 @@ pub struct GatewaySlack {
 
 /// Slack answered a call by refusing it: it did nothing.
 #[derive(Debug)]
-struct Refused {
-    tool: String,
-    why: String,
+pub(crate) struct Refused {
+    pub(crate) tool: String,
+    pub(crate) why: String,
 }
 
 impl std::fmt::Display for Refused {
@@ -107,13 +110,16 @@ impl GatewaySlack {
         }
     }
 
+    fn connection(&self) -> anyhow::Result<Connection> {
+        self.connections
+            .get(&self.connection)?
+            .ok_or_else(|| anyhow::anyhow!("no connection {}", self.connection))
+    }
+
     /// Call one tool and read its answer as JSON; a failed call is an error
     /// with what the service said.
     async fn call(&self, tool: &str, args: Value) -> anyhow::Result<Value> {
-        let connection = self
-            .connections
-            .get(&self.connection)?
-            .ok_or_else(|| anyhow::anyhow!("no connection {}", self.connection))?;
+        let connection = self.connection()?;
         let result = self.gateway.call_as_owner(&connection, tool, args).await?;
         let answer: Value = serde_json::from_str(&result.text).unwrap_or(Value::Null);
         if result.is_error {
@@ -201,6 +207,25 @@ impl Slack for GatewaySlack {
         args["ts"] = json!(ts);
         self.call("update_message", args).await?;
         Ok(())
+    }
+
+    async fn download(&self, path: &str) -> anyhow::Result<Fetched> {
+        let result = self
+            .gateway
+            .call_as_owner(
+                &self.connection()?,
+                "download_file",
+                json!({ "path": path }),
+            )
+            .await?;
+        if result.is_error {
+            return Err(Refused {
+                tool: "download_file".to_owned(),
+                why: result.text,
+            }
+            .into());
+        }
+        Fetched::of(&result).ok_or_else(|| anyhow::anyhow!("download_file answered no file"))
     }
 
     async fn open_dm(&self, user: &str) -> anyhow::Result<String> {
