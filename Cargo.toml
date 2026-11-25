@@ -13,6 +13,7 @@ repository = "https://github.com/lambdalisue/famulen"
 [workspace.dependencies]
 famulen-core = { path = "crates/core", version = "0.0.0" }
 famulen-api = { path = "crates/api", version = "0.0.0" }
+famulen-executor = { path = "crates/executor", version = "0.0.0" }
 famulen-gateway = { path = "crates/gateway", version = "0.0.0" }
 famulen-notebook = { path = "crates/notebook", version = "0.0.0" }
 anyhow = "1.0.104"

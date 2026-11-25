@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 famulen-api.workspace = true
 famulen-core.workspace = true
+famulen-executor.workspace = true
 axum.workspace = true
 futures.workspace = true
 anyhow.workspace = true
