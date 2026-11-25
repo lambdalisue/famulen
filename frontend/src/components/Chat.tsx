@@ -1,27 +1,28 @@
 import { shortTime } from "~/lib/dates";
-import { A, createAsync, revalidate } from "@solidjs/router";
+import { A, revalidate } from "@solidjs/router";
 import AideIcon from "~/components/AideIcon";
 import ApprovalCard from "~/components/ApprovalCard";
 import { AttachedList, DraftList } from "~/components/Attachments";
 import Markdown from "~/components/Markdown";
 import { createPull } from "~/components/pull";
 import * as icons from "~/lib/icons";
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
-import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, ConsoleMessageSchema, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
 import { api } from "~/lib/api";
 import { ACCEPTED, createDrafts } from "~/lib/attachments";
 import { chatMarkdown } from "~/lib/chat";
 import { workgroup } from "~/lib/workgroup";
-import { inboxQuery, messagesQuery } from "~/lib/data";
+import { createConversation } from "~/lib/conversation";
+import { inboxQuery } from "~/lib/data";
 import { useWaiting } from "~/lib/inbox";
-import { pushed, working } from "~/lib/events";
+import { working } from "~/lib/events";
 import { createKept, createSame } from "~/lib/kept";
 import { excerptOf } from "~/lib/records";
 import { tabNamed } from "~/lib/tabs";
 import { useOwner } from "~/lib/owner";
 import { selection, setSelection, view } from "~/lib/view";
-import { Button, Callout, EmptyState, Icon, IconButton, LinkButton, Tag } from "~/components/ui";
+import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, LinkButton, Tag } from "~/components/ui";
 import { createResizer } from "~/components/ui/resize";
 
 function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
@@ -100,38 +101,27 @@ function Inbox(props: { aide: string }) {
   );
 }
 
+/** What stands before the oldest message read: that more is coming, why it did not, or that it is the first. */
+function Before(props: { talk: ReturnType<typeof createConversation> }) {
+  return (
+    <div class="said-before" data-testid="said-before">
+      <Show when={!props.talk.failed()} fallback={<ErrorState error={props.talk.failed()} onRetry={() => void props.talk.retry()} />}>
+        {props.talk.more() ? "前の発言を読み込んでいる" : "会話の最初です"}
+      </Show>
+    </div>
+  );
+}
+
 const CHAT_WIDTH = 460;
 /** The least the page beside the conversation is left with. */
 const MAIN_LEAST = 560;
 
-/** What was said, as last read for one workgroup, and all that had come when it was asked for. */
-type Talk = { of: string; messages: ConsoleMessage[]; had: Came[] };
-/** A message that came since, for the workgroup it was shown in. */
-type Came = { of: string; m: ConsoleMessage };
-
 /** The conversation column. It stays mounted while pages change. */
 export default function Chat(props: { open: boolean; setOpen: (open: boolean) => void }) {
   const owner = useOwner();
-  const [extra, setExtra] = createSignal<Came[]>([]);
-  const read = createAsync<Talk>((before) => {
-    const of = workgroup();
-    const same = before?.of === of ? before : undefined;
-    const had = untrack(extra);
-    return messagesQuery(of).then(
-      (said) => {
-        // Only the newest are read; what the owner reads further back is not taken away.
-        const first = said[0]?.id;
-        const earlier = same && first !== undefined && !follows ? untrack(messages).filter((m) => m.id < first) : [];
-        return { of, messages: [...earlier, ...said], had };
-      },
-      (e: unknown) => {
-        if (!before) throw e;
-        return same ?? { of, messages: [], had };
-      },
-    );
-  });
-  // Nothing is taken off the screen while it is read again.
-  const loaded = () => read.latest;
+  let follows = true;
+  const talk = createConversation(workgroup, () => follows);
+  const messages = talk.messages;
   const [text, setText] = createSignal("");
   const [error, setError] = createSignal("");
   const attached = createDrafts();
@@ -143,25 +133,12 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
 
   const aide = owner.aide;
   const tz = owner.tz;
-  const messages = createSame(
-    ConsoleMessageSchema,
-    () => {
-      // One pushed again is how it stands now, such as once its files came in.
-      const said = new Map<bigint, ConsoleMessage>();
-      const talk = loaded();
-      for (const m of talk?.messages ?? []) said.set(m.id, m);
-      for (const { of, m } of extra()) if (of === talk?.of) said.set(m.id, m);
-      return [...said.values()].sort((a, b) => Number(a.id - b.id));
-    },
-    (m) => m.id,
-  );
   const last = () => [...messages()].reverse().find((m) => m.who === Speaker.AIDE);
   const waiting = useWaiting();
 
   // The newest stays in sight, whatever grows or shrinks, until the owner
   // scrolls up to read what came before. Then what is read stays where it is:
   // the browser does not see to it, as Safari cannot.
-  let follows = true;
   let was = { top: 0, height: 0, room: 0 };
   /** The message at the top of what is seen and the part of it there, and how far below the top each begins. */
   let reading: { id: string; at: number; part: Element; partAt: number } | undefined;
@@ -184,6 +161,10 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     const by = offset(message, seen) - ((part.isConnected ? partAt : at) - (seen.scrollTop - was.top));
     if (Math.abs(by) >= 1) seen.scrollTop += by;
   };
+  // What came before is read a screen ahead of where the owner is.
+  const readOn = (seen: HTMLElement) => {
+    if (seen.scrollTop < seen.clientHeight) void talk.older();
+  };
   const onScroll = (e: Event & { currentTarget: HTMLElement }) => {
     const seen = e.currentTarget;
     const { scrollTop: top, scrollHeight: height, clientHeight: room } = seen;
@@ -192,6 +173,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     else if (top < was.top && height === was.height && room === was.room) follows = false;
     if (!follows && height !== was.height) hold(seen);
     mark(seen);
+    readOn(seen);
   };
   const toBottom = () => {
     follows = true;
@@ -205,6 +187,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
       if (follows) seen.scrollTop = seen.scrollHeight;
       else hold(seen);
       mark(seen);
+      readOn(seen);
     });
     sized.observe(seen);
     sized.observe(said);
@@ -249,30 +232,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     open: () => props.open,
     setOpen: (open) => props.setOpen(open),
   });
-  let shown = untrack(() => loaded()?.of);
-  createEffect(
-    on(
-      loaded,
-      (talk) => {
-        if (!talk) return;
-        // What came while it was read is not in it, or not as it stands now.
-        setExtra((e) => e.filter((x) => x.of === talk.of && !talk.had.includes(x)));
-        if (shown === talk.of) return;
-        shown = talk.of;
-        toBottom();
-      },
-      { defer: true },
-    ),
-  );
-  createEffect(
-    on(
-      pushed,
-      (came) => {
-        if (came) setExtra((e) => [...e.filter((x) => x.m.id !== came.m.id), came]);
-      },
-      { defer: true },
-    ),
-  );
+  createEffect(on(talk.workgroup, toBottom, { defer: true }));
 
   const send = async (e?: Event) => {
     e?.preventDefault();
@@ -300,7 +260,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
       setText("");
       attached.remove(files);
       setSelection("");
-      setExtra((x) => (x.some((y) => y.m.id === m.id) ? x : [...x, { of, m }]));
+      talk.sent(of, m);
       toBottom();
     } catch (err) {
       setError(message(err));
@@ -345,10 +305,13 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.setOpen(false)} />
           </div>
         </div>
-        <div id="messages" class="messages" ref={list} role="log" aria-label="会話" tabindex="0" onScroll={onScroll}>
+        <div id="messages" class="messages" ref={list} role="log" aria-label="会話" aria-busy={talk.reading()} tabindex="0" onScroll={onScroll}>
           <div class="said" ref={said}>
-            <Show when={messages().length === 0}>
+            <Show when={messages().length === 0 && !talk.more()}>
               <EmptyState>{aide()} に頼みごとを書く。右の画面で見ているものも一緒に渡る。</EmptyState>
+            </Show>
+            <Show when={messages().length > 0 || talk.more()}>
+              <Before talk={talk} />
             </Show>
             <For each={messages()}>{(m) => <Message m={m} aide={aide()} tz={tz()} />}</For>
             <Show when={working()}>

@@ -51,6 +51,8 @@ message ListMessagesRequest {
 message ListMessagesResponse {
   // Oldest first.
   repeated ConsoleMessage messages = 1;
+  // Whether older messages remain.
+  bool more = 2;
 }
 
 message SendRequest {

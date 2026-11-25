@@ -485,8 +485,9 @@ test("what is read far back stays while the conversation, longer than is read at
   for (let i = 0; i < 125; i++) await post(`遠い発言 ${i}`);
   await visit(page, "/", /^ホーム/);
   await page.getByRole("button", { name: "会話を引き上げる" }).click();
-  const oldest = page.getByTestId("message").first();
-  const text = (await oldest.locator(".markdown-body").innerText()).trim();
+  // What is before it is read as it is come near, so it does not stay the first.
+  const text = (await page.getByTestId("message").first().locator(".markdown-body").innerText()).trim();
+  const oldest = page.getByTestId("message").filter({ hasText: text });
   await page.locator("#messages").evaluate((el) => el.scrollTo(0, 0));
   await settled(page);
   const at = async () => Math.round((await oldest.boundingBox())?.y ?? Number.NaN);
