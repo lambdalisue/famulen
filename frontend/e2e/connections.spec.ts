@@ -262,9 +262,11 @@ test.describe("サービス", () => {
   test("the bulk buttons set every read-only tool at once and 既定に戻す clears them", async ({ page, request }) => {
     await visit(page, "/settings/services?id=famulen", "設定 · サービス · famulen");
     const bulk = page.locator(".row").filter({ hasText: "読むだけの道具を" });
+    const first = await page.locator(".tool-row").first().elementHandle();
     await bulk.getByRole("button", { name: "拒否する" }).click();
     await expect(toast(page)).toHaveText("保存した");
     await expect(page.getByRole("radio", { name: "拒否する" }).first()).toBeChecked();
+    expect(await first?.evaluate((el) => el.isConnected), "the row is not drawn anew").toBe(true);
 
     await bulk.getByRole("button", { name: "既定に戻す" }).click();
     await expect(toast(page)).toHaveText("保存した");
