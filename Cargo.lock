@@ -1149,6 +1149,7 @@ dependencies = [
  "dotenvy",
  "famulen-api",
  "famulen-core",
+ "famulen-executor",
  "futures",
  "tokio",
  "tracing",
@@ -1214,6 +1215,20 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "famulen-executor"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "hmac 0.13.0",
+ "rand 0.10.4",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
 ]
 
 [[package]]

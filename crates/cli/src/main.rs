@@ -33,6 +33,11 @@ notebook is kept at first:
 }
 
 fn main() -> anyhow::Result<()> {
+    // Famulen starts itself as the parent of an agent; nothing of its own is
+    // read or opened there.
+    if std::env::args().nth(1).as_deref() == Some(famulen_executor::COMMAND) {
+        return famulen_executor::execute();
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     let ended = runtime.block_on(start())?;
     // Waits for what is still being written, so nothing is cut off halfway.

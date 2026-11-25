@@ -48,6 +48,7 @@ holds one intent, with its spec and tests, and is merged once CI is green.
 | `crates/api/` | `famulen-api`: the API the console and the secretary share, from `proto/` |
 | `crates/gateway/` | `famulen-gateway`: the gateway to outside services, usable without Famulen; its promises in `SPEC.md` |
 | `crates/gateway-cli/` | `famulen-gateway-cli`: the `famulen-gateway` command, for the owner to use a gateway directory without Famulen |
+| `crates/executor/` | `famulen-executor`: the process that is the parent of one agent and outlives Famulen; small, and knows nothing of agents |
 | `crates/cli/` | `famulen`: the binary |
 | `proto/` | the API's definition in protobuf |
 | `frontend/` | the console: a SolidStart app, its Playwright tests in `e2e/` |
@@ -93,6 +94,7 @@ Scoped Commits:
 | `api` | `crates/api/` |
 | `gateway` | `crates/gateway/` |
 | `gateway-cli` | `crates/gateway-cli/` |
+| `executor` | `crates/executor/` |
 | `proto` | `proto/` |
 | `console` | `frontend/` |
 | `deploy` | `Dockerfile`, `compose.yaml`, `.env.sample`, `contrib/` |

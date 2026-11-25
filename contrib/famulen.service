@@ -18,6 +18,9 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Agents at work go on while Famulen is started again: each has a process of
+# its own, which the default would stop along with Famulen.
+KillMode=process
 EnvironmentFile=%h/.config/famulen/env
 ExecStart=%h/.local/bin/famulen %h/.config/famulen/famulen.toml
 Restart=on-failure
