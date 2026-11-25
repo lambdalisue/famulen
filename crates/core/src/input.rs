@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::attachments::{self, Attached};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Sender {
@@ -36,6 +38,9 @@ pub enum Source {
         /// it may not be for the secretary at all.
         #[serde(default)]
         unmentioned: bool,
+        /// The files the owner attached.
+        #[serde(default)]
+        attached: Vec<Attached>,
     },
     /// The owner answered an approval request.
     Approval { id: i64, user: String },
@@ -49,6 +54,9 @@ pub enum Source {
         workgroup: String,
         view: String,
         selection: Option<String>,
+        /// The files the owner attached.
+        #[serde(default)]
+        attached: Vec<Attached>,
     },
     /// A connected service told the secretary something itself.
     Arrival {
@@ -105,6 +113,19 @@ impl Input {
         }
     }
 
+    /// The files the owner attached.
+    pub fn attached(&self) -> &[Attached] {
+        match &self.source {
+            Source::Slack { attached, .. } | Source::Console { attached, .. } => attached,
+            _ => &[],
+        }
+    }
+
+    /// What was said, with the names of the files that came with it.
+    pub fn gist(&self) -> String {
+        attachments::with_names(&self.text, self.attached())
+    }
+
     /// The text the model reads: a header line saying where this came from
     /// and how to answer there, then the message itself.
     pub fn render(&self) -> String {
@@ -116,6 +137,7 @@ impl Input {
                 thread_ts,
                 user,
                 unmentioned,
+                ..
             } => {
                 let thread = thread_ts
                     .as_deref()
@@ -140,6 +162,7 @@ impl Input {
                 workgroup,
                 view,
                 selection,
+                ..
             } => {
                 let selection = selection
                     .as_deref()
@@ -160,7 +183,16 @@ impl Input {
                 run, task, outcome, ..
             } => format!("[worker] task: {task} run: #{run} outcome: {outcome}"),
         };
-        format!("{header}\n{}", self.text)
+        let attached = self.attached();
+        let count = match attached.len() {
+            0 => String::new(),
+            n => format!(" attached: {n}"),
+        };
+        format!(
+            "{header}{count}\n{}{}",
+            attachments::described(attached),
+            self.text
+        )
     }
 
     /// [`Input::render`], with the time it is delivered added to the header,
@@ -186,6 +218,7 @@ mod tests {
                 thread_ts: thread_ts.map(Into::into),
                 user: "U1".into(),
                 unmentioned: false,
+                attached: Vec::new(),
             },
             text: "明日の予定は？".into(),
         }
@@ -217,6 +250,21 @@ mod tests {
             "[slack] workspace: w1 from: owner (U1) channel: D1 ts: 1700.2 unmentioned\n明日の予定は？"
         );
         assert_eq!(input.dedup_key(), slack(None).dedup_key());
+    }
+
+    #[test]
+    fn what_was_attached_is_counted_in_the_header_and_stands_above_the_message() {
+        let mut input = slack(None);
+        if let Source::Slack { attached, .. } = &mut input.source {
+            attached.push(Attached::missing("a.png", "x"));
+        }
+        assert!(
+            input
+                .render()
+                .ends_with(" attached: 1\n- \"a.png\": did not arrive: x\n明日の予定は？")
+        );
+        assert_eq!(input.gist(), "明日の予定は？（添付：a.png）");
+        assert_eq!(slack(None).gist(), "明日の予定は？");
     }
 
     #[test]

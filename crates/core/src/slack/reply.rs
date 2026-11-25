@@ -107,6 +107,7 @@ mod tests {
                 thread_ts: thread_ts.map(Into::into),
                 user: "U1".into(),
                 unmentioned,
+                attached: Vec::new(),
             },
             text: "hi".into(),
         };

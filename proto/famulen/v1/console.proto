@@ -11,6 +11,18 @@ enum Speaker {
   SPEAKER_AIDE = 2;
 }
 
+// A file the owner attached to a message.
+message Attachment {
+  // Where it is: /attachments/<id>. Empty when it did not arrive, or not yet.
+  string id = 1;
+  string name = 2;
+  // What it is, by what it holds.
+  string mime = 3;
+  int64 size = 4;
+  // Why it did not arrive; empty when it did.
+  string problem = 5;
+}
+
 // One message in the conversation on the console.
 message ConsoleMessage {
   int64 id = 1;
@@ -26,6 +38,7 @@ message ConsoleMessage {
   string about = 7;
   // A section the reply suggests opening: calendar, task, memos, …
   string open = 8;
+  repeated Attachment attachments = 9;
 }
 
 message ListMessagesRequest {
@@ -47,6 +60,9 @@ message SendRequest {
   string view = 3;
   // Something the owner picked on screen to talk about.
   string selection = 4;
+  // The files attached, by the ids POST /attachments gave. With one, text may
+  // be empty.
+  repeated string attachments = 5;
 }
 
 message PostMessageRequest {

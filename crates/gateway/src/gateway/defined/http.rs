@@ -3,12 +3,13 @@
 
 use std::collections::BTreeMap;
 
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 use super::super::{Gateway, api_method, api_tools, text_result};
 use super::AGENT;
 use crate::connections::Connection;
-use crate::definitions::{Definition, Method};
+use crate::definitions::{Definition, HttpTool, Method};
 use crate::mcp::ToolResult;
 use crate::template::{Context, text_of};
 
@@ -28,6 +29,56 @@ pub(super) struct Outgoing<'a> {
 const PAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 const MAX_REDIRECTS: usize = 5;
+
+/// How long a file may take to arrive.
+const FILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The largest file a tool answers.
+pub const MAX_FILE_BYTES: usize = 20 * 1024 * 1024;
+
+/// What a file tool answers when it is sent on to another host, such as to
+/// log in.
+pub const SENT_ELSEWHERE: &str = "sent on to another host";
+
+/// A file a tool answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fetched {
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+impl Fetched {
+    fn into_result(self, url: &str) -> ToolResult {
+        let text = format!("{} bytes of {}", self.bytes.len(), self.mime);
+        ToolResult {
+            content: vec![
+                json!({ "type": "text", "text": text }),
+                json!({ "type": "resource", "resource": {
+                    "uri": url,
+                    "mimeType": self.mime,
+                    "blob": base64::engine::general_purpose::STANDARD.encode(&self.bytes),
+                } }),
+            ],
+            structured_content: None,
+            is_error: false,
+            text,
+        }
+    }
+
+    /// The file in what a tool answered.
+    pub fn of(result: &ToolResult) -> Option<Self> {
+        let resource = result
+            .content
+            .iter()
+            .find_map(|part| part.get("resource"))?;
+        Some(Self {
+            mime: resource.get("mimeType")?.as_str()?.to_owned(),
+            bytes: base64::engine::general_purpose::STANDARD
+                .decode(resource.get("blob")?.as_str()?)
+                .ok()?,
+        })
+    }
+}
 
 impl Gateway {
     /// The operations of the OpenAPI description a definition names, read
@@ -172,6 +223,9 @@ impl Gateway {
             {
                 ctx.tokens.insert(name.to_owned(), token);
             }
+            if t.file {
+                return self.fetch_file(def, &ctx, t, auth).await;
+            }
             let out = Outgoing {
                 method: t.method.as_str(),
                 target: &t.path,
@@ -262,37 +316,15 @@ impl Gateway {
             .as_ref()
             .and_then(|h| ctx.render_text(&h.base))
             .unwrap_or_default();
-        let url = if target.starts_with("http://") || target.starts_with("https://") {
-            target.to_owned()
-        } else if same_host {
-            anyhow::bail!("{target:?} is not a URL");
-        } else if target.is_empty() {
-            base.clone()
-        } else {
-            format!(
-                "{}/{}",
-                base.trim_end_matches('/'),
-                target.trim_start_matches('/')
-            )
-        };
+        anyhow::ensure!(!same_host || is_url(target), "{target:?} is not a URL");
+        let url = url_of(&base, target);
         let http = if same_host {
             let base = url::Url::parse(&base)?;
             anyhow::ensure!(
                 on_host(&base, &url::Url::parse(&url)?),
                 "{url} is not on the service's host"
             );
-            reqwest::Client::builder()
-                .timeout(PAGE_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::custom(move |to| {
-                    if to.previous().len() > MAX_REDIRECTS {
-                        to.error("too many redirects")
-                    } else if on_host(&base, to.url()) {
-                        to.follow()
-                    } else {
-                        to.error("sent on to another host")
-                    }
-                }))
-                .build()?
+            following_on(base, PAGE_TIMEOUT)?
         } else {
             self.http.clone()
         };
@@ -313,6 +345,62 @@ impl Gateway {
             "{url} is not text"
         );
         Ok((status, response.text().await?))
+    }
+
+    /// Fetch the file a tool names. A redirect is followed only on the host
+    /// asked, so a login page elsewhere is never taken for the file.
+    async fn fetch_file(
+        &self,
+        def: &Definition,
+        ctx: &Context,
+        tool: &HttpTool,
+        auth: Option<&str>,
+    ) -> anyhow::Result<ToolResult> {
+        let base = def
+            .transport
+            .http
+            .as_ref()
+            .and_then(|h| ctx.render_text(&h.base))
+            .unwrap_or_default();
+        let target = ctx
+            .render_text(&tool.path)
+            .ok_or_else(|| anyhow::anyhow!("the request names a value it does not have"))?;
+        let url = url::Url::parse(&url_of(&base, &target))?;
+        let mut request = following_on(url.clone(), FILE_TIMEOUT)?
+            .get(url.clone())
+            .header(reqwest::header::USER_AGENT, AGENT)
+            .query(&ctx.render_map(&tool.query).iter().collect::<Vec<_>>());
+        if let Some((name, value)) = self.auth_header(def, ctx, auth) {
+            request = request.header(name, value);
+        }
+        let mut response = match request.send().await {
+            Ok(response) => response,
+            Err(error) if error.is_redirect() => {
+                return Ok(text_result(SENT_ELSEWHERE.to_owned(), true));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let status = response.status();
+        if !status.is_success() {
+            return Ok(text_result(format!("answered {status}"), true));
+        }
+        let mime = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(';').next())
+            .unwrap_or("application/octet-stream")
+            .trim()
+            .to_owned();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            anyhow::ensure!(
+                bytes.len() + chunk.len() <= MAX_FILE_BYTES,
+                "the file is larger than {MAX_FILE_BYTES} bytes"
+            );
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(Fetched { mime, bytes }.into_result(url.as_str()))
     }
 
     /// The tool that reads `url`, a link in what `tool` of a connection
@@ -336,6 +424,41 @@ impl Gateway {
         let url = url::Url::parse(url.as_ref()).ok()?;
         on_host(&base, &url).then_some(opens)
     }
+}
+
+fn is_url(target: &str) -> bool {
+    target.starts_with("http://") || target.starts_with("https://")
+}
+
+/// Where a request goes: a whole URL as it is, anything else below `base`.
+fn url_of(base: &str, target: &str) -> String {
+    if is_url(target) {
+        target.to_owned()
+    } else if target.is_empty() {
+        base.to_owned()
+    } else {
+        format!(
+            "{}/{}",
+            base.trim_end_matches('/'),
+            target.trim_start_matches('/')
+        )
+    }
+}
+
+/// A client that follows where it is sent on only on the host of `base`.
+fn following_on(base: url::Url, timeout: std::time::Duration) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::custom(move |to| {
+            if to.previous().len() > MAX_REDIRECTS {
+                to.error("too many redirects")
+            } else if on_host(&base, to.url()) {
+                to.follow()
+            } else {
+                to.error(SENT_ELSEWHERE)
+            }
+        }))
+        .build()
 }
 
 /// Whether `url` is on the host of `base`, where http may become https but

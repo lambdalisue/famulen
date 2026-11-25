@@ -1,5 +1,6 @@
 //! The API as the console and the secretary call it.
 
+mod attachments;
 mod attention;
 mod builtin_permissions;
 mod channels;

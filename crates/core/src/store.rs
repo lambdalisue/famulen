@@ -257,6 +257,15 @@ impl Store {
         Ok(())
     }
 
+    /// Write an input anew, such as with the files that came in after it.
+    pub fn set_input(&self, id: i64, input: &Input) -> anyhow::Result<()> {
+        self.conn().execute(
+            "UPDATE inputs SET body = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, serde_json::to_string(input)?, now()],
+        )?;
+        Ok(())
+    }
+
     /// The running turn ended. Returns its input.
     pub fn end_turn(&self) -> anyhow::Result<Option<i64>> {
         Ok(self
@@ -649,6 +658,11 @@ CREATE TABLE IF NOT EXISTS purchase_settled (
     holding TEXT NOT NULL,
     PRIMARY KEY (mail, holding)
 );
+CREATE TABLE IF NOT EXISTS attachments (
+    id   TEXT PRIMARY KEY,
+    at   INTEGER NOT NULL,
+    body TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS slack_taken (
     workspace TEXT NOT NULL,
     channel   TEXT NOT NULL,
@@ -694,6 +708,7 @@ mod tests {
                 thread_ts: None,
                 user: "U1".into(),
                 unmentioned: false,
+                attached: Vec::new(),
             },
             text: format!("message {ts}"),
         }

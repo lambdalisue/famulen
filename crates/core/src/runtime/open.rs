@@ -134,6 +134,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         calendars: calendars.clone(),
         connections: connections.clone(),
         console: console.clone(),
+        attachments: crate::attachments::Attachments::new(store.clone(), config.workdir()),
         notices: crate::notices::Notices::new(store.clone(), permissions.clone()),
         permissions,
         models: Models::new(store.clone()).with_gateway(gateway.clone()),

@@ -44,6 +44,9 @@ pub enum Event {
     Records,
 }
 
+/// How far back a message is looked for.
+const RECENT: usize = 1000;
+
 #[derive(Clone)]
 pub struct ConsoleLog {
     store: Store,
@@ -83,6 +86,33 @@ impl ConsoleLog {
         };
         self.notify(Event::Message(message.clone()));
         Ok(message)
+    }
+
+    /// Show what came of the files of the message kept as the input `input`.
+    pub fn set_attached(
+        &self,
+        input: i64,
+        attached: &[crate::attachments::Attached],
+    ) -> anyhow::Result<()> {
+        let found = self
+            .recent(RECENT)?
+            .into_iter()
+            .rev()
+            .find(|m| m.meta.get("input").and_then(Value::as_i64) == Some(input));
+        let Some(mut message) = found else {
+            return Ok(());
+        };
+        let attached = serde_json::to_value(attached)?;
+        if message.meta["attached"] == attached {
+            return Ok(());
+        }
+        message.meta["attached"] = attached;
+        self.store.conn().execute(
+            "UPDATE console_messages SET meta = ?2 WHERE id = ?1",
+            params![message.id, message.meta.to_string()],
+        )?;
+        self.notify(Event::Message(message));
+        Ok(())
     }
 
     /// The latest messages, oldest first.

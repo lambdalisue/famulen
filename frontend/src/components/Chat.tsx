@@ -2,6 +2,7 @@ import { shortTime } from "~/lib/dates";
 import { A, createAsync, revalidate } from "@solidjs/router";
 import AideIcon from "~/components/AideIcon";
 import ApprovalCard from "~/components/ApprovalCard";
+import { AttachedList, DraftList } from "~/components/Attachments";
 import Markdown from "~/components/Markdown";
 import { createPull } from "~/components/pull";
 import * as icons from "~/lib/icons";
@@ -9,6 +10,7 @@ import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "s
 import { ApprovalAnswer, type ConsoleMessage, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
 import { api } from "~/lib/api";
+import { ACCEPTED, createDrafts } from "~/lib/attachments";
 import { chatMarkdown } from "~/lib/chat";
 import { workgroup } from "~/lib/workgroup";
 import { inboxQuery, messagesQuery } from "~/lib/data";
@@ -36,9 +38,12 @@ function Message(props: { m: ConsoleMessage; aide: string; tz: string }) {
           {props.m.about ? ` · ${props.m.about}` : ""}
         </span>
       </span>
-      <div class="text">
-        <Markdown text={chatMarkdown(props.m.text)} plain={props.m.text} />
-      </div>
+      <Show when={props.m.text}>
+        <div class="text">
+          <Markdown text={chatMarkdown(props.m.text)} plain={props.m.text} />
+        </div>
+      </Show>
+      <AttachedList files={props.m.attachments} at={props.m.at} />
       <Show when={open()}>
         {(tab) => (
           <LinkButton small icon={tab().icon} href={tab().path}>
@@ -103,6 +108,9 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   const [extra, setExtra] = createSignal<ConsoleMessage[]>([]);
   const [text, setText] = createSignal("");
   const [error, setError] = createSignal("");
+  const attached = createDrafts();
+  const [dropping, setDropping] = createSignal(false);
+  let picker: HTMLInputElement | undefined;
   let list: HTMLDivElement | undefined;
   let said: HTMLDivElement | undefined;
   let say: HTMLTextAreaElement | undefined;
@@ -110,8 +118,10 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   const aide = owner.aide;
   const tz = owner.tz;
   const messages = () => {
-    const seen = new Set((loaded() ?? []).map((m) => m.id));
-    return [...(loaded() ?? []), ...extra().filter((m) => !seen.has(m.id))];
+    // One pushed again is how it stands now, such as once its files came in.
+    const said = new Map<bigint, ConsoleMessage>();
+    for (const m of [...(loaded() ?? []), ...extra()]) said.set(m.id, m);
+    return [...said.values()].sort((a, b) => Number(a.id - b.id));
   };
   const last = () => [...messages()].reverse().find((m) => m.who === Speaker.AIDE);
   const waiting = useWaiting();
@@ -194,7 +204,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
       pushed,
       (m) => {
         if (!m) return;
-        setExtra((e) => (e.some((x) => x.id === m.id) ? e : [...e, m]));
+        setExtra((e) => [...e.filter((x) => x.id !== m.id), m]);
       },
       { defer: true },
     ),
@@ -203,11 +213,27 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   const send = async (e?: Event) => {
     e?.preventDefault();
     const body = text().trim();
-    if (!body) return;
+    const files = attached.drafts();
+    if (!body && files.length === 0) return;
+    if (files.some((f) => f.problem)) {
+      setError("届いていないファイルがある。外すか、添え直してから送る");
+      return;
+    }
+    if (files.some((f) => !f.id)) {
+      setError("ファイルを送っている。届いてから送る");
+      return;
+    }
     setError("");
     try {
-      const m = await api.console.send({ text: body, workgroup: workgroup(), view: view(), selection: selection() });
+      const m = await api.console.send({
+        text: body,
+        workgroup: workgroup(),
+        view: view(),
+        selection: selection(),
+        attachments: files.flatMap((f) => f.id ?? []),
+      });
       setText("");
+      attached.remove(files);
       setSelection("");
       setExtra((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]));
       toBottom();
@@ -216,9 +242,36 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     }
   };
 
+  const attach = (files: Iterable<File>) => {
+    setError("");
+    attached.add(files);
+  };
+  const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+
   return (
     <>
-      <aside class="chat" aria-label={`${aide()} との会話`} ref={column} style={{ "--chat": `${size.width()}px` }} {...pull}>
+      <aside
+        class="chat"
+        classList={{ dropping: dropping() }}
+        aria-label={`${aide()} との会話`}
+        ref={column}
+        style={{ "--chat": `${size.width()}px` }}
+        onDragOver={(e) => {
+          if (!carriesFiles(e)) return;
+          e.preventDefault();
+          setDropping(true);
+        }}
+        onDragLeave={(e) => {
+          if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setDropping(false);
+        }}
+        onDrop={(e) => {
+          setDropping(false);
+          if (!carriesFiles(e)) return;
+          e.preventDefault();
+          attach(e.dataTransfer?.files ?? []);
+        }}
+        {...pull}
+      >
         <div class="m-sheetbar">
           <div class="sheet-grip" />
           <div class="row">
@@ -258,7 +311,35 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
               </button>
             </div>
           </Show>
+          <DraftList
+            drafts={attached.drafts()}
+            onRemove={(d) => {
+              setError("");
+              attached.remove([d]);
+            }}
+          />
           <div class="line">
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              accept={ACCEPTED}
+              data-testid="picker"
+              onChange={(e) => {
+                attach([...(e.currentTarget.files ?? [])]);
+                // So that the same file can be chosen again.
+                e.currentTarget.value = "";
+              }}
+            />
+            <IconButton
+              icon={icons.paperclip}
+              label="ファイルを添える"
+              variant="ghost"
+              class="attach"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => picker?.click()}
+            />
             <label for="say" class="sr">
               {aide()} への頼みごと
             </label>
@@ -269,6 +350,14 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
               placeholder={`${aide()}に頼む`}
               value={text()}
               onInput={(e) => setText(e.currentTarget.value)}
+              onPaste={(e) => {
+                const files = [...(e.clipboardData?.files ?? [])];
+                // Copied cells and the like bring a picture of themselves beside their text.
+                const types = e.clipboardData?.types ?? [];
+                if (files.length === 0 || ["text/plain", "text/html"].every((t) => types.includes(t))) return;
+                e.preventDefault();
+                attach(files);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
               }}

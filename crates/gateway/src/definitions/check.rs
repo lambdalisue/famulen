@@ -258,6 +258,11 @@ fn check_tools(def: &Definition) -> anyhow::Result<()> {
     }
     for tool in &def.tools {
         anyhow::ensure!(is_name(&tool.name), "tool {:?} is not a name", tool.name);
+        anyhow::ensure!(
+            !tool.file || (tool.method == Method::Get && tool.ok.is_none() && !tool.same_host),
+            "{} answers a file, so it is a GET tool without ok or same_host",
+            tool.name
+        );
         if let Some(opens) = &tool.opens {
             anyhow::ensure!(
                 def.tools

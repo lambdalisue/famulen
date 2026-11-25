@@ -47,6 +47,7 @@ export { default as moonStars } from "@tabler/icons/outline/moon-stars.svg?raw";
 export { default as notes } from "@tabler/icons/outline/notes.svg?raw";
 export { default as pencil } from "@tabler/icons/outline/pencil.svg?raw";
 export { default as microphone } from "@tabler/icons/outline/microphone.svg?raw";
+export { default as paperclip } from "@tabler/icons/outline/paperclip.svg?raw";
 export { default as plugConnected } from "@tabler/icons/outline/plug-connected.svg?raw";
 export { default as plus } from "@tabler/icons/outline/plus.svg?raw";
 export { default as refresh } from "@tabler/icons/outline/refresh.svg?raw";

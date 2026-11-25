@@ -402,6 +402,9 @@ pub struct HttpTool {
     /// Send it, and follow where it is sent on, only on the base's host.
     #[serde(default)]
     pub same_host: bool,
+    /// Answer the bytes as a file, followed only on the host asked.
+    #[serde(default)]
+    pub file: bool,
     /// The tool that reads the pages this one's answer links to.
     #[serde(default)]
     pub opens: Option<String>,

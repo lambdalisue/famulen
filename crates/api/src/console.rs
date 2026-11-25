@@ -2,6 +2,7 @@
 
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult, ServiceStream};
 use famulen_core::approvals::{self, Answer};
+use famulen_core::attachments::{Attached, MAX_FILES, TOO_MANY};
 use famulen_core::connections::Connection;
 use famulen_core::console_log::{self, Event, Who};
 use famulen_core::input::{Input, Sender, Source};
@@ -19,6 +20,34 @@ fn meta_text<'a>(m: &'a console_log::Message, key: &str) -> Option<&'a str> {
     m.meta.get(key).and_then(serde_json::Value::as_str)
 }
 
+pub(crate) fn attachment(attached: Attached) -> Attachment {
+    match attached {
+        Attached::Kept(a) => Attachment {
+            id: a.id,
+            name: a.name,
+            mime: a.mime,
+            size: a.size as i64,
+            ..Default::default()
+        },
+        Attached::OnSlack { name, .. } => Attachment {
+            name,
+            ..Default::default()
+        },
+        Attached::Missing { name, why } => Attachment {
+            name,
+            problem: why,
+            ..Default::default()
+        },
+    }
+}
+
+fn attached(m: &console_log::Message) -> Vec<Attached> {
+    m.meta
+        .get("attached")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default()
+}
+
 fn message(m: &console_log::Message) -> ConsoleMessage {
     let meta = |key| meta_text(m, key).unwrap_or_default().to_owned();
     ConsoleMessage {
@@ -34,6 +63,7 @@ fn message(m: &console_log::Message) -> ConsoleMessage {
         origin: meta("origin"),
         about: meta("about"),
         open: meta("open"),
+        attachments: attached(m).into_iter().map(attachment).collect(),
         ..Default::default()
     }
 }
@@ -81,7 +111,7 @@ fn input_item(stored: StoredInput, at: i64) -> InputItem {
         source: source.into(),
         detail,
         sender: stored.input.sender.as_str().into(),
-        text: stored.input.text,
+        text: stored.input.gist(),
         status: stored.status.as_str().into(),
         ..Default::default()
     }
@@ -111,7 +141,7 @@ impl Api {
             .map(|h| {
                 Ok(HeldInput {
                     id: h.id,
-                    text: h.input.text,
+                    text: h.input.gist(),
                     at: self.arrived_at(h.id)?,
                     ..Default::default()
                 })
@@ -201,7 +231,7 @@ impl Api {
                 .app
                 .store
                 .get(turn.input)?
-                .map(|i| i.input.text.chars().take(60).collect())
+                .map(|i| i.input.gist().chars().take(60).collect())
                 .unwrap_or_default(),
             None => String::new(),
         };
@@ -251,9 +281,23 @@ impl ConsoleService for Api {
     ) -> ServiceResult<ConsoleMessage> {
         let r = request.to_owned_message();
         let text = r.text.trim();
-        if text.is_empty() {
+        if text.is_empty() && r.attachments.is_empty() {
             return Err(fail("nothing to send"));
         }
+        if r.attachments.len() > MAX_FILES {
+            return Err(fail(TOO_MANY));
+        }
+        let attached = r
+            .attachments
+            .iter()
+            .map(|id| {
+                let found = self.app.attachments.get(id)?;
+                found
+                    .map(Attached::Kept)
+                    .ok_or_else(|| anyhow::anyhow!("添えたファイルが見つからない。添え直す"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()
+            .or_fail()?;
         let workgroup = self.app.workgroups.resolve(Some(&r.workgroup)).or_fail()?;
         let selection = given(&r.selection).map(str::to_owned);
         let about = [
@@ -270,7 +314,7 @@ impl ConsoleService for Api {
             .add(
                 Who::Owner,
                 text,
-                json!({ "origin": "コンソール", "about": about, "workgroup": workgroup.id }),
+                json!({ "origin": "コンソール", "about": about, "workgroup": workgroup.id, "attached": attached }),
             )
             .or_fail()?;
         let input = Input {
@@ -280,6 +324,7 @@ impl ConsoleService for Api {
                 workgroup: workgroup.id.clone(),
                 view: r.view.clone(),
                 selection,
+                attached,
             },
             text: text.to_owned(),
         };
