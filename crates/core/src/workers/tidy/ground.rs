@@ -50,7 +50,8 @@ impl Ran {
 }
 
 pub(super) trait Ground: Send + Sync {
-    /// Every session of the Adroit a run was started in, those that ended too.
+    /// The session of a run, and every session that goes on in the Adroit it
+    /// was started in.
     fn sessions<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<Vec<Session>>>;
     /// Run a program in `dir`. An error says that it did not run to its end.
     fn run<'a>(
@@ -81,7 +82,15 @@ impl Machine {
 
 impl Ground for Machine {
     fn sessions<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<Vec<Session>>> {
-        Box::pin(async move { sessions(&adroit::sessions(&self.app, run).await?) })
+        Box::pin(async move {
+            let (own, going_on) = adroit::sessions(&self.app, run).await?;
+            let own = session(&own)?;
+            anyhow::ensure!(own.id == run.session, "another session was read");
+            let mut all = sessions(&going_on)?;
+            // One that went on since it was read is listed, and that counts.
+            all.push(own);
+            Ok(all)
+        })
     }
 
     fn run<'a>(
@@ -145,25 +154,27 @@ fn ran(program: &str, output: std::process::Output) -> anyhow::Result<Ran> {
 /// Every session must be read whole: one passed over could be the one that
 /// works where something is removed.
 fn sessions(listed: &Value) -> anyhow::Result<Vec<Session>> {
-    let text = |s: &Value, name: &str| {
-        s[name]
+    listed
+        .as_array()
+        .context("the sessions could not be read")?
+        .iter()
+        .map(session)
+        .collect()
+}
+
+fn session(told: &Value) -> anyhow::Result<Session> {
+    let text = |name: &str| {
+        told[name]
             .as_str()
             .filter(|t| !t.is_empty())
             .map(str::to_owned)
             .with_context(|| format!("a session has no {name}"))
     };
-    listed
-        .as_array()
-        .context("the sessions could not be read")?
-        .iter()
-        .map(|s| {
-            Ok(Session {
-                id: text(s, "id")?,
-                dir: text(s, "dir")?.into(),
-                ended: text(s, "state")? == "ended",
-            })
-        })
-        .collect()
+    Ok(Session {
+        id: text("id")?,
+        dir: text("dir")?.into(),
+        ended: text("state")? == "ended",
+    })
 }
 
 #[cfg(test)]

@@ -388,6 +388,24 @@ async fn one_whose_task_or_session_may_go_on_is_left_without_a_word() {
 }
 
 #[tokio::test]
+async fn a_session_told_both_as_ended_and_as_going_on_goes_on() {
+    let b = bench("tidy-session-both");
+    let w = b.work();
+    b.fake
+        .sessions
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .push(Session {
+            id: w.session.clone(),
+            dir: w.path.clone(),
+            ended: false,
+        });
+    b.is_in_use(&w).await;
+}
+
+#[tokio::test]
 async fn one_whose_run_is_open_is_left() {
     let b = bench("tidy-run-open");
     let w = b.work();

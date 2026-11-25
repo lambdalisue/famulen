@@ -225,8 +225,8 @@ struct Tidy<'a> {
     app: &'a App,
     ground: Arc<dyn Ground>,
     runs: Vec<Run>,
-    /// The sessions, by the connection they were read through.
-    sessions: HashMap<(String, String), Result<Vec<Session>, String>>,
+    /// The sessions read for a run, by its id.
+    sessions: HashMap<i64, Result<Vec<Session>, String>>,
 }
 
 impl<'a> Tidy<'a> {
@@ -328,21 +328,23 @@ impl<'a> Tidy<'a> {
             return Err(kept("どのセッションで動いたか分からない"));
         }
         let sessions = self.sessions_of(run).await?;
-        match sessions.iter().find(|s| s.id == run.session) {
-            Some(session) if session.ended => Ok(()),
-            Some(_) => Err(in_use("セッションが閉じられていない")),
-            None => Err(kept("Adroit がそのセッションを知らない")),
+        let mut own = sessions.iter().filter(|s| s.id == run.session).peekable();
+        if own.peek().is_none() {
+            return Err(kept("Adroit がそのセッションを知らない"));
         }
+        if own.any(|s| !s.ended) {
+            return Err(in_use("セッションが閉じられていない"));
+        }
+        Ok(())
     }
 
     async fn sessions_of(&mut self, run: &Run) -> Result<Vec<Session>, Fate> {
-        let through = (run.connection.clone(), run.order.connection.clone());
-        if !self.sessions.contains_key(&through) {
+        if !self.sessions.contains_key(&run.id) {
             let read = self.ground.sessions(run).await;
             self.sessions
-                .insert(through.clone(), read.map_err(|error| format!("{error:#}")));
+                .insert(run.id, read.map_err(|error| format!("{error:#}")));
         }
-        self.sessions[&through]
+        self.sessions[&run.id]
             .clone()
             .map_err(|error| unsure("Adroit のセッション", error))
     }
