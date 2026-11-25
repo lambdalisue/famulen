@@ -6,6 +6,7 @@ import LookoutEdit from "~/components/LookoutEdit";
 import { ROUTES } from "~/components/LookoutFields";
 import LookoutForm from "~/components/LookoutForm";
 import LookoutInterval from "~/components/LookoutInterval";
+import PastPurchases from "~/components/PastPurchases";
 import RoleModel from "~/components/RoleModel";
 import { type LookoutDefault, LookoutRoute, type LookoutSource } from "~/gen/famulen/v1/lookout_pb";
 import { Role } from "~/gen/famulen/v1/settings_pb";
@@ -218,6 +219,7 @@ export default function Lookout() {
           </Show>
         </Section>
         <IntervalDefaults defaults={w()?.defaults ?? []} sources={w()?.sources ?? []} />
+        <PastPurchases />
       </div>
       <LogSheet title="見張りのログ">
         <LookoutLog />

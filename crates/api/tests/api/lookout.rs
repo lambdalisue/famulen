@@ -216,3 +216,36 @@ async fn a_lookout_follows_the_default_until_given_its_own_interval_and_back() {
     assert_eq!(back.get("ownInterval"), None);
     assert_eq!(back["intervalMinutes"], 20);
 }
+
+#[tokio::test]
+async fn a_mailbox_is_gone_back_over_from_a_day_on_and_stopped() {
+    let dir = temp();
+    let api = open(&dir);
+    let google = api
+        .app()
+        .gateway
+        .add_defined("google", Default::default(), None)
+        .unwrap()
+        .id;
+
+    let before = call(&api, "LookoutService/ListPastPurchases", json!({})).await;
+    assert_eq!(before["mailboxes"][0]["connection"], google.as_str());
+    assert!(before["mailboxes"][0]["state"].is_null(), "{before}");
+
+    let started = call(
+        &api,
+        "LookoutService/StartPastPurchases",
+        json!({"connection": google, "since": "2024-03-01"}),
+    )
+    .await;
+    assert_eq!(started["state"], "PAST_PURCHASES_STATE_GOING");
+    assert_eq!(started["month"], "2024-03-01");
+
+    let stopped = call(
+        &api,
+        "LookoutService/StopPastPurchases",
+        json!({"id": google}),
+    )
+    .await;
+    assert_eq!(stopped["state"], "PAST_PURCHASES_STATE_STOPPED");
+}

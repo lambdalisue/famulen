@@ -1,5 +1,5 @@
 import { type APIRequestContext, expect, test } from "@playwright/test";
-import { agree, call, expectView, toast, visit } from "./support";
+import { agree, call, dayFromToday, expectView, record, toast, visit } from "./support";
 
 type Detail = { tools: { name: string }[] };
 type Connected = { connection: { id: string } };
@@ -681,6 +681,41 @@ test.describe("見張り", () => {
     } finally {
       await call(request, "ConnectionService", "DeleteConnection", { id });
     }
+  });
+
+  test("past mail is gone back over from the lookout's page, with how far it got, and stopped", async ({ page, request }) => {
+    const mailbox = (more: object) => ({ connection: "g", name: "Google · me@example.com", ...more });
+    let now: object = mailbox({});
+    const asked: unknown[] = [];
+    await page.route("**/famulen.v1.LookoutService/ListPastPurchases*", (route) => route.fulfill({ json: { mailboxes: [now] } }));
+    await page.route("**/famulen.v1.LookoutService/StartPastPurchases", (route) => {
+      asked.push(route.request().postDataJSON());
+      now = mailbox({ state: "PAST_PURCHASES_STATE_GOING", since: "2021-01-01", month: "2022-05-01", found: "12", left: "3", added: "4" });
+      return route.fulfill({ json: now });
+    });
+    await page.route("**/famulen.v1.LookoutService/StopPastPurchases", (route) => {
+      now = { ...now, state: "PAST_PURCHASES_STATE_STOPPED" };
+      return route.fulfill({ json: now });
+    });
+    await visit(page, "/settings/lookout", "設定 · 見張り");
+    // The page came from the server, which has no such account; it is read anew.
+    await record(request, "memos", "さかのぼりの頁を読み直させる");
+    const row = page.locator(".past-purchases");
+    await expect(row).toContainText("まださかのぼっていない");
+
+    await row.getByLabel("さかのぼる年数").selectOption({ label: "5 年" });
+    await row.getByRole("button", { name: "さかのぼる", exact: false }).click();
+    await agree(page, "さかのぼる");
+    await expect(row).toContainText("2022-05 を探している");
+    await expect(row).toContainText("見つけたメール 12 通 · 残り 3 通 · 足した物 4 件");
+    const year = Number(dayFromToday(0).slice(0, 4)) - 5;
+    expect(asked).toEqual([{ connection: "g", since: expect.stringMatching(new RegExp(`^${year}-`)) }]);
+
+    await row.getByRole("button", { name: /止める/ }).click();
+    await expect(row).toContainText("2022-05 で止めている");
+    await row.getByRole("button", { name: /続ける/ }).click();
+    await expect(row).toContainText("2022-05 を探している");
+    expect(asked[1]).toEqual({ connection: "g", since: "2021-01-01" });
   });
 
   test("broken JSON arguments are refused with the reason and the dialog stays open", async ({ page, request }) => {

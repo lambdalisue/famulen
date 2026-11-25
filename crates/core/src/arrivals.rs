@@ -55,7 +55,7 @@ impl std::fmt::Display for Refused {
 impl std::error::Error for Refused {}
 
 /// Whether Google answered that what was asked for is not there (any more).
-fn is_gone(error: &anyhow::Error) -> bool {
+pub(crate) fn is_gone(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<Refused>()
         .and_then(|r| serde_json::from_str::<Value>(&r.text).ok())

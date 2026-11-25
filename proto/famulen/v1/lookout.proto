@@ -187,6 +187,45 @@ message GiveFeedbackRequest {
   bool wanted = 2;
 }
 
+// How going back over a mailbox for what the owner bought stands.
+enum PastPurchasesState {
+  // It was never started.
+  PAST_PURCHASES_STATE_UNSPECIFIED = 0;
+  PAST_PURCHASES_STATE_GOING = 1;
+  PAST_PURCHASES_STATE_STOPPED = 2;
+  PAST_PURCHASES_STATE_DONE = 3;
+}
+
+// One mailbox that can be gone back over.
+message PastPurchases {
+  string connection = 1;
+  // The connection's name and account.
+  string name = 2;
+  PastPurchasesState state = 3;
+  // From which day on, and the month that is searched next: YYYY-MM-DD.
+  string since = 4;
+  string month = 5;
+  // Mails found, and those still to be read.
+  int64 found = 6;
+  int64 left = 7;
+  // Things added from them.
+  int64 added = 8;
+  // Why it does not get on, or empty.
+  string problem = 9;
+  // Every month was searched; what was found may still be read.
+  bool searched = 10;
+}
+
+message PastPurchasesList {
+  repeated PastPurchases mailboxes = 1;
+}
+
+message StartPastPurchasesRequest {
+  string connection = 1;
+  // YYYY-MM-DD.
+  string since = 2;
+}
+
 // Watching the outside world and passing on only what concerns the owner.
 service LookoutService {
   rpc GetLookout(Empty) returns (LookoutOverview) {
@@ -210,4 +249,11 @@ service LookoutService {
     option (confirm) = true;
   }
   rpc GiveFeedback(GiveFeedbackRequest) returns (Empty);
+  // The mailboxes that can be gone back over for what the owner bought.
+  rpc ListPastPurchases(Empty) returns (PastPurchasesList) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Go back over a mailbox, or go on; mail read before is not read again.
+  rpc StartPastPurchases(StartPastPurchasesRequest) returns (PastPurchases);
+  rpc StopPastPurchases(ByName) returns (PastPurchases);
 }
