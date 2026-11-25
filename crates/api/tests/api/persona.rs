@@ -169,3 +169,36 @@ async fn a_gender_slack_would_not_follow_is_kept_and_the_owner_is_told() {
     assert_eq!(later["gender"], "PERSONA_GENDER_FEMALE");
     assert_eq!(later["troubles"], json!(null));
 }
+
+#[tokio::test]
+async fn a_token_pasted_for_a_slack_app_goes_into_the_vault_and_is_not_read_back() {
+    let dir = temp();
+    let base = slack_refusing_icons().await;
+    define(
+        &dir,
+        "slack",
+        &include_str!("../../../gateway/services/slack/slack.toml")
+            .replace("https://slack.com/api", &format!("{base}/api")),
+    );
+    let api = open(&dir);
+    api.app()
+        .gateway
+        .add_defined("slack", [("app".into(), "A1".into())].into(), None)
+        .unwrap();
+
+    let answer = call(
+        &api,
+        "SettingsService/LetSlackAppFollow",
+        json!({ "app": "A1", "refreshToken": "xoxe-1-secret" }),
+    )
+    .await;
+
+    let trouble = answer["troubles"][0].as_str().unwrap();
+    assert!(trouble.contains("app_edit_disabled"), "{trouble}");
+    let apps = call(&api, "SettingsService/ListSlackApps", json!({})).await;
+    assert_eq!(apps["apps"][0]["id"], "A1");
+    assert_eq!(apps["apps"][0]["follows"], true);
+    let row = api.app().connections.get("slack").unwrap().unwrap();
+    assert!(row.secret.account.is_empty());
+    assert!(!format!("{answer}{apps}").contains("xoxe-1-secret"));
+}

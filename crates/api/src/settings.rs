@@ -8,7 +8,7 @@ use famulen_core::writable;
 use serde::{Deserialize, Serialize};
 
 use crate::pb::*;
-use crate::{Api, OrFail, changed, fail, given};
+use crate::{Api, OrFail, actor, changed, fail, given};
 
 const TILES_KEY: &str = "home.tiles";
 const SETUP_HIDDEN: &str = "home.setup.hidden";
@@ -229,6 +229,44 @@ impl SettingsService for Api {
         Response::ok(Persona {
             troubles,
             ..self.persona().or_fail()?
+        })
+    }
+
+    async fn list_slack_apps(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<ListSlackAppsResponse> {
+        let apps = self.app.slack_apps().or_fail()?;
+        Response::ok(ListSlackAppsResponse {
+            apps: apps
+                .into_iter()
+                .map(|a| SlackApp {
+                    id: a.id,
+                    workspaces: a.workspaces,
+                    follows: a.follows,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        })
+    }
+
+    async fn let_slack_app_follow(
+        &self,
+        ctx: RequestContext,
+        request: ServiceRequest<'_, LetSlackAppFollowRequest>,
+    ) -> ServiceResult<LetSlackAppFollowResponse> {
+        let r = request.to_owned_message();
+        let troubles = self
+            .app
+            .let_slack_app_follow(actor(&ctx), &r.app, &r.refresh_token)
+            .await
+            .or_fail()?;
+        changed(self);
+        Response::ok(LetSlackAppFollowResponse {
+            troubles,
+            ..Default::default()
         })
     }
 

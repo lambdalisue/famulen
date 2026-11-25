@@ -147,11 +147,43 @@ message SetNotebookSharingRequest {
   bool on = 1;
 }
 
+// A Slack app the connected workspaces share.
+message SlackApp {
+  string id = 1;
+  repeated string workspaces = 2;
+  // Its own icon follows the secretary's portrait.
+  bool follows = 3;
+}
+
+message ListSlackAppsResponse {
+  repeated SlackApp apps = 1;
+}
+
+message LetSlackAppFollowRequest {
+  string app = 1;
+  // The refresh token of a Slack app configuration token; it goes into the
+  // vault.
+  string refresh_token = 2;
+}
+
+message LetSlackAppFollowResponse {
+  // Why the icon was not set; the token is kept.
+  repeated string troubles = 1;
+}
+
 service SettingsService {
   rpc GetPersona(Empty) returns (Persona) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
   rpc UpdatePersona(UpdatePersonaRequest) returns (Persona);
+  rpc ListSlackApps(Empty) returns (ListSlackAppsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // Only the owner lets Famulen change a Slack app.
+  rpc LetSlackAppFollow(LetSlackAppFollowRequest) returns (LetSlackAppFollowResponse) {
+    option (console_only) = true;
+  }
   rpc GetHome(Empty) returns (Home) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

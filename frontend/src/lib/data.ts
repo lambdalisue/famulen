@@ -8,6 +8,7 @@ export const personaQuery = query(() => api.settings.getPersona({}), "persona");
 export const writableQuery = query(async () => (await api.settings.getWritablePlaces({})).paths, "writable");
 export const notebookPlaceQuery = query(() => api.settings.getNotebookPlace({}), "notebookPlace");
 export const notebookSharingQuery = query(() => api.settings.getNotebookSharing({}), "notebookSharing");
+export const slackAppsQuery = query(async () => (await api.settings.listSlackApps({})).apps, "slackApps");
 export const slackNamesQuery = query(async () => (await api.channels.listSlackNames({})).names, "slackNames");
 export const noticesQuery = query((endpoint: string) => api.notices.getNotices({ endpoint }), "notices");
 export const messagesQuery = query(

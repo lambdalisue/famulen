@@ -25,32 +25,163 @@ const LIMIT: Duration = Duration::from_secs(60);
 /// Held while icons are set, so the last portrait chosen is the one left.
 pub type AppIcons = Arc<tokio::sync::Mutex<()>>;
 
+/// A Slack app the connected workspaces share, and whether its icon follows
+/// the secretary's portrait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlackApp {
+    pub id: String,
+    pub workspaces: Vec<String>,
+    pub follows: bool,
+}
+
+/// What the owner copied instead of a refresh token, if it is not one.
+fn not_a_refresh_token(text: &str) -> Option<&'static str> {
+    if text.starts_with("xoxe.") || text.starts_with("xoxp-") {
+        Some("それは Access Token。下に並ぶ Refresh Token（xoxe- で始まる）を写す")
+    } else if text.starts_with("xapp-") {
+        Some(
+            "それは App-Level Token。アプリの一覧の下で作った Refresh Token（xoxe- で始まる）を写す",
+        )
+    } else if !text.starts_with("xoxe-") || text.contains(char::is_whitespace) {
+        Some("Refresh Token は xoxe- で始まる。全部を写して貼る")
+    } else {
+        None
+    }
+}
+
+/// What the owner can do about why Slack refused.
+fn remedy(why: &str) -> Option<&'static str> {
+    if ["invalid_refresh_token", "token_expired", "token_revoked"]
+        .iter()
+        .any(|e| why.contains(e))
+    {
+        Some("トークンが古いか、もう使われている。作り直して貼る")
+    } else if [
+        "access_denied",
+        "no_permission",
+        "invalid_app",
+        "team_access_not_granted",
+    ]
+    .iter()
+    .any(|e| why.contains(e))
+    {
+        Some(
+            "別のワークスペースのトークンかもしれない。このアプリを作ったワークスペースで作り直して貼る",
+        )
+    } else {
+        None
+    }
+}
+
 impl App {
+    /// The Slack apps of the connected workspaces.
+    pub fn slack_apps(&self) -> anyhow::Result<Vec<SlackApp>> {
+        let mut apps: Vec<SlackApp> = Vec::new();
+        for (id, c, follows) in self.slack_app_connections()? {
+            let name = if c.account.is_empty() {
+                c.name
+            } else {
+                c.account
+            };
+            match apps.iter_mut().find(|a| a.id == id) {
+                Some(app) => {
+                    app.workspaces.push(name);
+                    app.follows |= follows;
+                }
+                None => apps.push(SlackApp {
+                    id,
+                    workspaces: vec![name],
+                    follows,
+                }),
+            }
+        }
+        Ok(apps)
+    }
+
+    /// Keep what lets Famulen change the Slack app `id`, as `actor` pasted
+    /// it, and set the app's icon now; what went wrong with the icon.
+    pub async fn let_slack_app_follow(
+        &self,
+        actor: &str,
+        id: &str,
+        token: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let token = token.trim();
+        if let Some(why) = not_a_refresh_token(token) {
+            anyhow::bail!("{why}");
+        }
+        let of_app: Vec<_> = self
+            .slack_app_connections()?
+            .into_iter()
+            .filter(|(app, ..)| app == id)
+            .collect();
+        // Put where one already is, so an old one is not left beside it.
+        let (_, connection, _) = of_app
+            .iter()
+            .find(|(.., follows)| *follows)
+            .or_else(|| of_app.first())
+            .ok_or_else(|| anyhow::anyhow!("no Slack app {id} is connected"))?;
+        self.gateway
+            .set_account_value(actor, &connection.id, TOKEN_FIELD, token)
+            .await?;
+        // Waited for until Slack answers: told that it is not done yet, the owner
+        // would paste again a token already spent.
+        Ok(self.set_slack_app_icons_within(LIMIT * 2, Some(id)).await)
+    }
+
+    /// The Slack connections whose app is known, with the app and whether
+    /// each holds what lets Famulen change it.
+    fn slack_app_connections(&self) -> anyhow::Result<Vec<(String, Connection, bool)>> {
+        let mut found = Vec::new();
+        for c in self.connections.list()? {
+            if c.kind != DEFINITION {
+                continue;
+            }
+            if let Some(app) = self.gateway.account_values(&c.id)?.remove("app") {
+                let follows = self.gateway.account_names(&c.id)?.contains(TOKEN_FIELD);
+                found.push((app, c, follows));
+            }
+        }
+        Ok(found)
+    }
+
     /// Set the icon of every Slack app a connection may change to the
     /// secretary's portrait; what went wrong, for the owner.
     pub async fn set_slack_app_icons(&self) -> Vec<String> {
+        self.set_slack_app_icons_within(PATIENCE, None).await
+    }
+
+    async fn set_slack_app_icons_within(
+        &self,
+        patience: Duration,
+        only: Option<&str>,
+    ) -> Vec<String> {
+        let only = only.map(str::to_owned);
         // Apart from the request: a token already traded for must be kept
         // even when whoever asked is gone.
         let app = self.clone();
         let mut work = tokio::spawn(async move {
-            let troubles = app.slack_app_icon_troubles().await.unwrap_or_else(|error| {
-                vec![format!(
-                    "Slack のアプリのアイコンを替えられなかった（{error}）"
-                )]
-            });
+            let troubles = app
+                .slack_app_icon_troubles(only.as_deref())
+                .await
+                .unwrap_or_else(|error| {
+                    vec![format!(
+                        "Slack のアプリのアイコンを替えられなかった（{error}）"
+                    )]
+                });
             for trouble in &troubles {
                 tracing::warn!(%trouble, "the Slack app's icon was not set");
                 app.journal.record("setting", trouble);
             }
             troubles
         });
-        match tokio::time::timeout(PATIENCE, &mut work).await {
+        match tokio::time::timeout(patience, &mut work).await {
             Ok(done) => done.unwrap_or_else(|error| vec![error.to_string()]),
             Err(_) => vec!["Slack のアプリのアイコンは、まだ替わっていない".into()],
         }
     }
 
-    async fn slack_app_icon_troubles(&self) -> anyhow::Result<Vec<String>> {
+    async fn slack_app_icon_troubles(&self, only: Option<&str>) -> anyhow::Result<Vec<String>> {
         let _one = self.slack_app_icons.lock().await;
         let icon = looks::url(Gender::load(&self.store)?);
         let mut set = BTreeSet::new();
@@ -60,6 +191,9 @@ impl App {
                 continue;
             }
             let app_id = self.gateway.account_values(&c.id)?.remove("app");
+            if only.is_some() && app_id.as_deref() != only {
+                continue;
+            }
             // Workspaces share an app, whose icon is one.
             if app_id.as_ref().is_some_and(|app| set.contains(app)) {
                 continue;
@@ -78,7 +212,9 @@ impl App {
                 } else {
                     c.account
                 };
-                format!("{whose} の Slack のアプリのアイコンを替えられなかった（{error}）")
+                let why = error.to_string();
+                let remedy = remedy(&why).map(|r| format!("。{r}")).unwrap_or_default();
+                format!("{whose} の Slack のアプリのアイコンを替えられなかった（{why}）{remedy}")
             })
             .collect())
     }
@@ -248,5 +384,77 @@ mod tests {
         assert!(app.set_slack_app_icons().await.is_empty());
 
         assert_eq!(icons_set(&seen).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_pasted_token_is_kept_once_for_the_app_and_its_icon_is_set_at_once() {
+        let dir = TempDir::new("app-icon-paste");
+        let (app, seen) = famulen(&dir).await;
+        workspace(&app, &[("app", "A1"), ("team_name", "Acme")]);
+        workspace(&app, &[("app", "A1"), ("team_name", "Beta")]);
+        let shown = |follows| SlackApp {
+            id: "A1".into(),
+            workspaces: vec!["Acme".into(), "Beta".into()],
+            follows,
+        };
+        assert_eq!(app.slack_apps().unwrap(), [shown(false)]);
+
+        for token in [" xoxe-1-one\n", "xoxe-1-two"] {
+            let troubles = app.let_slack_app_follow("owner", "A1", token).await;
+            assert_eq!(troubles.unwrap(), Vec::<String>::new());
+        }
+
+        assert_eq!(app.slack_apps().unwrap(), [shown(true)]);
+        let held = |id| app.gateway.account_names(id).unwrap().contains(TOKEN_FIELD);
+        assert_eq!((held("slack"), held("slack-2")), (true, false));
+        let set: Vec<String> = icons_set(&seen).into_iter().map(|s| s.0).collect();
+        assert_eq!(set, ["Bearer for-xoxe-1-one", "Bearer for-xoxe-1-two"]);
+    }
+
+    #[tokio::test]
+    async fn pasting_for_one_app_leaves_the_other_apps_alone() {
+        let dir = TempDir::new("app-icon-only");
+        let (app, seen) = famulen(&dir).await;
+        workspace(&app, &[("app", "A1")]);
+        workspace(&app, &[("app", "A2"), ("config_refresh", "bad")]);
+
+        let troubles = app.let_slack_app_follow("owner", "A1", "xoxe-1-a").await;
+
+        assert_eq!(troubles.unwrap(), Vec::<String>::new());
+        assert_eq!(icons_set(&seen).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn what_is_not_a_refresh_token_is_named_and_kept_nowhere() {
+        let dir = TempDir::new("app-icon-mistaken");
+        let (app, seen) = famulen(&dir).await;
+        workspace(&app, &[("app", "A1")]);
+
+        for (pasted, says) in [
+            ("xoxe.xoxp-1-a", "Access Token"),
+            ("xapp-1-a", "App-Level Token"),
+            ("xoxe-1-a xoxe-1-b", "全部を写して"),
+            ("", "xoxe-"),
+        ] {
+            let error = app.let_slack_app_follow("owner", "A1", pasted).await;
+            let error = error.unwrap_err().to_string();
+            assert!(error.contains(says), "{pasted}: {error}");
+        }
+        let unknown = app.let_slack_app_follow("owner", "A9", "xoxe-1-a").await;
+
+        assert!(unknown.is_err());
+        assert!(!app.slack_apps().unwrap()[0].follows);
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_refusal_the_owner_can_mend_says_how() {
+        for why in [
+            "Slack gave no config token: invalid_refresh_token",
+            "access_denied",
+        ] {
+            assert!(remedy(why).is_some_and(|r| r.contains("作り直して貼る")));
+        }
+        assert_eq!(remedy("app_edit_disabled"), None);
     }
 }
