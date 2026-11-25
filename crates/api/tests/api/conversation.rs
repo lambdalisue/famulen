@@ -273,6 +273,15 @@ async fn the_owner_goes_on_begins_anew_or_chooses_the_conversation() {
         first
     );
 
+    // A thread may run through several; what the owner chose holds.
+    let reply = call(
+        &api,
+        "ConsoleService/Send",
+        json!({ "text": "二つ目への返信", "workgroup": "work", "replyTo": "3", "conversation": first }),
+    )
+    .await;
+    assert_eq!(reply["conversation"], first);
+
     let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
     let titles: Vec<_> = listed["conversations"]
         .as_array()
@@ -287,12 +296,53 @@ async fn the_owner_goes_on_begins_anew_or_chooses_the_conversation() {
         .collect();
     assert_eq!(
         titles,
-        [("二つ目の話", "二つ目の話"), ("一つ目の話", "一つ目の続き")]
+        [
+            ("二つ目の話", "二つ目の話"),
+            ("一つ目の話", "二つ目への返信")
+        ]
     );
     assert_eq!(listed["conversations"][0]["waiting"], true);
+    let also = json!({ "limit": 1, "also": first });
+    let listed = call(&api, "ConsoleService/ListConversations", also).await;
+    assert_eq!(listed["conversations"].as_array().unwrap().len(), 2);
+    let elsewhere = json!({ "workgroup": "personal", "also": first });
+    let listed = call(&api, "ConsoleService/ListConversations", elsewhere).await;
+    assert_eq!(listed["conversations"], Value::Null);
 
     let body = json!({ "text": "a", "workgroup": "work", "conversation": "99" });
     let (status, _) = try_call(&api, "ConsoleService/Send", body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_conversation_tells_how_much_of_it_is_unread_until_it_was_shown() {
+    let dir = temp();
+    let api = open(&dir);
+    let body = json!({ "text": "頼み", "workgroup": "work" });
+    let sent = call(&api, "ConsoleService/Send", body).await;
+    let answer = call(
+        &api,
+        "ConsoleService/PostMessage",
+        json!({ "text": "答え", "replyTo": sent["id"] }),
+    )
+    .await;
+    let id = &sent["conversation"];
+    assert_eq!(&answer["conversation"], id);
+    let unread = async || {
+        let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
+        listed["conversations"][0]["unread"].clone()
+    };
+    assert_eq!(unread().await, 1);
+    let shown = json!({ "conversation": id, "message": answer["id"] });
+    call(&api, "ConsoleService/ReadConversation", shown).await;
+    assert_eq!(unread().await, Value::Null);
+
+    let (status, _) = try_call(
+        &api,
+        "ConsoleService/ReadConversation",
+        json!({ "conversation": "99", "message": "1" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 

@@ -623,3 +623,50 @@ fn a_conversation_waiting_for_its_first_turn_shows_only_in_its_workgroup() {
     assert!(b.all.recent("personal", None, 9).unwrap().is_empty());
     assert_eq!(b.all.recent("work", None, 9).unwrap().len(), 1);
 }
+
+#[test]
+fn what_the_secretary_said_is_unread_until_it_is_shown_or_the_owner_speaks_after_it() {
+    let b = bench();
+    let (_, row) = b.says("頼み", None);
+    let of = b.turn(&row, || {
+        b.answers("一つ目");
+        b.answers("二つ目");
+    });
+    let said = || b.all.messages(&b.log, of).unwrap();
+    let unread = || b.all.unread(of, &said()).unwrap();
+    assert_eq!(unread(), 2);
+
+    let first = said()[1].id;
+    assert!(b.all.read(of, first).unwrap());
+    assert_eq!(unread(), 1);
+    assert!(!b.all.read(of, 1).unwrap());
+    assert_eq!(unread(), 1, "what was read stays read");
+
+    let (_, row) = b.says("続き", None);
+    assert_eq!(b.turn(&row, || ()), of);
+    assert_eq!(unread(), 0);
+}
+
+#[test]
+fn a_request_is_of_the_conversation_it_was_made_in_or_that_ordered_its_task() {
+    let b = bench();
+    let (_, row) = b.says("頼み", None);
+    let of = b.turn(&row, || {
+        b.all.link_to_running([task_key("t1")]).unwrap();
+    });
+    let made_in = |request: i64| (request == 1).then_some(row.id);
+    assert_eq!(b.all.of_request(1, None, made_in).unwrap(), Some(of));
+    assert_eq!(b.all.of_request(2, None, made_in).unwrap(), None);
+
+    b.store
+        .conn()
+        .execute(
+            "INSERT INTO worker_runs (task, runner, state, attempt, spec, session, ticket, created_at)
+             VALUES ('t1', 'adroit', 'running', 1, '{}', 's1', 3, 0)",
+            [],
+        )
+        .unwrap();
+    assert_eq!(b.all.of_request(3, None, made_in).unwrap(), Some(of));
+    assert_eq!(b.all.of_request(4, Some("s1"), made_in).unwrap(), Some(of));
+    assert_eq!(b.all.of_request(5, Some("s2"), made_in).unwrap(), None);
+}

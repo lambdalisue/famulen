@@ -4,9 +4,11 @@ import ApprovalCard from "~/components/ApprovalCard";
 import { DraftList } from "~/components/Attachments";
 import Message, { Quote } from "~/components/Message";
 import { createPull } from "~/components/pull";
+import Talk, { TalkHead } from "~/components/Talk";
+import TalkList, { type Waits } from "~/components/TalkList";
 import Thread from "~/components/Thread";
 import * as icons from "~/lib/icons";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
 import { api } from "~/lib/api";
@@ -19,14 +21,16 @@ import { working } from "~/lib/events";
 import { createKept, createSame } from "~/lib/kept";
 import { excerptOf } from "~/lib/records";
 import { offsetIn, pointOut } from "~/lib/scroll";
+import { createTalk, createTalks, forgetLast, go, lastOpen, openTalk, type Place, place, restorePlace, titleOf } from "~/lib/talks";
 import { createThread } from "~/lib/thread";
 import { useOwner } from "~/lib/owner";
 import { isNarrow } from "~/lib/viewport";
 import { selection, setSelection, view } from "~/lib/view";
-import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Tag } from "~/components/ui";
+import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Keyed, Tag } from "~/components/ui";
 import { createResizer } from "~/components/ui/resize";
 
-function Inbox(props: { aide: string }) {
+/** What waits for the owner. What is of a conversation that is not on screen is kept there, with what was begun in it. */
+function Inbox(props: { aide: string; shows: (conversation: bigint) => boolean }) {
   const inbox = createKept(() => inboxQuery());
   const heldOnes = createSame(HeldInputSchema, () => inbox()?.held ?? [], (h) => h.id);
   const approvals = createSame(ApprovalSchema, () => inbox()?.approvals ?? [], (r) => r.id);
@@ -42,7 +46,7 @@ function Inbox(props: { aide: string }) {
     <div id="approvals">
       <For each={heldOnes()}>
         {(h) => (
-          <div class="approval">
+          <div class="approval" hidden={!props.shows(h.conversation)}>
             <header class="asked-head">
               <Icon svg={icons.alertTriangle} size={16} />
               <b>途中で切れた依頼</b>
@@ -65,9 +69,9 @@ function Inbox(props: { aide: string }) {
           </div>
         )}
       </For>
-      <For each={approvals()}>
-        {(r) => <ApprovalCard approval={r} onAnswer={(answer, replies) => void approve(r.id, answer, replies)} />}
-      </For>
+      <Keyed each={approvals()} by={(r) => r.id}>
+        {(r) => <ApprovalCard approval={r()} hidden={!props.shows(r().conversation)} onAnswer={(answer, replies) => void approve(r().id, answer, replies)} />}
+      </Keyed>
     </div>
   );
 }
@@ -106,10 +110,129 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   });
   /** The message the owner picked to reply to. */
   const [picked, setPicked] = createSignal<ConsoleMessage>();
-  const replyTo = () => picked() ?? thread.messages()[0];
+  const replyTo = () => picked() ?? (place().kind === "all" ? thread.messages()[0] : undefined);
+  const waiting = useWaiting();
+  const open = createMemo(() => {
+    const at = place();
+    return at.kind === "talk" ? at.id : undefined;
+  });
+  /** The conversation what is written in one line goes on with; none begins one. */
+  const [target, setTarget] = createSignal<bigint>();
+  const talks = createTalks(workgroup, () => open() ?? target());
+  const one = createTalk(workgroup, open);
+  /** The conversation what is written goes on with; none begins one. A reply goes to that of its message. */
+  const goesOn = () => open() ?? (replyTo()?.conversation || target());
   const [text, setText] = createSignal("");
+  /** What was begun for each place, put away while another is open. */
+  const drafts = new Map<string, string>();
+  const keyOf = (at: Place) => (at.kind === "talk" ? at.id.toString() : "new");
+  /** What is written goes along: the owner saw that it goes to the wrong place. */
+  let carried = false;
+  createEffect(
+    on(
+      place,
+      (now, before) => {
+        setTarget();
+        setPicked();
+        if (now.kind !== "all") setRoot();
+        if (!before || keyOf(now) === keyOf(before)) return;
+        if (carried && (text().trim() || attached.drafts().length > 0)) {
+          carried = false;
+          drafts.delete(keyOf(before));
+          // What was begun there before is not lost.
+          setText([drafts.get(keyOf(now)), text()].filter((t) => t?.trim()).join("\n"));
+          return;
+        }
+        carried = false;
+        drafts.set(keyOf(before), text());
+        setText(drafts.get(keyOf(now)) ?? "");
+      },
+    ),
+  );
+  const carry = (to: Place) => {
+    carried = keyOf(to) !== keyOf(place());
+    if (carried) attached.move(keyOf(to));
+    go(to);
+    say?.focus();
+  };
+  /** The conversation that 続き goes on with: the one open, or else the one that was open or used last. */
+  const toGoOn = () => goesOn() ?? lastOpen() ?? talks.talks()[0]?.id;
+  const titled = (id: bigint | undefined) => (id === undefined ? "" : titleOf(talks.of(id)));
+  const waits = (id: bigint): Waits => ({
+    approvals: waiting.approvals().filter((a) => a.conversation === id).length,
+    held: waiting.held().filter((h) => h.conversation === id).length,
+  });
+  const wants = (id: bigint) => waits(id).approvals + waits(id).held > 0;
+  /** How many other conversations have something for the owner. */
+  const elsewhere = () =>
+    talks.talks().filter((c) => c.id !== open() && (c.unread > 0 || wants(c.id))).length +
+    waiting.approvals().filter((a) => a.conversation !== 0n && a.conversation !== open() && strays(a.conversation)).length;
+  /** Whether a conversation is not on the list, so that what waits in it is answered over the list. */
+  const strays = (conversation: bigint) => (talks.there() ? !talks.of(conversation) : !!talks.failed());
+  const shows = (conversation: bigint) => {
+    const at = place();
+    if (at.kind === "all") return true;
+    if (conversation === 0n) return true;
+    if (at.kind === "talk") return conversation === at.id;
+    return strays(conversation);
+  };
+  // One that the workgroup does not show is not gone on with from there.
+  createEffect(() => {
+    const id = open();
+    if (id !== undefined && talks.lacks(id)) go({ kind: "list" });
+    const on = target();
+    if (on !== undefined && talks.lacks(on)) setTarget();
+  });
+  // What is on the screen is read.
+  const [visible, setVisible] = createSignal(true);
+  onMount(() => {
+    const seen = () => setVisible(document.visibilityState === "visible");
+    seen();
+    document.addEventListener("visibilitychange", seen);
+    onCleanup(() => document.removeEventListener("visibilitychange", seen));
+    restorePlace();
+  });
+  let told = 0n;
+  createEffect(() => {
+    const id = open();
+    const last = one.messages().at(-1);
+    if (id === undefined || !last || !visible() || (isNarrow() && !props.open)) return;
+    if (last.id === told) return;
+    told = last.id;
+    // It is told again with the next one, should it fail.
+    api.console.readConversation({ conversation: id, message: last.id }).catch(() => {});
+  });
+  /** Something that came to a conversation that is not on the screen. */
+  const [arrived, setArrived] = createSignal<bigint>();
+  const arrives = (id: bigint) => {
+    const at = place().kind;
+    if (id && id !== open() && (at === "talk" || at === "new")) setArrived(id);
+  };
+  let unreadBefore: { of: string; by: Map<bigint, number> } | undefined;
+  createEffect(() => {
+    if (!talks.there()) return;
+    const of = workgroup();
+    const by = new Map(talks.talks().map((c) => [c.id, c.unread]));
+    const before = unreadBefore;
+    unreadBefore = { of, by };
+    if (before?.of !== of) return;
+    for (const [id, n] of by) if (n > (before.by.get(id) ?? 0)) untrack(() => arrives(id));
+  });
+  let askedBefore: Set<bigint> | undefined;
+  createEffect(() => {
+    const asked = waiting.approvals();
+    if (!waiting.there()) return;
+    const before = askedBefore;
+    askedBefore = new Set(asked.map((a) => a.id));
+    if (before) for (const a of asked) if (!before.has(a.id)) untrack(() => arrives(a.conversation));
+  });
+  createEffect(
+    on(place, (at) => {
+      if (at.kind === "list" || at.kind === "all" || (at.kind === "talk" && at.id === arrived())) setArrived();
+    }),
+  );
   const [error, setError] = createSignal("");
-  const attached = createDrafts();
+  const attached = createDrafts(() => keyOf(place()));
   const [dropping, setDropping] = createSignal(false);
   let picker: HTMLInputElement | undefined;
   let list: HTMLDivElement | undefined;
@@ -119,7 +242,6 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   const aide = owner.aide;
   const tz = owner.tz;
   const last = () => [...messages()].reverse().find((m) => m.who === Speaker.AIDE);
-  const waiting = useWaiting();
 
   // The newest stays in sight, whatever grows or shrinks, until the owner
   // scrolls up to read what came before. Then what is read stays where it is:
@@ -242,7 +364,18 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     setPicked();
     setRoot(id);
   };
-  createEffect(on(workgroup, () => openThread(undefined), { defer: true }));
+  createEffect(
+    on(
+      workgroup,
+      () => {
+        openThread(undefined);
+        setTarget();
+        setArrived();
+        forgetLast();
+      },
+      { defer: true },
+    ),
+  );
   /** Go to a message, reading back to it when it is older than what is read. */
   const goTo = async (id: bigint) => {
     const mine = ++gone;
@@ -276,9 +409,17 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     }
     setError("");
     const of = workgroup();
-    const target = picked();
+    // On a phone, where it goes is seen before it is sent.
+    if (isNarrow() && !props.open) {
+      props.setOpen(true);
+      return;
+    }
+    const at = place();
+    const quoted = picked();
     const to = replyTo()?.id ?? root();
     const within = root();
+    const on = at.kind === "talk" ? at.id : to === undefined ? target() : undefined;
+    const written = text();
     try {
       const m = await api.console.send({
         text: body,
@@ -287,18 +428,44 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
         selection: selection(),
         attachments: files.flatMap((f) => f.id ?? []),
         replyTo: to ?? 0n,
+        conversation: on ?? 0n,
+        newConversation: to === undefined && on === undefined,
       });
-      setText("");
       attached.remove(files);
       setSelection("");
-      if (picked() === target) setPicked();
+      if (picked() === quoted) setPicked();
       talk.sent(of, m);
+      // The owner may have gone elsewhere meanwhile, where what is there stays.
+      if (drafts.get(keyOf(at)) === written) drafts.delete(keyOf(at));
+      if (place() !== at || workgroup() !== of) return;
+      if (text() === written) setText("");
+      if (at.kind === "all") {
+        if (to === undefined && m.conversation) setTarget(m.conversation);
+      } else if (m.conversation) {
+        if (m.conversation !== open()) openTalk(m.conversation);
+        one.sent(m);
+      }
       // Within a thread, what is read beside it stays.
       if (within === undefined) toBottom();
     } catch (err) {
       setError(message(err));
     }
   };
+
+  const goOn = () => {
+    const id = toGoOn();
+    if (id === undefined || goesOn() !== undefined) return;
+    if (place().kind === "all") setTarget(id);
+    else carry({ kind: "talk", id });
+  };
+  const beginNew = () => {
+    if (goesOn() === undefined && place().kind !== "list") return;
+    if (place().kind === "all") setTarget();
+    else carry({ kind: "new" });
+  };
+  /** What the folded conversation says of the open one. */
+  const folded = () => (open() === undefined ? "" : `${titled(open())}：${excerptOf(one.messages().at(-1)?.text ?? "", 160)}`);
+  const newOnes = () => talks.talks().reduce((n, c) => n + c.unread, 0);
 
   const attach = (files: Iterable<File>) => {
     setError("");
@@ -338,7 +505,50 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.setOpen(false)} />
           </div>
         </div>
-        <div class="talk">
+        <Show when={place().kind === "list"}>
+          <TalkList talks={talks} waits={waits} aide={aide()} tz={tz()} />
+        </Show>
+        <Show when={place().kind === "new"}>
+          <TalkHead talk={undefined} fresh elsewhere={elsewhere()} tz={tz()} />
+          <div class="talk-new">
+            <AideIcon size={48} />
+            <h2>新しい話を始める</h2>
+            <p class="sub">前の話は引き継がない。続きを話すなら、下から選ぶ。</p>
+            <ul class="list">
+              <For each={talks.talks().slice(0, 3)}>
+                {(c) => (
+                  <li class="item picks">
+                    <button type="button" class="item-title item-pick" onClick={() => carry({ kind: "talk", id: c.id })}>
+                      {titleOf(c)}
+                    </button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </div>
+        </Show>
+        <Show when={open()} keyed>
+          {(id) => (
+            <>
+              <TalkHead talk={talks.of(id)} fresh={false} elsewhere={elsewhere()} tz={tz()} />
+              <Talk talk={one} id={id} aide={aide()} tz={tz()} working={talks.of(id)?.running || talks.of(id)?.waiting ? working() : ""} onReply={reply} />
+            </>
+          )}
+        </Show>
+        <Show when={place().kind === "all"}>
+          <header class="talk-head">
+            <button type="button" class="btn ghost small talk-back" aria-label="話の一覧へ" title="話の一覧へ" onClick={() => go({ kind: "list" })}>
+              <Icon svg={icons.chevronLeft} size={18} />
+            </button>
+            <div class="talk-name">
+              <b>一続きの会話</b>
+            </div>
+            <Button small icon={icons.messagePlus} onClick={() => go({ kind: "new" })}>
+              新しい話
+            </Button>
+          </header>
+        </Show>
+        <div class="talk" hidden={place().kind !== "all"}>
           <div id="messages" class="messages" ref={list} role="log" aria-label="会話" aria-busy={talk.reading()} tabindex="0" onScroll={onScroll}>
             <div class="said" ref={said}>
               <Show when={messages().length === 0 && !talk.more()}>
@@ -360,18 +570,57 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             {(id) => <Thread thread={thread} root={id} aide={aide()} tz={tz()} onReply={reply} onClose={() => openThread(undefined)} />}
           </Show>
         </div>
-        <Inbox aide={aide()} />
+        <Inbox aide={aide()} shows={shows} />
+        <Show when={arrived()}>
+          {(id) => (
+            <div class="arrival" role="status">
+              <Icon svg={icons.bell} size={16} />
+              <span class="grow">
+                <b>ほかの話に届いた</b>
+                <span class="arrival-title">{titled(id())}</span>
+              </span>
+              <Button small onClick={() => openTalk(id())}>
+                開く
+              </Button>
+              <IconButton plain icon={icons.x} label="あとで" onClick={() => setArrived()} />
+            </div>
+          )}
+        </Show>
         <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.setOpen(true)}>
           <span class="sheet-grip" />
           <span class="peek-line">
             <AideIcon size={24} />
-            <span class="peek-text">{working() || excerptOf(last()?.text ?? "", 200) || "まだ話していない"}</span>
+            <span class="peek-text">{working() || folded() || excerptOf(last()?.text ?? "", 200) || "まだ話していない"}</span>
+            <Show when={newOnes() > 0}>
+              <Tag tone="info">未読 {newOnes()}</Tag>
+            </Show>
             <Show when={waiting.count() > 0}>
               <Tag tone="warn">確認 {waiting.count()}</Tag>
             </Show>
           </span>
         </button>
         <form id="composer" class="composer" onSubmit={send}>
+          <div class="dest" role="group" aria-label="送り先">
+            <Show when={!replyTo() || place().kind !== "all"} fallback={<span class="sub">返信</span>}>
+            <div class="segs">
+              <button
+                type="button"
+                class="segs-item"
+                classList={{ on: goesOn() !== undefined }}
+                aria-pressed={goesOn() !== undefined}
+                disabled={toGoOn() === undefined}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => goOn()}
+              >
+                続き
+              </button>
+              <button type="button" class="segs-item" classList={{ on: goesOn() === undefined }} aria-pressed={goesOn() === undefined} onMouseDown={(e) => e.preventDefault()} onClick={() => beginNew()}>
+                新しい話
+              </button>
+            </div>
+            </Show>
+            <span class="dest-name">{goesOn() === undefined ? "題は最初の一文から付く" : titled(goesOn())}</span>
+          </div>
           <div class="view">
             <span class="dot" />
             <span title="この画面のことも秘書に伝わる">{view()}</span>

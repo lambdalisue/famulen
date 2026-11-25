@@ -106,7 +106,7 @@ export function dateTimeText(at: bigint | number, tz: string): string {
 }
 
 /** The day a Unix time falls on in `tz`. */
-function dayIn(at: bigint | number, tz: string): string {
+export function dayIn(at: bigint | number, tz: string): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: tz || "UTC" }).format(new Date(Number(at) * 1000));
 }
 

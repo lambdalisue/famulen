@@ -629,6 +629,11 @@ CREATE TABLE IF NOT EXISTS conversation_keys (
     input        INTEGER
 );
 CREATE INDEX IF NOT EXISTS conversation_keys_of ON conversation_keys (conversation);
+-- The newest message of a conversation that was shown to the owner.
+CREATE TABLE IF NOT EXISTS conversation_reads (
+    conversation INTEGER PRIMARY KEY,
+    message      INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS conversation_turns (
     id                 INTEGER PRIMARY KEY,
     conversation       INTEGER NOT NULL,

@@ -6,7 +6,7 @@ export function useWaiting() {
   const inbox = createKept(() => inboxQuery());
   const approvals = () => (inbox()?.approvals ?? []).filter((a) => a.status === "pending");
   const held = () => inbox()?.held ?? [];
-  return { approvals, held, count: () => approvals().length + held().length };
+  return { there: () => inbox() !== undefined, approvals, held, count: () => approvals().length + held().length };
 }
 
 /** The element of a request in the conversation. */

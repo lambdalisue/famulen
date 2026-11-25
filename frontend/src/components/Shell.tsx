@@ -17,6 +17,7 @@ import { followEvents } from "~/lib/events";
 import { createKept } from "~/lib/kept";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { followKeyboard, isNarrow, layoutHeld } from "~/lib/viewport";
+import { openTalk, place } from "~/lib/talks";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import ThemeChoice from "./ThemeChoice";
@@ -79,6 +80,8 @@ export default function Shell(props: { children?: JSX.Element }) {
       return say(`確認 #${id} は、答えを待つものの中にない`);
     }
     workgroupSheet?.close();
+    const asked = inbox.approvals.find((a) => a.id.toString() === id);
+    if (place().kind !== "all") openTalk(asked?.conversation ?? 0n);
     if (isNarrow()) setChatOpen(true);
     requestAnimationFrame(() => {
       const card = document.getElementById(approvalId(id));

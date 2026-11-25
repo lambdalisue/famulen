@@ -43,7 +43,7 @@ export function followEvents(workgroup: () => string) {
               show(e.event.value);
               break;
             case "inbox":
-              await revalidate("inbox");
+              await revalidate(["inbox", "conversations"]);
               break;
             case "records":
               await revalidate();

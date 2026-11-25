@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # A stand-in for Claude Code in the browser tests: each message the owner
 # sends becomes one short turn that ends without calling a tool, except that a
-# message holding `e2e-bash` first asks to run Bash, one holding
+# message holding `e2e-bash` first asks to run Bash, one holding `e2e-asks`
+# asks so and waits for the answer, one holding
 # `e2e-work` searches the web as the test lets it, one holding
 # `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
 # tells of a plan and writes until the test lets it end, and one holding `e2e-hold` goes
@@ -60,6 +61,10 @@ while (my $line = <STDIN>) {
     print qq({"type":"system","subtype":"init","session_id":"e2e","tools":["Bash","Read"]}\n) unless $started++;
     print qq({"type":"control_request","request_id":"e2e-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}\n)
       if $line =~ /e2e-bash/;
+    if ($line =~ /e2e-asks/) {
+        print qq({"type":"control_request","request_id":"e2e-asks","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}\n);
+        <STDIN>;
+    }
     print qq({"type":"control_request","request_id":"e2e-long-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"), "ls\\n" x 60, qq(rm e2e-last"}}}\n)
       if $line =~ /e2e-long-bash/;
     if ($line =~ /e2e-work/) {

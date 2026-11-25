@@ -89,6 +89,11 @@ fn message(
     })
 }
 
+/// The session a request answers the question of.
+fn decided_session(shown: &serde_json::Value) -> Option<&str> {
+    shown.get("call")?.get("session")?.as_str()
+}
+
 /// Where a held call is made, with the account, which only the console tells.
 fn place(tool: &str, connection: Option<&Connection>) -> String {
     let service = wording::place(tool, connection);
@@ -236,6 +241,23 @@ impl Api {
         }
     }
 
+    /// Keep what was said under `keys` in the conversation of the running
+    /// turn; outside any turn, in that of the message it replies to.
+    fn keep_where_said(
+        &self,
+        keys: Vec<String>,
+        to: Option<&console_log::Message>,
+    ) -> anyhow::Result<()> {
+        let all = &self.app.conversations;
+        match to {
+            Some(to) if self.app.store.running()?.is_none() => match all.of_message(to)? {
+                Some(of) => all.link(of, keys),
+                None => Ok(()),
+            },
+            _ => all.link_to_running(keys),
+        }
+    }
+
     /// The message what is said now belongs in the thread of: the owner's that
     /// is being answered, when it is itself a reply, and the one the owner
     /// asked with, when something comes back to it later.
@@ -279,7 +301,10 @@ impl Api {
         let title = first
             .map(|row| excerpt(&row.input.gist(), TITLE))
             .unwrap_or_default();
+        let mut said = all.messages(&self.app.console, c.id)?;
+        said.retain(|m| m.shown_in(workgroup));
         Ok(pb::Conversation {
+            unread: all.unread(c.id, &said)? as i32,
             running: all.running()? == Some(c.id),
             id: c.id,
             title,
@@ -291,11 +316,7 @@ impl Api {
             context_tokens: c.context,
             spent: spent(used).into(),
             waiting: all.waiting(c.id)?,
-            last: match all
-                .messages(&self.app.console, c.id)?
-                .iter()
-                .rfind(|m| m.shown_in(workgroup))
-            {
+            last: match said.last() {
                 Some(m) => Some(self.message(m, workgroup)?),
                 None => None,
             }
@@ -323,7 +344,13 @@ impl Api {
         let connection = self.app.permissions.connection_of(&r.tool);
         let decided = shown.get("decides").unwrap_or(&shown);
         let ticket = self.app.gateway.ticket(r.id).ok().flatten();
+        let session = decided_session(&shown);
+        let conversation = self
+            .app
+            .conversations
+            .of_request(r.id, session, |request| self.app.request_made_in(request));
         Approval {
+            conversation: conversation.ok().flatten().unwrap_or_default(),
             deed: wording::deed(&r.tool, connection.as_ref()),
             place: place(&r.tool, connection.as_ref()),
             given: wording::given(decided)
@@ -378,6 +405,7 @@ impl Api {
                     id: h.id,
                     text: h.input.gist(),
                     at: self.arrived_at(h.id)?,
+                    conversation: self.app.conversations.of_input(h.id)?.unwrap_or_default(),
                     ..Default::default()
                 })
             })
@@ -473,6 +501,11 @@ impl ConsoleService for Api {
             let older = found.len().saturating_sub(MOST_MESSAGES);
             found.drain(..older);
             return Response::ok(ListMessagesResponse {
+                read_to: self
+                    .app
+                    .conversations
+                    .read_to(r.conversation, &found)
+                    .or_fail()?,
                 messages: self.messages(&found, &r.workgroup).or_fail()?,
                 more: older > 0,
                 ..Default::default()
@@ -560,15 +593,15 @@ impl ConsoleService for Api {
         };
         // Before it is queued, as its turn may begin at once.
         let conversations = &self.app.conversations;
-        if to.is_none() {
-            let chosen = match r.conversation {
-                0 if r.new_conversation => Some(conversations.begin_anew(&input).or_fail()?),
-                0 => None,
-                id => Some(id),
-            };
-            if let Some(id) = chosen {
-                conversations.choose(id, &input, m.id).or_fail()?;
+        let chosen = match r.conversation {
+            0 if r.new_conversation && to.is_none() => {
+                Some(conversations.begin_anew(&input).or_fail()?)
             }
+            0 => None,
+            id => Some(id),
+        };
+        if let Some(id) = chosen {
+            conversations.choose(id, &input, m.id).or_fail()?;
         }
         if let Some(id) = self.app.store.enqueue(&input).or_fail()?
             && let Some(row) = self.app.store.get(id).or_fail()?
@@ -601,7 +634,14 @@ impl ConsoleService for Api {
         let found = all
             .recent(&r.workgroup, before.as_ref(), limit + 1)
             .or_fail()?;
-        let (found, more) = page(found, limit);
+        let (mut found, more) = page(found, limit);
+        if r.also != 0
+            && !found.iter().any(|c| c.id == r.also)
+            && let Some(also) = all.get(r.also).or_fail()?
+            && also.shown_in(&r.workgroup)
+        {
+            found.push(also);
+        }
         let conversations = found
             .into_iter()
             .map(|c| {
@@ -615,6 +655,24 @@ impl ConsoleService for Api {
             more,
             ..Default::default()
         })
+    }
+
+    async fn read_conversation(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ReadConversationRequest>,
+    ) -> ServiceResult<Empty> {
+        let (id, message) = (request.conversation, request.message);
+        self.app
+            .conversations
+            .get(id)
+            .or_fail()?
+            .ok_or_else(|| fail(format!("no conversation {id}")))?;
+        // Any other screen that counts it as unread is told.
+        if self.app.conversations.read(id, message).or_fail()? {
+            self.app.console.notify(Event::Approvals);
+        }
+        Response::ok(Empty::default())
     }
 
     async fn list_link_previews(
@@ -655,7 +713,7 @@ impl ConsoleService for Api {
         let mut keys = vec![message_key(m.id)];
         keys.extend(m.thread().map(message_key));
         // It is said; failing here would have it said twice.
-        if let Err(error) = self.app.conversations.link_to_running(keys) {
+        if let Err(error) = self.keep_where_said(keys, to.as_ref()) {
             tracing::warn!(%error, "could not keep which conversation it was said in");
         }
         self.app.working.answered();

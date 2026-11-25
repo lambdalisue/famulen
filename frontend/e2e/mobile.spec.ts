@@ -136,7 +136,7 @@ test("closing the chat while typing puts the keyboard away with it", async ({ pa
   const peek = page.getByRole("button", { name: "会話を引き上げる" });
   await peek.click();
   await say.fill("書きかけ");
-  await expect(page.locator("#composer").getByRole("button")).toHaveText(["", "送る"]);
+  await expect(page.locator("#composer").getByRole("button")).toHaveText(["続き", "新しい話", "", "送る"]);
   // On iOS a tapped button does not take the focus.
   await page.getByRole("button", { name: "閉じる" }).evaluate((el: HTMLElement) => el.click());
   await expect(say).not.toBeFocused();

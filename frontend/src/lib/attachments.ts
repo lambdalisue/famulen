@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
 import { message } from "~/lib/act";
 
 /** How many files one message may carry, as the backend takes them. */
@@ -14,6 +14,9 @@ export const ACCEPTED =
 
 /** A file being attached to what is written. */
 export interface Draft {
+  no: number;
+  /** Where what it goes along with is written. */
+  at: string;
   name: string;
   /** Once it arrived. */
   id?: string;
@@ -42,13 +45,15 @@ async function upload(file: File): Promise<string> {
 }
 
 /** The files attached to what is being written, sent on as they are added. */
-export function createDrafts() {
-  const [drafts, setDrafts] = createSignal<Draft[]>([]);
+export function createDrafts(at: () => string = () => "") {
+  const [all, setDrafts] = createSignal<Draft[]>([]);
+  const drafts = createMemo(() => all().filter((d) => d.at === at()));
+  let no = 0;
   const settle = (draft: Draft, done: Partial<Draft>) =>
-    setDrafts((all) => all.map((d) => (d === draft ? { ...d, ...done } : d)));
+    setDrafts((all) => all.map((d) => (d.no === draft.no ? { ...d, ...done } : d)));
   const add = (files: Iterable<File>) => {
     for (const file of files) {
-      const draft: Draft = { name: file.name || "名前なし" };
+      const draft: Draft = { no: no++, at: at(), name: file.name || "名前なし" };
       if (drafts().length >= MOST) draft.problem = `一度に添えられるのは ${MOST} 個まで`;
       setDrafts((all) => [...all, draft]);
       if (draft.problem) continue;
@@ -58,6 +63,8 @@ export function createDrafts() {
       );
     }
   };
-  const remove = (gone: readonly Draft[]) => setDrafts((all) => all.filter((d) => !gone.includes(d)));
-  return { drafts, add, remove };
+  const remove = (gone: readonly Draft[]) => setDrafts((all) => all.filter((d) => !gone.some((g) => g.no === d.no)));
+  /** What is written goes to another place, and these along with it. */
+  const move = (to: string) => setDrafts((every) => every.map((d) => (d.at === at() ? { ...d, at: to } : d)));
+  return { drafts, add, remove, move };
 }
