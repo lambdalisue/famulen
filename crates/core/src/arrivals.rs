@@ -82,24 +82,123 @@ fn last_history(page: &Value) -> Option<u64> {
         .max()
 }
 
+/// A message's header, or nothing when it has none of that name.
+fn header<'a>(message: &'a Value, name: &str) -> Option<&'a str> {
+    message["payload"]["headers"].as_array()?.iter().find(|h| {
+        h["name"]
+            .as_str()
+            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    })?["value"]
+        .as_str()
+}
+
+/// The senders' names of mail no person writes, without the marks between
+/// their words.
+const AUTOMATED_SENDERS: &[&str] = &[
+    "mailerdaemon",
+    "postmaster",
+    "bounce",
+    "bounces",
+    "calendarnotification",
+    "notification",
+    "notifications",
+    "newsletter",
+    "newsletters",
+    "mailmag",
+    "mailmagazine",
+    "magazine",
+    "marketing",
+    "promotion",
+    "promotions",
+];
+
+/// The services that send mail to many at once, by their domains.
+const SENDING_SERVICES: &[&str] = &[
+    "amazonses.com",
+    "cuenote.jp",
+    "exacttarget.com",
+    "hubspotemail.net",
+    "mailchimpapp.net",
+    "mailgun.org",
+    "mcdlv.net",
+    "mcsv.net",
+    "rsgsv.net",
+    "sendgrid.net",
+];
+
+/// Who sends calendar invitations in the name of the person who invites.
+const INVITATIONS: &str = "calendar-notification@google.com";
+
+/// The address of a From or the like.
+fn address(value: &str) -> &str {
+    match value.rsplit_once('<') {
+        Some((_, address)) => address.trim_end().trim_end_matches('>'),
+        None => value,
+    }
+    .trim()
+}
+
+/// Whether an address sends mail no person writes.
+fn sends_automatically(value: &str) -> bool {
+    let address = address(value).to_lowercase();
+    let (name, domain) = address.rsplit_once('@').unwrap_or((&address, ""));
+    let name: String = name.chars().filter(|c| !"-_.".contains(*c)).collect();
+    name.contains("noreply")
+        || name.contains("donotreply")
+        || AUTOMATED_SENDERS.contains(&name.as_str())
+        || SENDING_SERVICES
+            .iter()
+            .any(|s| domain == *s || domain.ends_with(&format!(".{s}")))
+}
+
+/// Whether mail goes out to many or by itself: advertising, newsletters,
+/// lists and notices.
+fn is_bulk(message: &Value) -> bool {
+    let has = |name: &str| header(message, name).is_some();
+    let is = |name: &str, words: &[&str]| {
+        header(message, name).is_some_and(|v| {
+            let v = v.trim();
+            words.iter().any(|w| v.eq_ignore_ascii_case(w))
+        })
+    };
+    let labelled = message["labelIds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|l| {
+            l.as_str()
+                .is_some_and(|l| ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "SPAM"].contains(&l))
+        });
+    let invitation =
+        header(message, "Sender").is_some_and(|s| address(s).eq_ignore_ascii_case(INVITATIONS));
+    // Only mail sent by itself comes back to an address of its own.
+    let comes_back = header(message, "Return-Path").is_some_and(|path| {
+        address(path).to_lowercase().contains("bounce") || sends_automatically(path)
+    });
+    let by_itself =
+        header(message, "Auto-Submitted").is_some_and(|v| !v.trim().eq_ignore_ascii_case("no"));
+    labelled
+        || has("List-Unsubscribe")
+        || has("List-Id")
+        || is("Precedence", &["bulk", "list", "junk"])
+        || header(message, "From").is_some_and(sends_automatically)
+        || !invitation && (comes_back || by_itself)
+}
+
 /// One message's headers and snippet as an item the lookout reads.
 pub fn mail_item(message: &Value) -> Item {
-    let header = |name: &str| {
-        message
-            .pointer("/payload/headers")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .find(|h| {
-                h["name"]
-                    .as_str()
-                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
-            })
-            .and_then(|h| h["value"].as_str())
-            .unwrap_or_default()
-            .to_owned()
-    };
+    let header = |name: &str| header(message, name).unwrap_or_default().to_owned();
     let subject = header("Subject");
+    let sent = message["internalDate"]
+        .as_str()
+        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms.parse().ok()?))
+        .map(|at| format!("{SENT}{}\n", at.to_rfc3339()))
+        .unwrap_or_default();
+    let automated = if is_bulk(message) {
+        format!("{AUTOMATED}\n")
+    } else {
+        String::new()
+    };
     Item {
         title: if subject.is_empty() {
             "(件名なし)".to_owned()
@@ -109,7 +208,7 @@ pub fn mail_item(message: &Value) -> Item {
         // Two mails of a shop may read the same; its id also names the one to
         // open.
         body: format!(
-            "{ID}{}\nfrom: {}\n{}",
+            "{ID}{}\n{FROM}{}\n{sent}{automated}{}",
             message["id"].as_str().unwrap_or_default(),
             header("From"),
             message["snippet"].as_str().unwrap_or_default()
@@ -119,11 +218,57 @@ pub fn mail_item(message: &Value) -> Item {
 
 /// What the line naming a mail in its item starts with.
 const ID: &str = "id: ";
+const FROM: &str = "from: ";
+const SENT: &str = "sent: ";
+/// The line of mail that goes out to many or by itself.
+const AUTOMATED: &str = "automated: yes";
 
 /// The id of the message an item is, when it is mail.
 pub fn message_of(item: &Item) -> Option<&str> {
     let id = item.body.lines().next()?.strip_prefix(ID)?;
     (!id.is_empty()).then_some(id)
+}
+
+/// What the lines before an item's text say of mail.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MailHead<'a> {
+    pub from: &'a str,
+    /// When it was sent, in seconds.
+    pub sent: Option<i64>,
+    marked: bool,
+    /// What is left of it: what the mail itself says.
+    pub text: &'a str,
+}
+
+impl MailHead<'_> {
+    /// Whether the mail goes out to many or by itself.
+    pub fn is_automated(&self) -> bool {
+        self.marked || sends_automatically(self.from)
+    }
+}
+
+/// Read the lines before the text of an item that is mail. Each is read only
+/// in its place, since the text is the sender's to write.
+pub fn mail_head(item: &Item) -> MailHead<'_> {
+    fn take<'a>(rest: &mut &'a str, mark: &str) -> Option<&'a str> {
+        let (line, after) = rest.split_once('\n').unwrap_or((*rest, ""));
+        let value = line.strip_prefix(mark)?;
+        *rest = after;
+        Some(value)
+    }
+    let mut rest = item.body.as_str();
+    take(&mut rest, ID);
+    let from = take(&mut rest, FROM).unwrap_or_default();
+    let sent = take(&mut rest, SENT)
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.timestamp());
+    let marked = take(&mut rest, AUTOMATED).is_some();
+    MailHead {
+        from,
+        sent,
+        marked,
+        text: rest,
+    }
 }
 
 /// The labels Gmail puts on inbox mail by itself that tell mail apart.
@@ -716,5 +861,86 @@ pub(crate) mod tests {
             "id: m1\nfrom: Sato <sato@example.com>\n明日の打ち合わせは"
         );
         assert_eq!(message_of(&item), Some("m1"));
+    }
+
+    fn mail(headers: &[(&str, &str)], labels: &[&str]) -> Item {
+        let headers: Vec<Value> = headers
+            .iter()
+            .map(|(name, value)| json!({ "name": name, "value": value }))
+            .collect();
+        mail_item(&json!({
+            "id": "m1",
+            "internalDate": "1795598544000",
+            "labelIds": labels,
+            "snippet": "本文",
+            "payload": { "headers": headers }
+        }))
+    }
+
+    #[test]
+    fn mail_to_many_or_by_itself_is_told_by_its_headers_sender_or_label() {
+        let person = ("From", "Sato <sato@example.com>");
+        for headers in [
+            &[person, ("List-Unsubscribe", "<https://a.example/u>")][..],
+            &[person, ("List-Id", "<dev.example.com>")],
+            &[person, ("Precedence", "Bulk")],
+            &[person, ("Auto-Submitted", "auto-generated")],
+            &[person, ("Return-Path", "<bounces+1-a=b@em1.example.com>")],
+            &[person, ("Return-Path", "<3z4@rtc.bounces.google.com>")],
+            &[
+                person,
+                ("Return-Path", "<0101@ap-northeast-1.amazonses.com>"),
+            ],
+            &[
+                ("From", "Google Calendar <calendar-notification@google.com>"),
+                ("Sender", "Google <calendar-notification@google.com>"),
+            ],
+            &[("From", "Shop <no_reply@example.com>")],
+            &[("From", "LinkedIn <updates-noreply@linkedin.com>")],
+            &[("From", "Discord <Notifications@discord.com>")],
+        ] {
+            assert!(mail_head(&mail(headers, &[])).is_automated(), "{headers:?}");
+        }
+        assert!(mail_head(&mail(&[person], &["CATEGORY_PROMOTIONS"])).is_automated());
+    }
+
+    #[test]
+    fn mail_a_person_wrote_and_an_invitation_in_their_name_are_not_automated() {
+        let person = ("From", "Sato <sato@example.com>");
+        for headers in [
+            &[person, ("Return-Path", "<sato@example.com>")][..],
+            &[person, ("Auto-Submitted", "no")],
+            &[
+                person,
+                ("Sender", "Google <calendar-notification@google.com>"),
+                ("Auto-Submitted", "auto-generated"),
+                ("Return-Path", "<3a@calendar-server.bounces.google.com>"),
+            ],
+            // A service's name within another's.
+            &[("From", "a@notsendgrid.net")],
+            &[("From", "marketing.sato@example.com")],
+        ] {
+            assert!(
+                !mail_head(&mail(headers, &["INBOX"])).is_automated(),
+                "{headers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_head_of_mail_is_read_apart_from_what_it_says() {
+        let item = mail(&[("From", "a@example.com"), ("List-Id", "x")], &[]);
+        let head = mail_head(&item);
+        assert_eq!(head.from, "a@example.com");
+        assert_eq!(head.sent, Some(1_795_598_544));
+        assert_eq!(head.text, "本文");
+
+        let before = Item {
+            title: "t".into(),
+            body: "id: m1\nfrom: a@example.com\n本文\nautomated: yes".into(),
+        };
+        let head = mail_head(&before);
+        assert_eq!((head.sent, head.is_automated()), (None, false));
+        assert_eq!(head.text, "本文\nautomated: yes");
     }
 }

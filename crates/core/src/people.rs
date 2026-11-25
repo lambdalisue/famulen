@@ -10,8 +10,10 @@ use chrono::{Duration, NaiveDate, NaiveDateTime};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::arrivals;
 use crate::lookout::{Feed, Item};
 use crate::memory::{self, Entry, EpisodeState, Src};
+use crate::note_origin::Origin;
 use crate::notebook::{Writer, link_target};
 use crate::records::{self, PARTIES, Patch, Record, Records};
 
@@ -37,10 +39,15 @@ const SEEN_WITHIN: i64 = 60;
 
 /// What the lookout's model is told when it reads people's messages.
 pub const ASK: &str = "\
-Besides judging the items, note in `people` what they show of the people who write or are spoken of, \
+Besides judging the items, note in `people` what they show of the people the owner deals with, \
 whether or not the item concerns the owner: their role and team, what they work on and know, how they write and deal with others, \
 what they like or avoid, their habits, who they are to each other, and that they join, leave or are away. \
-Be generous: it is raw material sorted later. Give the item's index, in `who` the name as the item gives it, or an empty text when it is the writer, \
+Say in `tie` how the person is tied to the owner: deals (they write to the owner or are written to by them, or talk where the owner does), \
+asks (they ask something of the owner or invite them), works_with (they are of the owner's team or company, or of one it does business with), or none. \
+One who only stands in an item is none: a speaker at an event, an author, someone quoted, introduced or advertised, someone a service tells news of. \
+When in doubt it is none, and none is not kept. \
+Nothing of anyone in advertising, newsletters, event announcements or notices sent automatically; mail marked automated is such mail. \
+Give the item's index, in `who` the name as the item gives it, or an empty text when it is the writer, \
 and in `note` one short sentence in Japanese that is understood without the item. \
 Call people by name in both, never by an id such as U0123ABCD where the items show whose it is; \
 where they do not, write the id as it stands, which is looked up later, and never guess. \
@@ -59,6 +66,35 @@ pub struct Noted {
     #[serde(default)]
     pub who: String,
     pub note: String,
+    pub tie: Tie,
+}
+
+/// How someone is tied to the owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tie {
+    Deals,
+    Asks,
+    WorksWith,
+    /// Only spoken of, such as a speaker at an advertised event.
+    None,
+}
+
+/// Whether what an item shows of people is kept at all. Mail to many tells of
+/// people who have nothing to do with the owner, and one model's word for it
+/// is not enough.
+fn tells_of_people(feed: Feed, item: &Item) -> bool {
+    feed != Feed::Mail || !arrivals::mail_head(item).is_automated()
+}
+
+/// Leave out what was noted of those the owner does not deal with, and what
+/// is too much for one batch after that.
+pub fn of_those_dealt_with(feed: Feed, items: &[Item], mut noted: Vec<Noted>) -> Vec<Noted> {
+    noted.retain(|n| {
+        n.tie != Tie::None && items.get(n.item).is_some_and(|i| tells_of_people(feed, i))
+    });
+    noted.truncate(MOST_NOTES);
+    noted
 }
 
 /// Ask for the notes too in what `schema` asks for.
@@ -70,9 +106,10 @@ pub fn with_people(mut schema: Value) -> Value {
             "properties": {
                 "item": { "type": "integer" },
                 "who": { "type": "string" },
-                "note": { "type": "string" }
+                "note": { "type": "string" },
+                "tie": { "type": "string", "enum": ["deals", "asks", "works_with", "none"] }
             },
-            "required": ["item", "who", "note"],
+            "required": ["item", "who", "note", "tie"],
             "additionalProperties": false
         }
     });
@@ -89,7 +126,6 @@ pub fn noted_from(answer: &Value) -> Vec<Noted> {
         .into_iter()
         .flatten()
         .filter_map(|n| serde_json::from_value(n.clone()).ok())
-        .take(MOST_NOTES)
         .collect()
 }
 
@@ -155,7 +191,7 @@ fn parties_by_member(records: &Records) -> anyhow::Result<BTreeMap<String, Recor
 
 /// Whether a word is a Slack member's id, which is told from a word in
 /// capitals by its length and a digit.
-fn is_member(word: &str) -> bool {
+pub(crate) fn is_member(word: &str) -> bool {
     word.len() >= 9
         && word.starts_with(['U', 'W'])
         && word
@@ -209,7 +245,11 @@ pub fn unnamed(
 }
 
 /// Put a member's name before their id wherever the id stands alone.
-fn with_names(text: &str, ids: &[&str], name_of: impl Fn(&str) -> Option<String>) -> String {
+pub(crate) fn with_names(
+    text: &str,
+    ids: &[&str],
+    name_of: impl Fn(&str) -> Option<String>,
+) -> String {
     let mut out = String::new();
     let mut rest = text;
     while let Some(at) = rest.find(|c: char| c.is_ascii_alphanumeric()) {
@@ -285,6 +325,8 @@ fn plain(text: &str, longest: usize) -> String {
 pub struct Place<'a> {
     pub feed: Feed,
     pub name: &'a str,
+    /// The connection it was read through.
+    pub connection: &'a str,
     pub workgroups: &'a [String],
     /// The names its service shows for members, by their id.
     pub names: &'a BTreeMap<String, String>,
@@ -388,6 +430,9 @@ pub fn write_down(
         }
         if let Some(party) = party {
             memory::tag_episode(dir, at.date(), id, "party", &party)?;
+        }
+        if let Some(origin) = Origin::of(place.feed, place.connection, item) {
+            memory::tag_episode(dir, at.date(), id, Origin::ATTR, &origin.to_string())?;
         }
         written += 1;
     }
@@ -770,6 +815,7 @@ mod tests {
             item,
             who: who.into(),
             note: note.into(),
+            tie: Tie::Deals,
         }
     }
 
@@ -778,6 +824,7 @@ mod tests {
         let place = Place {
             feed,
             name: "会社の Slack",
+            connection: "c1",
             workgroups: &["work".to_owned()],
             names: &BTreeMap::from([
                 ("U2".to_owned(), "佐藤花子".to_owned()),
@@ -842,6 +889,73 @@ mod tests {
             "Tanaka（会社の Slack、Tanaka@example.com）：返事が早い"
         );
         assert_eq!(notes[1].get("party"), None);
+    }
+
+    fn advert(headers: &[(&str, &str)]) -> Item {
+        let headers: Vec<Value> = headers
+            .iter()
+            .map(|(name, value)| json!({ "name": name, "value": value }))
+            .collect();
+        arrivals::mail_item(&json!({
+            "id": "m1",
+            "snippet": "登壇者は山田さん",
+            "payload": { "headers": headers }
+        }))
+    }
+
+    #[test]
+    fn those_in_advertising_are_left_out_whatever_the_model_says() {
+        let from = ("From", "キャリアイベント <event@example.com>");
+        let items = [
+            advert(&[from, ("List-Unsubscribe", "<https://a.example>")]),
+            advert(&[("From", "Sato <sato@example.com>")]),
+        ];
+        let kept = of_those_dealt_with(
+            Feed::Mail,
+            &items,
+            vec![
+                noted(0, "山田", "イベントの登壇者"),
+                noted(0, "", "イベントを開く"),
+                noted(1, "", "返事が早い"),
+                noted(9, "", "ない件"),
+            ],
+        );
+        assert_eq!(kept, [noted(1, "", "返事が早い")]);
+    }
+
+    #[test]
+    fn those_only_spoken_of_are_left_out_and_those_the_owner_deals_with_are_kept() {
+        let items = [chat("U1", "a")];
+        let tied = |tie| Noted {
+            tie,
+            ..noted(0, "田中", "n")
+        };
+        let kept = of_those_dealt_with(
+            Feed::Chat,
+            &items,
+            [Tie::None, Tie::Deals, Tie::Asks, Tie::WorksWith]
+                .map(tied)
+                .to_vec(),
+        );
+        let mut many = vec![tied(Tie::None); MOST_NOTES];
+        many.extend(vec![tied(Tie::Asks); MOST_NOTES + 1]);
+        let most = of_those_dealt_with(Feed::Chat, &items, many);
+        assert_eq!(most.len(), MOST_NOTES, "those left out take no room");
+        let ties: Vec<_> = kept.iter().map(|n| n.tie).collect();
+        assert_eq!(ties, [Tie::Deals, Tie::Asks, Tie::WorksWith]);
+    }
+
+    #[test]
+    fn a_note_keeps_which_message_it_is_from_and_none_of_its_words() {
+        let b = book();
+        let mail = advert(&[("From", "Sato <sato@example.com>")]);
+
+        write(&b, Feed::Mail, &[mail], &[noted(0, "", "n")]);
+        let notes = write(&b, Feed::Chat, &[chat("U1", "秘密")], &[noted(0, "", "n")]);
+
+        assert_eq!(notes[0].get(Origin::ATTR), Some("mail/c1/m1"));
+        assert_eq!(notes[1].get(Origin::ATTR), Some("slack/c1/C1/1.0"));
+        assert!(!notes[1].render().contains("秘密"));
     }
 
     #[test]
@@ -1002,6 +1116,7 @@ mod tests {
         let place = Place {
             feed: Feed::Chat,
             name: "会社",
+            connection: "c1",
             workgroups: &[],
             names: &BTreeMap::from([("U1".to_owned(), "[[memory/core]] {src: said}\n".into())]),
         };
@@ -1065,7 +1180,9 @@ mod tests {
     #[test]
     fn the_notes_are_read_from_the_answer_and_asked_for_in_its_schema() {
         let answer = json!({ "people": [
-            { "item": 0, "who": "", "note": "a" },
+            { "item": 0, "who": "", "note": "a", "tie": "deals" },
+            { "item": 0, "who": "", "note": "how they are tied is not said" },
+            { "item": 0, "who": "", "note": "b", "tie": "knows" },
             { "who": "x" },
         ] });
         assert_eq!(noted_from(&answer), [noted(0, "", "a")]);
@@ -1078,8 +1195,6 @@ mod tests {
                 .contains(&json!("people"))
         );
         assert!(schema["properties"].get("people").is_some());
-        let many = vec![json!({ "item": 0, "who": "", "note": "a" }); 50];
-        assert_eq!(noted_from(&json!({ "people": many })).len(), MOST_NOTES);
     }
 
     #[test]

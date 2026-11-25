@@ -20,6 +20,28 @@ message MemoryItem {
   string time = 6;
 }
 
+// Where a note in the inbox came from, as far as it is still known.
+message NoteOrigin {
+  // mail or slack; empty when the note does not say.
+  string kind = 1;
+  // The account it was read in.
+  string account = 2;
+  // The Slack channel.
+  string channel = 3;
+  string from = 4;
+  // The mail's subject.
+  string subject = 5;
+  // When it was written; 0 when unknown.
+  int64 at = 6;
+  // Where it opens; empty when unknown.
+  string url = 7;
+  // The start of what it says.
+  string excerpt = 8;
+  // Where the lookout sent it and why, in words; empty when unknown.
+  string outcome = 9;
+  string reason = 10;
+}
+
 // A memory layer and what it holds now.
 message MemoryLayer {
   // dream, pending, episodic (the inbox of notes), working, core, long, forgotten.
@@ -203,6 +225,11 @@ service MemoryService {
   }
   rpc ReadFile(ReadFileRequest) returns (FileContent) {
     option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Where a note waiting in the inbox (by its id) came from.
+  rpc GetNoteOrigin(ByName) returns (NoteOrigin) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
   }
   // The owner rewrites a memory file; the change is kept as theirs.
   rpc WriteFile(WriteFileRequest) returns (FileContent) {

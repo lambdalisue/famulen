@@ -21,6 +21,7 @@ pub mod link_previews;
 pub mod lookout;
 pub mod memory;
 pub mod models;
+pub mod note_origin;
 pub mod notebook;
 pub mod notebook_place;
 pub mod notices;

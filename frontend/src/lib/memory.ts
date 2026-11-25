@@ -4,6 +4,7 @@ import { api } from "./api";
 
 export const layersQuery = query(async () => (await api.memory.listLayers({})).layers, "memoryLayers");
 export const layerQuery = query((layer: string, at: string) => api.memory.getLayer({ layer, at }), "memoryLayer");
+export const noteOriginQuery = query((id: string) => api.memory.getNoteOrigin({ id }), "noteOrigin");
 export const memoryFileQuery = query((path: string) => api.memory.readFile({ path }), "memoryFile");
 export const dreamsQuery = query(() => api.memory.listDreams({}), "dreams");
 export const dreamSettingsQuery = query(() => api.memory.getDreamSettings({}), "dreamSettings");

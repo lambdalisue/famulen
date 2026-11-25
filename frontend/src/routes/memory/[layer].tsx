@@ -1,9 +1,10 @@
 import { createAsync, Navigate, useParams } from "@solidjs/router";
-import { createEffect, For, Match, Show, Switch } from "solid-js";
+import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import Markdown from "~/components/Markdown";
+import NoteSheet from "~/components/NoteSheet";
 import { EntryRow, SrcTag } from "~/components/MemoryEntry";
-import { EmptyState, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
+import { EmptyState, IconButton, LinkButton, List, ListRow, Loading, Meter, PageHeader, Section } from "~/components/ui";
 import type { Layer, MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import * as icons from "~/lib/icons";
 import { layerQuery, visible } from "~/lib/memory";
@@ -88,6 +89,7 @@ function Notes(props: { data: Layer }) {
   const notes = () => shown(props.data.items);
   const hidden = () => props.data.items.length - notes().length;
   const files = () => [...new Set(notes().map((e) => e.file))];
+  const [open, setOpen] = createSignal<MemoryItem>();
   return (
     <>
       <PageHeader title="気づき" note="雑に書く受信箱。ここにあるのは夢を待つものだけで、夢が整理したら消える。" />
@@ -103,7 +105,13 @@ function Notes(props: { data: Layer }) {
                     lead={<span class="mono sub memory-time">{e.time}</span>}
                     title={<Markdown inline text={e.text} />}
                     sub={<SrcTag src={e.src} />}
-                    end={<AskAbout what={`気づき：${e.text}`} />}
+                    onPick={() => setOpen(e)}
+                    end={
+                      <>
+                        <AskAbout what={`気づき：${e.text}`} />
+                        <IconButton plain icon={icons.listDetails} label={`${e.text} ― 詳細を見る`} title="詳細を見る" onClick={() => setOpen(e)} />
+                      </>
+                    }
                   />
                 )}
               </For>
@@ -111,6 +119,7 @@ function Notes(props: { data: Layer }) {
           </Section>
         )}
       </For>
+      <NoteSheet note={open()} onClose={() => setOpen(undefined)} />
     </>
   );
 }
