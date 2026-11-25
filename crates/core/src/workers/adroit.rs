@@ -177,15 +177,20 @@ fn was_asked(status: &str) -> bool {
     matches!(status, "held" | "rejected" | "lapsed")
 }
 
-/// Every session of the Adroit a run was started in, those that ended too.
-pub(super) async fn sessions(app: &App, run: &Run) -> anyhow::Result<Value> {
+/// The session of a run, and every session that goes on in the Adroit it was
+/// started in. Those that ended are not listed: they grow without end, and a
+/// long answer is cut.
+pub(super) async fn sessions(app: &App, run: &Run) -> anyhow::Result<(Value, Value)> {
     let kept = connection_kept(app, run)?;
     let connection = if kept.is_empty() {
         resolve(app, &run.order)?
     } else {
         kept
     };
-    read(app, &connection, "list_sessions", json!({ "ended": true })).await
+    let own = json!({ "session": run.session, "turns": 1 });
+    let own = read(app, &connection, "read_session", own).await?;
+    let going_on = read(app, &connection, "list_sessions", json!({})).await?;
+    Ok((own, going_on))
 }
 
 /// How a run's session stands. An error says that Adroit cannot be asked; a
