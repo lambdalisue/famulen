@@ -1147,6 +1147,7 @@ mod tests {
                     view: "v".into(),
                     selection: None,
                     attached: Vec::new(),
+                    reply_to: None,
                 },
             ),
             (Sender::Other, said_in("w1", "C1", Some("5.0"))),

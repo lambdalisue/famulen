@@ -86,7 +86,7 @@
   /* The conversation is pulled up from the composer over the whole screen. */
   .chat { position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 25; width: auto; max-width: none; border: 0; padding-top: 6px; background: var(--bg); box-shadow: 0 -10px 12px -2px var(--bg); }
   .chat-edge { display: none; }
-  .chat .messages, .chat .m-sheetbar, .chat #approvals { display: none; }
+  .chat .talk, .chat .m-sheetbar, .chat #approvals { display: none; }
   .m-peek { display: flex; flex-direction: column; gap: 6px; min-height: 64px; margin: 0 12px 6px; padding: 6px 12px 8px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg); text-align: left; cursor: pointer; }
   .m-peek, .m-sheetbar { touch-action: none; user-select: none; -webkit-user-select: none; }
   .peek-line { display: flex; align-items: center; gap: var(--s2); width: 100%; min-width: 0; }
@@ -95,7 +95,16 @@
   .composer .send { font-size: 0; gap: 0; width: 44px; padding: 0; border-radius: 10px; }
   .composer textarea { font-size: 16px; }
   body.chat-open .chat { --under: calc(56px + env(safe-area-inset-bottom)); top: var(--seen-top, 0px); bottom: auto; height: calc(var(--seen-height, 100dvh) - var(--under)); padding-top: var(--clear-top); background: var(--panel); box-shadow: none; z-index: 28; }
-  body.chat-open .chat .messages { display: block; min-height: 0; }
+  body.chat-open .chat .talk { display: flex; }
+  .thread { position: absolute; inset: 0; z-index: 1; border-top: 0; }
+  /* What is seen stays small; the finger is given more room than that. */
+  .msg .meta .reply, .replying .btn { position: relative; }
+  :is(.msg .meta .reply, .replying .btn)::after { content: ""; position: absolute; inset: -12px -10px -4px; }
+  .in-thread { min-height: 36px; }
+  /* At the right, where the thumb is, and out of the way of a tap that only puts the keyboard away. */
+  .msg.aide { width: 100%; }
+  .msg.aide .meta { align-self: stretch; }
+  .msg.aide .meta .reply { margin-left: auto; }
   body.chat-open .chat #approvals { display: flex; flex: 0 1000 auto; min-height: 0; }
   /* What is said gives way first, then the box scrolls inside, so that it ends over the keyboard. */
   body.chat-open .chat .composer { flex: 0 1 auto; min-height: 0; overflow-y: auto; }

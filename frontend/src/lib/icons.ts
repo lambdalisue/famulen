@@ -71,6 +71,7 @@ export { default as lock } from "@tabler/icons/outline/lock.svg?raw";
 export { default as playerSkipForward } from "@tabler/icons/outline/player-skip-forward.svg?raw";
 export { default as video } from "@tabler/icons/outline/video.svg?raw";
 export { default as messagePlus } from "@tabler/icons/outline/message-plus.svg?raw";
+export { default as messages } from "@tabler/icons/outline/messages.svg?raw";
 export { default as dots } from "@tabler/icons/outline/dots.svg?raw";
 export { default as link } from "@tabler/icons/outline/link.svg?raw";
 export { default as tag } from "@tabler/icons/outline/tag.svg?raw";

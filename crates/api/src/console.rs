@@ -5,7 +5,7 @@ use famulen_core::approvals::{self, Answer};
 use famulen_core::attachments::{Attached, MAX_FILES, TOO_MANY};
 use famulen_core::connections::Connection;
 use famulen_core::console_log::{self, Event, Who};
-use famulen_core::input::{Input, Sender, Source};
+use famulen_core::input::{Input, ReplyTo, Sender, Source};
 use famulen_core::store::StoredInput;
 use famulen_core::wording;
 use famulen_core::workgroups::ALL;
@@ -42,31 +42,49 @@ pub(crate) fn attachment(attached: Attached) -> Attachment {
     }
 }
 
-fn attached(m: &console_log::Message) -> Vec<Attached> {
-    m.meta
-        .get("attached")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default()
+fn speaker(who: Who) -> pb::Speaker {
+    match who {
+        Who::Owner => pb::Speaker::SPEAKER_OWNER,
+        Who::Aide => pb::Speaker::SPEAKER_AIDE,
+    }
 }
 
-fn message(m: &console_log::Message) -> ConsoleMessage {
+/// How much of a message is quoted over a reply to it.
+const QUOTED: usize = 200;
+
+/// A message as it is shown while `workgroup` is chosen: nothing of those not
+/// shown there is told with it.
+fn message(
+    log: &console_log::ConsoleLog,
+    m: &console_log::Message,
+    workgroup: &str,
+) -> anyhow::Result<ConsoleMessage> {
     let meta = |key| meta_text(m, key).unwrap_or_default().to_owned();
-    ConsoleMessage {
+    let reply_to = match m.reply_to() {
+        Some(id) => log.get(id)?.filter(|to| shown_in(to, workgroup)),
+        None => None,
+    };
+    Ok(ConsoleMessage {
         id: m.id,
         at: m.at,
-        who: match m.who {
-            Who::Owner => pb::Speaker::SPEAKER_OWNER,
-            Who::Aide => pb::Speaker::SPEAKER_AIDE,
-        }
-        .into(),
+        who: speaker(m.who).into(),
+        reply_to: reply_to
+            .map(|to| pb::RepliedTo {
+                id: to.id,
+                who: speaker(to.who).into(),
+                text: to.excerpt(QUOTED),
+                ..Default::default()
+            })
+            .into(),
+        thread: m.thread().unwrap_or_default(),
         text: m.text.clone(),
         workgroup: meta("workgroup"),
         origin: meta("origin"),
         about: meta("about"),
         open: meta("open"),
-        attachments: attached(m).into_iter().map(attachment).collect(),
+        attachments: m.attached().into_iter().map(attachment).collect(),
         ..Default::default()
-    }
+    })
 }
 
 /// Where a held call is made, with the account, which only the console tells.
@@ -158,6 +176,75 @@ impl Api {
     fn arrived_at(&self, input: i64) -> anyhow::Result<i64> {
         let newest = self.app.store.recent_inputs(input + 1, 1)?;
         Ok(newest.first().map(|(_, at)| *at).unwrap_or_default())
+    }
+
+    fn messages(
+        &self,
+        found: &[console_log::Message],
+        workgroup: &str,
+    ) -> anyhow::Result<Vec<ConsoleMessage>> {
+        found
+            .iter()
+            .map(|m| message(&self.app.console, m, workgroup))
+            .collect()
+    }
+
+    /// The thread the message `id` is in, as far as `workgroup` shows it.
+    fn thread(&self, id: i64, workgroup: &str) -> anyhow::Result<Vec<console_log::Message>> {
+        let log = &self.app.console;
+        let root = log.get(id)?.and_then(|m| m.thread()).unwrap_or(id);
+        let mut found: Vec<_> = log.get(root)?.into_iter().collect();
+        found.extend(log.replies(root)?);
+        found.retain(|m| shown_in(m, workgroup));
+        Ok(found)
+    }
+
+    /// The message a caller says it replies to; `0` is none. One not shown in
+    /// `workgroup` is not replied to from there, as its words go along.
+    fn replied_to(
+        &self,
+        id: i64,
+        workgroup: &str,
+    ) -> Result<Option<console_log::Message>, connectrpc::ConnectError> {
+        if id == 0 {
+            return Ok(None);
+        }
+        match self.app.console.get(id).or_fail()? {
+            None => Err(fail("返信先の発言が見つからない")),
+            Some(m) if !shown_in(&m, workgroup) => {
+                Err(fail("返信先の発言は、ほかのワークグループのもの"))
+            }
+            found => Ok(found),
+        }
+    }
+
+    /// The owner's message being answered, when it is itself a reply: what
+    /// answers it belongs in its thread.
+    fn being_answered(&self) -> anyhow::Result<Option<console_log::Message>> {
+        let Some(running) = self.app.store.running_input()? else {
+            return Ok(None);
+        };
+        match running.input.source {
+            Source::Console {
+                message,
+                reply_to: Some(_),
+                ..
+            } => self.app.console.get(message),
+            _ => Ok(None),
+        }
+    }
+
+    fn say(
+        &self,
+        who: Who,
+        text: &str,
+        meta: serde_json::Value,
+        to: Option<&console_log::Message>,
+    ) -> anyhow::Result<console_log::Message> {
+        match to {
+            Some(to) => self.app.console.reply(who, text, meta, to),
+            None => self.app.console.add(who, text, meta),
+        }
     }
 
     /// A request in the owner's words.
@@ -287,6 +374,19 @@ impl ConsoleService for Api {
         request: ServiceRequest<'_, ListMessagesRequest>,
     ) -> ServiceResult<ListMessagesResponse> {
         let r = request.to_owned_message();
+        if r.thread != 0 {
+            let mut found = self.thread(r.thread, &r.workgroup).or_fail()?;
+            // What it begins with stays, whatever is left out after it.
+            let older = found.len().saturating_sub(MOST_MESSAGES);
+            if older > 0 {
+                found.drain(1..1 + older);
+            }
+            return Response::ok(ListMessagesResponse {
+                messages: self.messages(&found, &r.workgroup).or_fail()?,
+                more: older > 0,
+                ..Default::default()
+            });
+        }
         let limit = match r.limit {
             n if n > 0 => (n as usize).min(MOST_MESSAGES),
             _ => 120,
@@ -302,7 +402,7 @@ impl ConsoleService for Api {
             found.remove(0);
         }
         Response::ok(ListMessagesResponse {
-            messages: found.iter().map(message).collect(),
+            messages: self.messages(&found, &r.workgroup).or_fail()?,
             more,
             ..Default::default()
         })
@@ -333,6 +433,7 @@ impl ConsoleService for Api {
             .collect::<anyhow::Result<Vec<_>>>()
             .or_fail()?;
         let workgroup = self.app.workgroups.resolve(Some(&r.workgroup)).or_fail()?;
+        let to = self.replied_to(r.reply_to, &workgroup.id)?;
         let selection = given(&r.selection).map(str::to_owned);
         let about = [
             (!r.view.is_empty()).then(|| format!("{} · {}", workgroup.name, r.view)),
@@ -342,15 +443,8 @@ impl ConsoleService for Api {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        let m = self
-            .app
-            .console
-            .add(
-                Who::Owner,
-                text,
-                json!({ "origin": "コンソール", "about": about, "workgroup": workgroup.id, "attached": attached }),
-            )
-            .or_fail()?;
+        let meta = json!({ "origin": "コンソール", "about": about, "workgroup": workgroup.id, "attached": attached });
+        let m = self.say(Who::Owner, text, meta, to.as_ref()).or_fail()?;
         let input = Input {
             sender: Sender::Owner,
             source: Source::Console {
@@ -359,13 +453,14 @@ impl ConsoleService for Api {
                 view: r.view.clone(),
                 selection,
                 attached,
+                reply_to: to.as_ref().map(ReplyTo::of),
             },
             text: text.to_owned(),
         };
         self.app.store.enqueue(&input).or_fail()?;
         self.app.inputs.notify_one();
         self.app.working.tell();
-        Response::ok(message(&m))
+        Response::ok(message(&self.app.console, &m, &workgroup.id).or_fail()?)
     }
 
     async fn list_link_previews(
@@ -393,13 +488,18 @@ impl ConsoleService for Api {
         request: ServiceRequest<'_, PostMessageRequest>,
     ) -> ServiceResult<ConsoleMessage> {
         let r = request.to_owned_message();
-        let mut meta = json!({ "workgroup": self.app.workgroups.working().or_fail()? });
+        let workgroup = self.app.workgroups.working().or_fail()?;
+        let to = match r.reply_to {
+            0 => self.being_answered().or_fail()?,
+            id => self.replied_to(id, &workgroup)?,
+        };
+        let mut meta = json!({ "workgroup": workgroup });
         if !r.open.is_empty() {
             meta["open"] = json!(r.open);
         }
-        let m = self.app.console.add(Who::Aide, &r.text, meta).or_fail()?;
+        let m = self.say(Who::Aide, &r.text, meta, to.as_ref()).or_fail()?;
         self.app.working.answered();
-        Response::ok(message(&m))
+        Response::ok(message(&self.app.console, &m, &workgroup).or_fail()?)
     }
 
     async fn get_inbox(
@@ -488,13 +588,19 @@ impl ConsoleService for Api {
         use pb::__buffa::oneof::console_event::Event as E;
         let workgroup = request.workgroup.to_owned();
         let receiver = self.app.console.subscribe();
-        let working = self.app.working.clone();
+        let (working, log) = (self.app.working.clone(), self.app.console.clone());
         let stream = as_stream(receiver).filter_map(move |event| {
-            let (workgroup, working) = (workgroup.clone(), working.clone());
+            let (workgroup, working, log) = (workgroup.clone(), working.clone(), log.clone());
             async move {
                 let event = match event {
                     Event::Message(m) if shown_in(&m, &workgroup) => {
-                        E::Message(Box::new(message(&m)))
+                        match message(&log, &m, &workgroup) {
+                            Ok(m) => E::Message(Box::new(m)),
+                            Err(error) => {
+                                tracing::warn!(%error, "could not tell of a message");
+                                return None;
+                            }
+                        }
                     }
                     Event::Message(_) => return None,
                     Event::Approvals => E::Inbox(Box::default()),

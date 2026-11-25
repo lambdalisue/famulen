@@ -45,7 +45,7 @@ export default function LinkCards(props: { message: bigint }) {
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) void ask();
       },
-      { root: said.closest(".messages"), rootMargin: "100% 0px" },
+      { root: said.closest(".messages, .thread-said"), rootMargin: "100% 0px" },
     );
     seen.observe(said);
     onCleanup(() => seen.disconnect());

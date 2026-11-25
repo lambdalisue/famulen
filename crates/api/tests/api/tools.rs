@@ -231,7 +231,7 @@ fn every_tool_the_secretary_is_told_of_exists() {
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
         .filter(|word| word.contains('_'))
         // A field of a tool's input, not a tool.
-        .filter(|word| *word != "thread_ts")
+        .filter(|word| !["thread_ts", "reply_to"].contains(word))
         .collect();
     assert!(told.contains("post_message"), "{told:?}");
     let missing: Vec<_> = told

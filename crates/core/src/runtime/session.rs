@@ -362,6 +362,7 @@ mod tests {
                 view: "タスク".into(),
                 selection: None,
                 attached: Vec::new(),
+                reply_to: None,
             },
             text: "これは".into(),
         };
@@ -400,6 +401,7 @@ mod tests {
                 view: "タスク".into(),
                 selection: None,
                 attached: Vec::new(),
+                reply_to: None,
             },
             text: "x".into(),
         };
@@ -457,6 +459,7 @@ mod tests {
                 view: String::new(),
                 selection: None,
                 attached: Vec::new(),
+                reply_to: None,
             },
             text: "x".into(),
         };

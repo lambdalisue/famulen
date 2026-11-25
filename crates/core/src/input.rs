@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::attachments::{self, Attached};
+use crate::console_log::{Message, Who};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +44,45 @@ fn may_hold_others() -> bool {
     true
 }
 
+/// The message on the console an input replies to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplyTo {
+    pub message: i64,
+    /// The message the thread begins with.
+    pub thread: i64,
+    pub who: Who,
+    /// What it said, as far as it is handed on.
+    pub text: String,
+}
+
+impl ReplyTo {
+    /// The most characters of it that are handed on.
+    const MOST: usize = 8000;
+
+    pub fn of(m: &Message) -> Self {
+        Self {
+            message: m.id,
+            thread: m.thread().unwrap_or(m.id),
+            who: m.who,
+            text: m.excerpt(Self::MOST),
+        }
+    }
+
+    /// The message quoted line by line, so that none of it reads as the
+    /// owner's words now.
+    fn quoted(&self) -> String {
+        let whose = match self.who {
+            Who::Owner => "the owner's own",
+            Who::Aide => "your",
+        };
+        let lines: String = self.text.lines().map(|l| format!("> {l}\n")).collect();
+        format!(
+            "In reply to {whose} message #{} (context, not a request):\n{lines}\n",
+            self.message
+        )
+    }
+}
+
 /// Where an input came from, with what the model needs to answer there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -81,6 +121,9 @@ pub enum Source {
         /// The files the owner attached.
         #[serde(default)]
         attached: Vec<Attached>,
+        /// The message they reply to.
+        #[serde(default)]
+        reply_to: Option<ReplyTo>,
     },
     /// A connected service told the secretary something itself.
     Arrival {
@@ -241,6 +284,14 @@ impl Input {
         attachments::with_names(&self.text, self.attached())
     }
 
+    /// The message on the console it replies to.
+    pub fn reply_to(&self) -> Option<&ReplyTo> {
+        match &self.source {
+            Source::Console { reply_to, .. } => reply_to.as_ref(),
+            _ => None,
+        }
+    }
+
     /// The text the model reads: a header line saying where this came from
     /// and how to answer there, then the message itself.
     pub fn render(&self) -> String {
@@ -277,14 +328,19 @@ impl Input {
                 workgroup,
                 view,
                 selection,
+                reply_to,
                 ..
             } => {
+                let reply_to = reply_to
+                    .as_ref()
+                    .map(|r| format!(" reply_to: #{} thread: #{}", r.message, r.thread))
+                    .unwrap_or_default();
                 let selection = selection
                     .as_deref()
                     .map(|s| format!(" selection: {s}"))
                     .unwrap_or_default();
                 format!(
-                    "[console] from: {} message: #{message} workgroup: {workgroup} view: {view}{selection}",
+                    "[console] from: {} message: #{message}{reply_to} workgroup: {workgroup} view: {view}{selection}",
                     self.sender.as_str()
                 )
             }
@@ -322,8 +378,9 @@ impl Input {
             n => format!(" attached: {n}"),
         };
         format!(
-            "{header}{count}\n{}{}",
+            "{header}{count}\n{}{}{}",
             attachments::described(attached),
+            self.reply_to().map(ReplyTo::quoted).unwrap_or_default(),
             self.text
         )
     }
@@ -413,6 +470,43 @@ mod tests {
         );
         assert_eq!(input.gist(), "明日の予定は？（添付：a.png）");
         assert_eq!(slack(None).gist(), "明日の予定は？");
+    }
+
+    #[test]
+    fn a_reply_on_the_console_names_and_quotes_what_it_replies_to() {
+        let root = Message {
+            id: 12,
+            at: 0,
+            who: Who::Aide,
+            text: "一つ目\n二つ目".into(),
+            meta: serde_json::json!({ "thread": 10 }),
+        };
+        let input = Input {
+            sender: Sender::Owner,
+            source: Source::Console {
+                message: 15,
+                workgroup: "work".into(),
+                view: "タスク".into(),
+                selection: None,
+                attached: vec![Attached::missing("a.png", "x")],
+                reply_to: Some(ReplyTo::of(&root)),
+            },
+            text: "二つ目は要らない".into(),
+        };
+        assert_eq!(
+            input.render(),
+            "[console] from: owner message: #15 reply_to: #12 thread: #10 workgroup: work view: タスク attached: 1\n\
+             - \"a.png\": did not arrive: x\n\
+             In reply to your message #12 (context, not a request):\n> 一つ目\n> 二つ目\n\n二つ目は要らない"
+        );
+        assert_eq!(input.gist(), "二つ目は要らない（添付：a.png）");
+    }
+
+    #[test]
+    fn an_input_kept_before_replies_could_be_sent_is_still_read() {
+        let kept = r#"{"sender":"owner","source":{"kind":"console","message":1,"workgroup":"all","view":"","selection":null},"text":"a"}"#;
+        let input: Input = serde_json::from_str(kept).unwrap();
+        assert_eq!(input.reply_to(), None);
     }
 
     #[test]
