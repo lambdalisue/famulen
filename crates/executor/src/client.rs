@@ -189,7 +189,9 @@ impl Executor {
                     Err(error) if socket::is_gone(&error) => return Ok(None),
                     stream => stream.context("could not reach the executor")?,
                 };
-                if let Some(connection) = self.greet(stream).await? {
+                if let Some(stream) = stream
+                    && let Some(connection) = self.greet(stream).await?
+                {
                     return Ok(Some(connection));
                 }
                 tokio::time::sleep(HELLO_AGAIN).await;

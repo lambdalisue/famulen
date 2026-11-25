@@ -42,20 +42,21 @@ mod system {
         pub(crate) async fn accept(&mut self) -> std::io::Result<Stream> {
             loop {
                 let (stream, _) = self.0.accept().await?;
-                if is_owner(&stream) {
+                if is_owner(&stream).unwrap_or(false) {
                     return Ok(stream);
                 }
             }
         }
     }
 
-    fn is_owner(stream: &UnixStream) -> bool {
-        let peer = stream.peer_cred().map(|c| c.uid());
-        peer.is_ok_and(|uid| uid == rustix::process::getuid().as_raw())
+    /// It cannot be told once whoever is at the other end is gone.
+    fn is_owner(stream: &UnixStream) -> std::io::Result<bool> {
+        Ok(stream.peer_cred()?.uid() == rustix::process::getuid().as_raw())
     }
 
-    /// Connect, to one of the owner's own processes alone.
-    pub(crate) async fn connect(dir: &Path) -> std::io::Result<Stream> {
+    /// Connect, to one of the owner's own processes alone. `None` when it is
+    /// gone as soon as it is reached.
+    pub(crate) async fn connect(dir: &Path) -> std::io::Result<Option<Stream>> {
         let path = dir.join(NAME);
         let stream = if path.as_os_str().len() <= LONGEST {
             UnixStream::connect(path).await?
@@ -63,12 +64,13 @@ mod system {
             let short = Short::to(dir)?;
             UnixStream::connect(short.0.join(NAME)).await?
         };
-        if is_owner(&stream) {
-            return Ok(stream);
+        match is_owner(&stream) {
+            Ok(true) => Ok(Some(stream)),
+            Ok(false) => Err(std::io::Error::other(
+                "the executor's socket is another user's",
+            )),
+            Err(_) => Ok(None),
         }
-        Err(std::io::Error::other(
-            "the executor's socket is another user's",
-        ))
     }
 
     /// A short name of a directory for as long as it is kept.
@@ -159,12 +161,12 @@ mod system {
         }
     }
 
-    pub(crate) async fn connect(dir: &Path) -> std::io::Result<Stream> {
+    pub(crate) async fn connect(dir: &Path) -> std::io::Result<Option<Stream>> {
         const ALL_BUSY: i32 = 231;
         let name = name(dir);
         loop {
             match ClientOptions::new().open(&name) {
-                Ok(client) => return Ok(NamedPipe::Client(client)),
+                Ok(client) => return Ok(Some(NamedPipe::Client(client))),
                 Err(error) if error.raw_os_error() == Some(ALL_BUSY) => {
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
