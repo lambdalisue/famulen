@@ -16,6 +16,7 @@ mod sight;
 mod spent;
 mod tidy;
 
+pub(crate) use agent::executor_program;
 pub use dispatch::*;
 pub use finish::*;
 pub use order::*;
@@ -31,6 +32,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use famulen_executor::Executors;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -92,6 +94,8 @@ pub struct Workers {
     pub sights: Sights,
     /// Where an agent works, one directory for each run.
     pub(crate) dir: PathBuf,
+    /// The processes agents run under, each named by its run.
+    pub(crate) executors: Executors,
     /// Where no agent's tool may reach, on top of what is sealed for the
     /// secretary: the notebook and Famulen's own data.
     pub(crate) sealed: Vec<PathBuf>,
@@ -105,11 +109,12 @@ pub struct Workers {
 }
 
 impl Workers {
-    pub fn new(store: Store, dir: PathBuf, sealed: Vec<PathBuf>) -> Self {
+    pub fn new(store: Store, dir: PathBuf, executors: Executors, sealed: Vec<PathBuf>) -> Self {
         Self {
             runs: Runs::new(store),
             sights: Sights::default(),
             dir,
+            executors,
             sealed,
             poke: Arc::default(),
             heard: Arc::default(),
@@ -163,11 +168,6 @@ impl Workers {
         Ok(())
     }
 
-    /// Remove what runs of an earlier process left behind.
-    pub(crate) fn sweep(&self) {
-        std::fs::remove_dir_all(&self.dir).ok();
-    }
-
     /// What was told of a session was not attended to: it is looked at again
     /// when the pool next looks.
     fn hear_again(&self, session: &str) {
@@ -195,6 +195,7 @@ mod tests {
         let workers = Workers::new(
             Store::open_in_memory().unwrap(),
             "/data/workers".into(),
+            Executors::new("/data/executors", "key", executor_program().unwrap()),
             vec!["/data/notebook".into()],
         );
         for directory in [

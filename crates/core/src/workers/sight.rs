@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::agents::{Body, PlanStep};
+use crate::agents::{Body, Event, PlanStep};
 
 /// How many runs are kept, the newest.
 const MOST_RUNS: usize = 50;
@@ -261,8 +261,7 @@ impl Sights {
         self.change(run, |s| s.steps = steps);
     }
 
-    pub(super) fn line(&self, run: i64, kind: LineKind, text: &str) {
-        let at = chrono::Utc::now().timestamp_millis();
+    fn line(&self, run: i64, at: i64, kind: LineKind, text: &str) {
         let line = Line::new(at, 0, kind, text);
         if line.text.is_empty() {
             return;
@@ -368,13 +367,14 @@ impl Sights {
     /// One event of an agent. Whether it changed the plan: that alone is
     /// worth telling at once, as what an agent writes changes all the time
     /// and every telling has each open console read everything again.
-    pub(super) fn event(&self, run: i64, event: &Body) -> bool {
-        match event {
-            Body::Said { text, .. } => self.line(run, LineKind::Said, text),
+    pub(super) fn event(&self, run: i64, event: &Event) -> bool {
+        let at = event.at;
+        match &event.body {
+            Body::Said { text, .. } => self.line(run, at, LineKind::Said, text),
             Body::ToolCalled { tool, input, .. } => {
-                self.line(run, LineKind::Called, &called(tool, input));
+                self.line(run, at, LineKind::Called, &called(tool, input));
             }
-            Body::ToolAnswered { output, .. } => self.line(run, LineKind::Answered, output),
+            Body::ToolAnswered { output, .. } => self.line(run, at, LineKind::Answered, output),
             Body::Planned { steps } => {
                 let before = self.of(run).steps;
                 self.plan(run, steps.iter().cloned().map(Step::from).collect());
@@ -522,11 +522,15 @@ mod tests {
         ] {
             let plans = block["name"] == "TodoWrite";
             let line = json!({ "type": kind, "message": { "content": [block] } }).to_string();
-            let changed = Claude
-                .codec()
-                .read(&line)
-                .iter()
-                .any(|event| sights.event(1, event));
+            let changed = Claude.codec().read(&line).into_iter().any(|body| {
+                let event = Event {
+                    seq: 1,
+                    part: 0,
+                    at: 1,
+                    body,
+                };
+                sights.event(1, &event)
+            });
             assert_eq!(changed, plans, "only a plan is told at once");
         }
         let sight = sights.of(1);
@@ -537,10 +541,10 @@ mod tests {
     #[test]
     fn a_change_of_what_stands_in_a_list_is_told_once() {
         let sights = Sights::default();
-        sights.line(1, LineKind::Said, "a");
+        sights.line(1, 0, LineKind::Said, "a");
         assert!(sights.take_changed());
         assert!(!sights.take_changed());
-        sights.line(1, LineKind::Answered, "b");
+        sights.line(1, 0, LineKind::Answered, "b");
         assert!(!sights.take_changed(), "only its own page shows it");
     }
 
@@ -548,14 +552,14 @@ mod tests {
     fn the_runs_used_last_and_the_newest_lines_alone_are_kept() {
         let sights = Sights::default();
         for run in 0..=MOST_RUNS as i64 {
-            sights.line(run, LineKind::Said, "a");
+            sights.line(run, 0, LineKind::Said, "a");
             // The oldest goes on all along.
-            sights.line(0, LineKind::Said, "b");
+            sights.line(0, 0, LineKind::Said, "b");
         }
         assert!(!sights.of(0).lines.is_empty());
         assert_eq!(sights.of(1), Sight::default());
         for n in 0..=MOST_LINES {
-            sights.line(1, LineKind::Said, &n.to_string());
+            sights.line(1, 0, LineKind::Said, &n.to_string());
         }
         let sight = sights.of(1);
         assert_eq!(sight.lines.len(), MOST_LINES);

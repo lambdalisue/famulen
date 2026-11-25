@@ -13,7 +13,7 @@ use anyhow::Context as _;
 use chrono_tz::Tz;
 use serde::Deserialize;
 
-pub use famulen_gateway::process::hide_secrets;
+pub use famulen_gateway::process::{hidden_vars, hide_secrets};
 
 /// Where to keep data, instead of the default.
 pub const DATA_DIR_ENV: &str = "FAMULEN_DATA_DIR";

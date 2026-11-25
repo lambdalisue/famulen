@@ -10,9 +10,14 @@ fn hidden_env(names: impl IntoIterator<Item = String>) -> Vec<String> {
         .collect()
 }
 
-/// Start `command` without [`hidden_env`].
+/// The names of them that are set.
+pub fn hidden_vars() -> Vec<String> {
+    hidden_env(std::env::vars_os().filter_map(|(name, _)| name.into_string().ok()))
+}
+
+/// Start `command` without [`hidden_vars`].
 pub fn hide_secrets(command: &mut tokio::process::Command) {
-    for name in hidden_env(std::env::vars().map(|(name, _)| name)) {
+    for name in hidden_vars() {
         command.env_remove(name);
     }
 }

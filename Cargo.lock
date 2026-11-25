@@ -1192,6 +1192,7 @@ dependencies = [
  "chrono-tz",
  "cron",
  "encoding_rs",
+ "famulen-executor",
  "famulen-gateway",
  "famulen-notebook",
  "feed-rs",

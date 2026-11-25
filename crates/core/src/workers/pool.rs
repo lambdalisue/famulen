@@ -64,8 +64,11 @@ enum Wanted {
 
 /// Run the pool until Famulen stops.
 pub async fn run(app: App) {
-    app.workers.sweep();
-    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    let real = Arc::new(Real::new(app.clone()));
+    if let Err(error) = real.sweep().await {
+        tracing::warn!(%error, "could not clear what earlier runs left");
+    }
+    let pool = Pool::new(app.clone(), real);
     let mut events = app.console.subscribe();
     let mut tick = tokio::time::interval(TICK);
     loop {
@@ -239,6 +242,17 @@ impl Pool {
                     Ok(true)
                 }
             },
+            // An agent that began after all is not kept waiting for a slot: what
+            // it asks is to be answered.
+            State::Starting if run.order.runner == Runner::Agent && run.tries > 0 => {
+                match self.runners.find(run).await {
+                    Ok(Some(began)) => {
+                        self.began(run, began)?;
+                        Ok(true)
+                    }
+                    Ok(None) | Err(_) => Ok(false),
+                }
+            }
             // Tried again when the queue says so.
             State::Starting => Ok(false),
             State::Unreachable if run.session.is_empty() => {
@@ -595,7 +609,9 @@ impl Pool {
             self.take_back(ticket)?;
         }
         let mut left = "Stopped, as its task does not ask for it any more.".to_owned();
-        let unsure = matches!(run.state, State::Starting | State::Unreachable)
+        // An agent is ended below whether or not it can be asked how it stands.
+        let unsure = run.order.runner == Runner::Adroit
+            && matches!(run.state, State::Starting | State::Unreachable)
             && run.session.is_empty()
             && run.tries > 0;
         // A task that will start again keeps its run until it is told whether

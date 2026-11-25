@@ -2072,3 +2072,6 @@ async fn a_session_in_adroit_is_asked_to_go_on_unless_forbidden_and_seen_going_o
     assert_eq!(state(), State::Running);
     assert_ne!(status(), "done");
 }
+
+#[cfg(unix)]
+mod again;

@@ -1,16 +1,22 @@
 //! What starts, watches and stops the runs.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use famulen_executor::Standing;
 use futures_util::future::BoxFuture;
 use tokio::task::AbortHandle;
 
 use super::adroit;
-use super::agent::{Finish, Job};
+use super::agent::{self, Finish, Job};
 use super::order::Runner;
-use super::runs::Run;
+use super::runs::{Run, State};
 use crate::app::App;
+
+/// How often an end is tried, and how long after one that failed.
+const CLEAR_TRIES: u32 = 5;
+const CLEAR_AGAIN: Duration = Duration::from_secs(5);
 
 /// What came of starting a run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +57,7 @@ pub trait Runners: Send + Sync + 'static {
 }
 
 struct Working {
+    job: Arc<Job>,
     abort: AbortHandle,
     finish: Arc<Mutex<Option<Finish>>>,
 }
@@ -76,29 +83,56 @@ impl Real {
         self.agents.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn begin_agent(&self, run: &Run) -> anyhow::Result<Began> {
-        let job = Job::ready(&self.app, run)?;
+    /// See to a run that was started, until it ends.
+    fn attend(&self, run: i64, job: Job) {
+        let job = Arc::new(job);
         let finish = Arc::new(Mutex::new(None));
         let (kept, workers) = (finish.clone(), self.app.workers.clone());
-        let task = tokio::spawn(async move {
-            let done = job.work().await;
-            *kept.lock().unwrap_or_else(|p| p.into_inner()) = Some(done);
-            workers.poke();
+        let task = tokio::spawn({
+            let job = job.clone();
+            async move {
+                let done = job.work().await;
+                *kept.lock().unwrap_or_else(|p| p.into_inner()) = Some(done);
+                workers.poke();
+            }
         });
         self.agents().insert(
-            run.id,
+            run,
             Working {
+                job,
                 abort: task.abort_handle(),
                 finish,
             },
         );
-        Ok(Began::Running(String::new()))
     }
 
-    fn look_at_agent(&self, run: &Run) -> Looked {
+    async fn find_agent(&self, run: &Run) -> anyhow::Result<Option<Began>> {
+        if let Some(trouble) = self.agents().get(&run.id).and_then(|w| w.job.trouble()) {
+            anyhow::bail!(trouble);
+        }
+        Ok(match agent::executor(&self.app, run.id).standing().await? {
+            Standing::None => None,
+            Standing::Foreign => {
+                anyhow::bail!("it runs under an executor of a version that is not spoken with here")
+            }
+            Standing::Working | Standing::Over | Standing::Gone => {
+                Some(Began::Running(String::new()))
+            }
+        })
+    }
+
+    async fn look_at_agent(&self, run: &Run) -> anyhow::Result<Looked> {
+        if !self.agents().contains_key(&run.id) {
+            match agent::executor(&self.app, run.id).standing().await? {
+                Standing::None | Standing::Gone => return Ok(Looked::Lost),
+                Standing::Working | Standing::Foreign | Standing::Over => {
+                    self.attend(run.id, Job::again(&self.app, run));
+                }
+            }
+        }
         let agents = self.agents();
         let Some(working) = agents.get(&run.id) else {
-            return Looked::Lost;
+            return Ok(Looked::Lost);
         };
         // Asked before the finish is read: an agent that ends in between has
         // its finish read below, and is not taken for lost.
@@ -108,12 +142,49 @@ impl Real {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        match finish {
-            Some(finish) if finish.ok => Looked::Done(finish.text),
-            Some(finish) => Looked::Failed(finish.text),
+        Ok(match finish {
+            Some(Finish::Done(text)) => Looked::Done(text),
+            Some(Finish::Failed(text)) => Looked::Failed(text),
+            Some(Finish::Lost) => Looked::Lost,
             None if over => Looked::Lost,
-            None => Looked::Working,
+            None => match working.job.trouble() {
+                Some(trouble) => anyhow::bail!(trouble),
+                None => Looked::Working,
+            },
+        })
+    }
+
+    /// End what is left of runs that are over, or of which nothing is known.
+    pub(super) async fn sweep(&self) -> anyhow::Result<()> {
+        let workers = &self.app.workers;
+        let mut open = BTreeSet::new();
+        for run in workers.runs.open()? {
+            if run.order.runner != Runner::Agent || run.state == State::Ending {
+                continue;
+            }
+            open.insert(run.id);
         }
+        let mut left: BTreeSet<i64> = BTreeSet::new();
+        left.extend(
+            workers
+                .executors
+                .names()?
+                .iter()
+                .filter_map(|n| n.parse::<i64>().ok()),
+        );
+        if let Ok(entries) = std::fs::read_dir(&workers.dir) {
+            left.extend(
+                entries
+                    .flatten()
+                    .filter_map(|e| e.file_name().to_str()?.parse::<i64>().ok()),
+            );
+        }
+        for run in left.difference(&open) {
+            if let Err(error) = agent::clear(&self.app, *run).await {
+                tracing::warn!(run, %error, "could not clear what a run left");
+            }
+        }
+        Ok(())
     }
 }
 
@@ -122,7 +193,17 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::begin(&self.app, run).await,
-                Runner::Agent => self.begin_agent(run),
+                Runner::Agent => {
+                    let job = Job::begin(&self.app, run).await?;
+                    let attended = self
+                        .agents()
+                        .get(&run.id)
+                        .is_some_and(|w| !w.abort.is_finished());
+                    if !attended {
+                        self.attend(run.id, job);
+                    }
+                    Ok(Began::Running(String::new()))
+                }
             }
         })
     }
@@ -131,7 +212,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::find(&self.app, run).await,
-                Runner::Agent => Ok(None),
+                Runner::Agent => self.find_agent(run).await,
             }
         })
     }
@@ -140,7 +221,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::look(&self.app, run).await,
-                Runner::Agent => Ok(self.look_at_agent(run)),
+                Runner::Agent => self.look_at_agent(run).await,
             }
         })
     }
@@ -159,8 +240,24 @@ impl Runners for Real {
     }
 
     fn stop(&self, run: &Run) {
+        if run.order.runner != Runner::Agent {
+            return;
+        }
         if let Some(working) = self.agents().remove(&run.id) {
             working.abort.abort();
         }
+        // What it was handed is gone at once, whatever it takes to end it.
+        std::fs::remove_dir_all(agent::workdir(&self.app, run.id)).ok();
+        let (app, run) = (self.app.clone(), run.id);
+        tokio::spawn(async move {
+            // What cannot be ended now is ended at the next start.
+            for _ in 0..CLEAR_TRIES {
+                match agent::clear(&app, run).await {
+                    Ok(()) => return,
+                    Err(error) => tracing::warn!(run, %error, "could not end a worker"),
+                }
+                tokio::time::sleep(CLEAR_AGAIN).await;
+            }
+        });
     }
 }
