@@ -436,7 +436,7 @@ async fn one_whose_session_is_not_known_to_be_closed_is_kept() {
 #[tokio::test]
 async fn one_with_unsaved_changes_is_kept() {
     for status in [
-        "Working copy changes:\nM a\nWorking copy  (@) : a\n",
+        "Working copy changes:\nM a\nUntracked paths:\n? big\n",
         "The working copy has no changes.\nUntracked paths:\n? big\n",
         "",
     ] {
@@ -457,13 +457,45 @@ async fn one_with_unsaved_changes_is_kept() {
     b.is_kept(&w, "未保存の変更がある").await;
 }
 
+const CHANGED: &str = "Working copy changes:\nM a\nWorking copy  (@) : a\n";
+const COMMIT: &str = "0123456789012345678901234567890123456789";
+
+#[tokio::test]
+async fn one_whose_files_were_changed_is_kept_unless_the_change_is_in_the_trunk() {
+    let b = bench("tidy-changed");
+    let w = b.work();
+    b.says("--no-pager status", says(CHANGED));
+    b.says("~ empty()", says("vutnkkuz\n"));
+    b.is_kept(&w, "未保存の変更がある").await;
+
+    let b = bench("tidy-changed-merged");
+    let w = b.work();
+    std::fs::write(w.path.join(".git"), "gitdir: x").unwrap();
+    b.says("--no-pager status", says(CHANGED));
+    b.says("-T commit_id", says(COMMIT));
+    assert_eq!(b.tidy(How::Remove).await[0].fate, Fate::Removed);
+}
+
 #[tokio::test]
 async fn one_git_sees_changes_in_is_kept() {
     let b = bench("tidy-git");
     let w = b.work();
     std::fs::write(w.path.join(".git"), "gitdir: x").unwrap();
-    b.says("git --no-optional-locks status", says("?? nested/\n"));
-    b.is_kept(&w, "未保存の変更がある").await;
+    for status in [CHANGED, "The working copy has no changes.\n"] {
+        for (part, said) in [
+            ("git --no-optional-locks diff", says("a\n")),
+            ("git --no-optional-locks diff", fails("bad object")),
+            ("ls-files", says("nested/\n")),
+            ("ls-files", fails("no index")),
+            ("-T commit_id", says("")),
+        ] {
+            b.fake.says.lock().unwrap().clear();
+            b.says("--no-pager status", says(status));
+            b.says(part, said);
+            b.says("-T commit_id", says(COMMIT));
+            b.is_kept(&w, "未保存の変更").await;
+        }
+    }
 }
 
 #[tokio::test]
