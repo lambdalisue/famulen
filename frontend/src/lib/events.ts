@@ -3,9 +3,9 @@ import { createEffect, createSignal, on, onCleanup } from "solid-js";
 import type { ConsoleMessage } from "~/gen/famulen/v1/console_pb";
 import { api } from "./api";
 
-const [incoming, setIncoming] = createSignal<ConsoleMessage | undefined>(undefined, { equals: false });
+const [incoming, setIncoming] = createSignal<{ of: string; m: ConsoleMessage } | undefined>(undefined, { equals: false });
 
-/** The newest message pushed while the console is open. */
+/** The newest message pushed while the console is open, and the workgroup it was pushed for. */
 export const pushed = incoming;
 
 /**
@@ -19,11 +19,12 @@ export function followEvents(workgroup: () => string) {
   const run = async () => {
     while (!stopped) {
       abort = new AbortController();
+      const of = workgroup();
       try {
-        for await (const e of api.console.subscribeEvents({ workgroup: workgroup() }, { signal: abort.signal })) {
+        for await (const e of api.console.subscribeEvents({ workgroup: of }, { signal: abort.signal })) {
           switch (e.event.case) {
             case "message":
-              setIncoming(e.event.value);
+              setIncoming({ of, m: e.event.value });
               break;
             case "inbox":
               await revalidate("inbox");

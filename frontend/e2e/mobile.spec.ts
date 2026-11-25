@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { call, detail, expectView, record, row, visit } from "./support";
 
 function tabbar(page: Page) {
@@ -334,4 +334,167 @@ test("a lookout keeps its name readable beside its buttons, and goes along with 
     await call(request, "LookoutService", "RemoveLookout", { id: added.id });
     await call(request, "ConnectionService", "DeleteConnection", { id: r.connection.id });
   }
+});
+
+/** Open the chat on enough messages to read back through, with one of them in the middle in sight. */
+async function readBack(page: Page, request: APIRequestContext, name: string) {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (let i = 0; i < 12; i++) {
+    await call(request, "ConsoleService", "PostMessage", { text: `${name} ${i}\n\n${"長い話。".repeat(30)}` });
+  }
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const list = page.locator("#messages");
+  const read = page.getByTestId("message").filter({ hasText: `${name} 5` });
+  await expect(page.getByTestId("message").filter({ hasText: `${name} 11` }).locator(".markdown-body")).toBeVisible();
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+  await read.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await settled(page);
+  return { list, at: async () => Math.round((await read.boundingBox())?.y ?? Number.NaN) };
+}
+
+/** Wait until what came has been laid out and drawn. */
+function settled(page: Page) {
+  return page.evaluate(() => new Promise<void>((done) => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => done())), 300)));
+}
+
+/** Change a record, and wait until the conversation has been read again for it. */
+async function changeRecord(page: Page, request: APIRequestContext, title: string) {
+  await settled(page);
+  const read = page.waitForResponse((r) => r.url().endsWith("/ListMessages"));
+  await record(request, "memos", title);
+  await read;
+}
+
+async function reject(page: Page) {
+  const card = page.getByTestId("approval");
+  await card.getByRole("button", { name: "却下" }).click();
+  await expect(card).toHaveCount(0);
+}
+
+test("the conversation stays where it is read, whatever comes, and follows again from its end", async ({ page, request }) => {
+  const { list, at } = await readBack(page, request, "読み返す");
+  const before = await at();
+  const still = async (what: string) => {
+    await settled(page);
+    expect(Math.abs((await at()) - before), what).toBeLessThanOrEqual(1);
+  };
+
+  await call(request, "ConsoleService", "PostMessage", { text: "読む間に来た発言" });
+  await expect(page.getByTestId("message").filter({ hasText: "読む間に来た発言" }).last()).toBeAttached();
+  await still("a message");
+  await changeRecord(page, request, "読む間に足したメモ");
+  await still("a record");
+  await page.getByTestId("message").filter({ hasText: "読み返す 2" }).evaluate((el: HTMLElement) => {
+    el.style.minHeight = `${el.offsetHeight + 200}px`;
+  });
+  await still("a message above that grew, as with an image");
+  await call(request, "ConsoleService", "Send", { text: "e2e-bash", workgroup: "all" });
+  await expect(page.getByTestId("approval")).toBeVisible();
+  await still("a request");
+  await reject(page);
+  await still("a request that went");
+
+  const long = page.getByTestId("message").filter({ hasText: "読み返す 5" });
+  const end = long.locator(".markdown-body > *").last();
+  await end.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await list.evaluate((el) => el.scrollBy(0, 20));
+  await settled(page);
+  const inside = (await end.boundingBox())?.y ?? Number.NaN;
+  await long.locator(".meta").evaluate((el: HTMLElement) => {
+    el.style.paddingBottom = "150px";
+  });
+  await settled(page);
+  expect(Math.abs(((await end.boundingBox())?.y ?? Number.NaN) - inside), "the message itself grew above").toBeLessThanOrEqual(1);
+
+  await list.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await settled(page);
+  await call(request, "ConsoleService", "PostMessage", { text: `末尾で来た発言\n\n${"続き。".repeat(60)}` });
+  await expect(page.getByTestId("message").filter({ hasText: "末尾で来た発言" }).last().locator(".markdown-body")).toBeVisible();
+  await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+});
+
+test("what is being written keeps the keyboard, its text and its caret, whatever comes", async ({ page, request }) => {
+  const { at } = await readBack(page, request, "書きながら");
+  const say = page.getByPlaceholder(/に頼む$/);
+  await say.focus();
+  await keyboard(page, { top: 0, height: 500 });
+  await say.fill("打ちかけの文字");
+  await say.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(3, 3));
+  await settled(page);
+  const before = await at();
+  await say.evaluate((el) => {
+    el.addEventListener("blur", () => el.setAttribute("data-lost", ""));
+  });
+  const kept = async (what: string) => {
+    await settled(page);
+    await expect(say, what).toBeFocused();
+    expect(await say.getAttribute("data-lost"), what).toBeNull();
+    await expect(say).toHaveValue("打ちかけの文字");
+    expect(await say.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([3, 3]);
+    await expect(page.locator("#m-tabbar")).toBeHidden();
+    expect(Math.abs((await at()) - before), what).toBeLessThanOrEqual(1);
+  };
+
+  await call(request, "ConsoleService", "PostMessage", { text: "書く間に来た発言" });
+  await expect(page.getByTestId("message").filter({ hasText: "書く間に来た発言" }).last()).toBeAttached();
+  await kept("a message");
+  await changeRecord(page, request, "書く間に足したメモ");
+  await kept("a record");
+  await call(request, "ConsoleService", "Send", { text: "e2e-bash", workgroup: "all" });
+  await expect(page.getByTestId("approval")).toBeVisible();
+  await kept("a request");
+  await page.route(/\/(ListMessages|GetInbox|GetPersona)$/, async (r) => {
+    await new Promise((done) => setTimeout(done, 1500));
+    await r.continue();
+  });
+  await record(request, "memos", "ゆっくり届くメモ");
+  await call(request, "ConsoleService", "PostMessage", { text: "読み直す間に来た発言" });
+  await kept("a message while the rest is read again");
+  await expect(page.getByTestId("message").filter({ hasText: "読み直す間に来た発言" }).last()).toBeAttached();
+  await page.unroute(/\/(ListMessages|GetInbox|GetPersona)$/);
+  await page.route(/\/(ListMessages|GetInbox|GetPersona)$/, (r) => r.abort());
+  await record(request, "memos", "届かない間に足したメモ");
+  await kept("a reload that failed");
+  await page.unroute(/\/(ListMessages|GetInbox|GetPersona)$/);
+  await changeRecord(page, request, "また届いたメモ");
+  await kept("a reload after that");
+  await say.evaluate((el) => el.blur());
+  await keyboard(page, { top: 0, height: 844 });
+  await reject(page);
+});
+
+test("what the owner opened in a request stays open while records change", async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await visit(page, "/", /^ホーム/);
+  await call(request, "ConsoleService", "Send", { text: "e2e-long-bash", workgroup: "all" });
+  await expect(page.locator(".m-peek")).toContainText("確認 1");
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const card = page.getByTestId("approval");
+  await card.getByRole("button", { name: "すべて読む" }).tap();
+  const fold = card.getByRole("button", { name: "畳む" });
+  await fold.focus();
+  await changeRecord(page, request, "確認を読む間に足したメモ");
+  await settled(page);
+  await expect(fold).toBeFocused();
+  await reject(page);
+});
+
+test("what is read far back stays while the conversation, longer than is read at once, is read again", async ({ page, request }) => {
+  const post = (text: string) => call(request, "ConsoleService", "PostMessage", { text });
+  for (let i = 0; i < 125; i++) await post(`遠い発言 ${i}`);
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const oldest = page.getByTestId("message").first();
+  const text = (await oldest.locator(".markdown-body").innerText()).trim();
+  await page.locator("#messages").evaluate((el) => el.scrollTo(0, 0));
+  await settled(page);
+  const at = async () => Math.round((await oldest.boundingBox())?.y ?? Number.NaN);
+  const before = await at();
+  await post("遠くを読む間に来た発言");
+  await expect(page.getByTestId("message").filter({ hasText: "遠くを読む間に来た発言" }).last()).toBeAttached();
+  await changeRecord(page, request, "遠くを読む間に足したメモ");
+  await settled(page);
+  await expect(oldest.locator(".markdown-body")).toHaveText(text);
+  expect(Math.abs((await at()) - before)).toBeLessThanOrEqual(1);
 });
