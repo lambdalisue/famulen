@@ -28,8 +28,9 @@
 
 ## Quality gate
 
-Run `just ci` before reporting a change as done. CI runs the same recipe,
-and `just e2e` for anything the console shows.
+Run `just ci` before reporting a change as done. CI runs the same recipe on
+Linux, `just e2e` for anything the console shows, and on macOS
+`just ci-macos`: only the tests an OS can make a difference to.
 
 ## Workflow
 

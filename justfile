@@ -23,10 +23,11 @@ lint:
 # not look after each commit whether one needs maintenance. The library path
 # Nix's cargo sets on macOS for its own curl makes every program a test starts,
 # most of them Git, several times slower; the runner takes it out again.
-test:
+# Arguments go to cargo.
+test *args:
     CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER="env -u DYLD_LIBRARY_PATH" \
     GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false \
-    cargo test --workspace --no-fail-fast
+    cargo test --workspace --no-fail-fast {{args}}
 
 # Stamp a copy of the manifests the way a release does, so a placeholder the
 # release workflow would no longer find fails here, on every OS.
@@ -55,5 +56,10 @@ e2e *args: console-setup
     cargo build -p famulen
     cd frontend && pnpm exec playwright install --with-deps chromium && pnpm e2e {{args}}
 
-# Everything CI runs on every OS.
+# Everything CI runs on Linux.
 ci: fmt-check lint test stamp-check console-check
+
+# What CI runs on macOS: the tests an OS can make a difference to. The rest of
+# `just ci` is the same on every OS, and Linux checks it.
+ci-macos:
+    skip=$(perl scripts/os-free-tests.pl) && just test --tests -- $skip
