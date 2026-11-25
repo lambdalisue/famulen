@@ -37,6 +37,15 @@ export async function openLog(page: Page, path: string, view: string | RegExp, t
   return sheet;
 }
 
+/**
+ * Look at a page once it has drawn a frame. Chromium can hold a wheel back
+ * until the next frame, and a page at rest draws none by being looked at.
+ */
+export async function onFrame<T>(page: Page, look: () => Promise<T>): Promise<T> {
+  await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(drawn)));
+  return look();
+}
+
 /** The note at the bottom of the screen after a change. */
 export function toast(page: Page) {
   return page.locator("#toast");
