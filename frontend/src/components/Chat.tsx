@@ -15,7 +15,7 @@ import { chatMarkdown } from "~/lib/chat";
 import { workgroup } from "~/lib/workgroup";
 import { inboxQuery, messagesQuery } from "~/lib/data";
 import { useWaiting } from "~/lib/inbox";
-import { pushed } from "~/lib/events";
+import { pushed, working } from "~/lib/events";
 import { excerptOf } from "~/lib/records";
 import { tabNamed } from "~/lib/tabs";
 import { useOwner } from "~/lib/owner";
@@ -286,13 +286,19 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
               <EmptyState>{aide()} に頼みごとを書く。右の画面で見ているものも一緒に渡る。</EmptyState>
             </Show>
             <For each={messages()}>{(m) => <Message m={m} aide={aide()} tz={tz()} />}</For>
+            <Show when={working()}>
+              <div class="working" data-testid="working">
+                <span class="working-dot" aria-hidden="true" />
+                <span class="working-text">{working()}</span>
+              </div>
+            </Show>
           </div>
         </div>
         <Inbox aide={aide()} />
         <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.setOpen(true)}>
           <span class="sheet-grip" />
           <span class="peek-line">
-            <span class="peek-text">{excerptOf(last()?.text ?? "", 200) || "まだ話していない"}</span>
+            <span class="peek-text">{working() || excerptOf(last()?.text ?? "", 200) || "まだ話していない"}</span>
             <Show when={waiting.count() > 0}>
               <Tag tone="warn">確認 {waiting.count()}</Tag>
             </Show>

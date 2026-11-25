@@ -227,6 +227,10 @@ impl ChannelService for Api {
             .console
             .add(famulen_core::console_log::Who::Aide, &r.text, meta)
             .or_fail()?;
+        // The message is out; failing here would have it said twice.
+        if let Err(error) = self.app.working.said_on_slack() {
+            tracing::warn!(%error, "could not note that the secretary answered");
+        }
         Response::ok(SendSlackResponse {
             ts,
             ..Default::default()

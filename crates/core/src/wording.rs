@@ -128,6 +128,32 @@ const VERBS: &[(&str, &str)] = &[
     ("write", "書く"),
 ];
 
+/// Verbs of a call that only looks.
+const LOOKS: &[&str] = &[
+    "fetch", "find", "get", "list", "query", "read", "search", "view",
+];
+
+/// What the secretary does while a call is under way, where its place and
+/// verb do not say it well.
+const UNDER_WAY: &[(&str, &str)] = &[
+    ("Bash", "コマンドを実行しています…"),
+    ("Edit", "ファイルを書いています…"),
+    ("Glob", "ファイルを調べています…"),
+    ("Grep", "ファイルを調べています…"),
+    ("MultiEdit", "ファイルを書いています…"),
+    ("NotebookEdit", "ファイルを書いています…"),
+    ("PowerShell", "コマンドを実行しています…"),
+    ("Read", "ファイルを読んでいます…"),
+    ("WebFetch", "ウェブを調べています…"),
+    ("WebSearch", "ウェブを調べています…"),
+    ("Write", "ファイルを書いています…"),
+    ("mcp__famulen__delegate_task", "仕事を委ねています…"),
+    ("mcp__famulen__list_events", "予定を調べています…"),
+    ("mcp__famulen__remember", "覚え書きを書いています…"),
+    ("mcp__famulen__save_record", "記録を書いています…"),
+    ("mcp__famulen__search_notebook", "手帳を調べています…"),
+];
+
 /// The particle the object of a verb takes, where it is not を.
 const PARTICLES: &[(&str, &str)] = &[
     ("answer", "に"),
@@ -480,6 +506,31 @@ pub fn place(tool: &str, connection: Option<&Connection>) -> String {
     }
 }
 
+/// What the secretary is doing while a call is under way, where that is more
+/// than thinking. Nothing the call is given is in it.
+pub fn under_way(tool: &str, connection: Option<&Connection>) -> Option<String> {
+    if let Some(whole) = look_up(UNDER_WAY, tool) {
+        return Some(whole.to_owned());
+    }
+    let (id, name) = parts(tool);
+    let id = id?;
+    let verb = words(name)
+        .into_iter()
+        .take(2)
+        .map(|w| w.to_lowercase())
+        .find(|w| look_up(VERBS, w).is_some());
+    let looks = verb.is_some_and(|verb| LOOKS.contains(&verb.as_str()));
+    if id == crate::hub::SERVER_NAME {
+        return looks.then(|| "手元の記録を調べています…".to_owned());
+    }
+    let place = place(tool, connection);
+    Some(if looks {
+        format!("{place} を調べています…")
+    } else {
+        format!("{place} で作業しています…")
+    })
+}
+
 /// An email as Gmail is given one, in the text it is.
 pub(crate) fn letter(raw: &str) -> Option<String> {
     let bytes = URL_SAFE_NO_PAD.decode(raw.trim_end_matches('=')).ok()?;
@@ -635,6 +686,32 @@ mod tests {
         ] {
             assert_eq!(deed(tool, None), does, "{tool}");
         }
+    }
+
+    #[test]
+    fn a_call_under_way_reads_as_what_the_secretary_is_doing() {
+        for (tool, does) in [
+            ("Bash", Some("コマンドを実行しています…")),
+            ("WebSearch", Some("ウェブを調べています…")),
+            ("ToolSearch", None),
+            ("TodoWrite", None),
+            ("mcp__famulen__delegate_task", Some("仕事を委ねています…")),
+            (
+                "mcp__famulen__list_records",
+                Some("手元の記録を調べています…"),
+            ),
+            ("mcp__famulen__post_message", None),
+            ("mcp__famulen__set_working", None),
+            ("mcp__notion__notion-search", Some("notion を調べています…")),
+            ("mcp__asana__createTask", Some("asana で作業しています…")),
+        ] {
+            assert_eq!(under_way(tool, None).as_deref(), does, "{tool}");
+        }
+        let mine = connection("google-2", "google", "会社の Gmail");
+        assert_eq!(
+            under_way("mcp__google-2__search_messages", Some(&mine)).as_deref(),
+            Some("会社の Gmail を調べています…")
+        );
     }
 
     #[test]

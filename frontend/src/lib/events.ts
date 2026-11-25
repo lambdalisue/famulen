@@ -1,12 +1,25 @@
 import { revalidate } from "@solidjs/router";
 import { createEffect, createSignal, on, onCleanup } from "solid-js";
-import type { ConsoleMessage } from "~/gen/famulen/v1/console_pb";
+import type { ConsoleMessage, Working } from "~/gen/famulen/v1/console_pb";
 import { api } from "./api";
 
 const [incoming, setIncoming] = createSignal<ConsoleMessage | undefined>(undefined, { equals: false });
 
 /** The newest message pushed while the console is open. */
 export const pushed = incoming;
+
+const [doing, setDoing] = createSignal("");
+
+/** What the secretary is doing for the owner, in words; empty when there is nothing to show. */
+export const working = doing;
+
+let stale: ReturnType<typeof setTimeout> | undefined;
+
+function show(w: Working) {
+  clearTimeout(stale);
+  setDoing(w.text);
+  if (w.text) stale = setTimeout(() => setDoing(""), w.seconds * 1000);
+}
 
 /**
  * Follow what changes on the backend: new messages arrive as they are said,
@@ -24,6 +37,9 @@ export function followEvents(workgroup: () => string) {
           switch (e.event.case) {
             case "message":
               setIncoming(e.event.value);
+              break;
+            case "working":
+              show(e.event.value);
               break;
             case "inbox":
               await revalidate("inbox");

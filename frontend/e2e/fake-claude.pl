@@ -2,6 +2,7 @@
 # A stand-in for Claude Code in the browser tests: each message the owner
 # sends becomes one short turn that ends without calling a tool, except that a
 # message holding `e2e-bash` first asks to run Bash, one holding
+# `e2e-work` searches the web for some seconds, one holding
 # `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
 # tells of a plan and writes for some seconds.
 #
@@ -49,6 +50,13 @@ while (my $line = <STDIN>) {
       if $line =~ /e2e-bash/;
     print qq({"type":"control_request","request_id":"e2e-long-bash","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"), "ls\\n" x 60, qq(rm e2e-last"}}}\n)
       if $line =~ /e2e-long-bash/;
+    if ($line =~ /e2e-work/) {
+        sleep 2;
+        print qq({"type":"assistant","message":{"id":"w","content":[{"type":"tool_use","id":"w1","name":"WebSearch","input":{"query":"x"}}]}}\n);
+        sleep 4;
+        print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"x"}]}}\n);
+        sleep 2;
+    }
     if ($line =~ /e2e-plan/) {
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"まず読む"}]}}\n);
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"},{"content":"書く","status":"in_progress"}]}}]}}\n);
