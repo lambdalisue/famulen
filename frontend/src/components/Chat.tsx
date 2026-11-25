@@ -43,22 +43,24 @@ function Inbox(props: { aide: string }) {
       <For each={heldOnes()}>
         {(h) => (
           <div class="approval">
-            <div class="row">
-              <AideIcon size={20} />
-              <b class="approval-title">途中で切れた依頼</b>
-            </div>
-            <div class="asked">{[...h.text].slice(0, 300).join("")}</div>
-            <p class="sub">
-              {props.aide}{" "}
-              が止まったとき、外への呼び出しがまだ終わっていなかった。もう一度やると、送信などが二重になるかもしれない。済んでいたかを確かめてから選ぶ。
-            </p>
-            <div class="row">
-              <Button variant="primary" small onClick={() => held(h.id, true)}>
-                続ける
-              </Button>
-              <Button small onClick={() => held(h.id, false)}>
-                やめる
-              </Button>
+            <header class="asked-head">
+              <Icon svg={icons.alertTriangle} size={16} />
+              <b>途中で切れた依頼</b>
+            </header>
+            <div class="asked-in">
+              <div class="asked">{[...h.text].slice(0, 300).join("")}</div>
+              <p class="sub">
+                {props.aide}{" "}
+                が止まったとき、外への呼び出しがまだ終わっていなかった。もう一度やると、送信などが二重になるかもしれない。済んでいたかを確かめてから選ぶ。
+              </p>
+              <div class="row">
+                <Button variant="primary" small onClick={() => held(h.id, true)}>
+                  続ける
+                </Button>
+                <Button small onClick={() => held(h.id, false)}>
+                  やめる
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -362,6 +364,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
         <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.setOpen(true)}>
           <span class="sheet-grip" />
           <span class="peek-line">
+            <AideIcon size={24} />
             <span class="peek-text">{working() || excerptOf(last()?.text ?? "", 200) || "まだ話していない"}</span>
             <Show when={waiting.count() > 0}>
               <Tag tone="warn">確認 {waiting.count()}</Tag>
