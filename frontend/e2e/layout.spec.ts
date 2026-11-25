@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { call, dayFromToday, record } from "./support";
+import { call, dayFromToday, onFrame, record } from "./support";
 
 const WIDTHS = [390, 1280, 1440, 1920];
 
@@ -131,7 +131,7 @@ test.describe("the left and the right each scroll by themselves", () => {
     ]) {
       const before = await top(page, other);
       await wheel(page, over);
-      await expect.poll(() => top(page, over)).toBeGreaterThan(0);
+      await expect.poll(() => onFrame(page, () => top(page, over))).toBeGreaterThan(0);
       expect(await top(page, other)).toBe(before);
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
       await expect(page.locator(".topbar")).toBeInViewport({ ratio: 1 });
@@ -161,7 +161,7 @@ test.describe("the left and the right each scroll by themselves", () => {
       await wheel(page, ".chat .messages");
       // A wheel is answered only after the fact: the next one that is answered shows this one was too.
       await wheel(page, ".detail");
-      await expect.poll(() => top(page, ".detail")).toBeGreaterThan(0);
+      await expect.poll(() => onFrame(page, () => top(page, ".detail"))).toBeGreaterThan(0);
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
     });
   }

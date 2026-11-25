@@ -1,6 +1,6 @@
 import type { APIRequestContext, Page, Request } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { call, visit } from "./support";
+import { call, onFrame, visit } from "./support";
 
 const SAID = 130;
 
@@ -77,7 +77,7 @@ test("what is read stays where it is, as older and newer messages come", async (
   await expect.poll(() => atEnd(page)).toBeLessThan(2);
   await page.locator("#messages").hover();
   await page.mouse.wheel(0, -100);
-  await expect.poll(() => atEnd(page)).toBeGreaterThan(50);
+  await expect.poll(() => onFrame(page, () => atEnd(page))).toBeGreaterThan(50);
   await page.locator("#messages").evaluate((el) => el.scrollTo(0, 120));
   await expect(page.getByText("前の発言を読み込んでいる")).toBeVisible();
   await expect(messages(page).first().locator(".markdown-body")).toBeVisible();
