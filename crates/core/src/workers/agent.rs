@@ -21,6 +21,7 @@ use super::runs::Run;
 use crate::app::App;
 use crate::claude::protocol::{self, ControlRequest, Inbound};
 use crate::claude::session::sandbox_settings;
+use crate::disclosure;
 use crate::gateway::NEEDS_OWNER;
 use crate::hub::failed;
 use crate::models::{ModelSpec, Models, Role, Usage};
@@ -354,6 +355,10 @@ impl Job {
         if let Some(refused) = self.app.permissions.refused_launch(server, message) {
             return Some(refused);
         }
+        if let Some(why) = disclosure::refused_to_workers(&self.app, server, message) {
+            self.unasked_if(&full(name), &format!("{NEEDS_OWNER} ({why})"));
+            return Some(failed(message, &why));
+        }
         let ask = self
             .app
             .permissions
@@ -365,6 +370,27 @@ impl Job {
             .handle_unasked(WORKER, ask, server, message)
             .await
             .map(|r| self.app.permissions.without_launchers(server, r))?;
+        let clients = self
+            .app
+            .slack
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let taints = disclosure::of_answer(
+            clients.as_deref(),
+            &self.app.permissions,
+            server,
+            message,
+            &response,
+        )
+        .await;
+        if let Err(error) = disclosure::note_run(&self.app.store, self.run, &taints) {
+            tracing::warn!(%error, "could not mark what a worker read");
+            return Some(failed(
+                message,
+                "famulen could not keep that this was read.",
+            ));
+        }
         if let Some(tools) = response
             .pointer_mut("/result/tools")
             .and_then(Value::as_array_mut)

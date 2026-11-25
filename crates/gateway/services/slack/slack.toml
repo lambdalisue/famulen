@@ -133,7 +133,7 @@ name = "channel_info"
 description = "Read a channel's name and what it is about, as the owner."
 method = "GET"
 path = "/conversations.info"
-query = { channel = "{args.channel}" }
+query = { channel = "{args.channel}", include_num_members = "true" }
 input = { type = "object", properties = { channel = { type = "string", title = "チャンネルの ID", description = "C で始まる ID" } }, required = ["channel"] }
 auth = "user"
 ok = "{/ok}"

@@ -485,6 +485,22 @@ CREATE TABLE IF NOT EXISTS approval_places (
     channel   TEXT NOT NULL,
     thread    TEXT NOT NULL
 );
+-- What was read in confidence in a turn (`input:<id>`), or is handed on to a
+-- wake-up (`wake:<id>`) or a delegated task (`task:<id>`).
+CREATE TABLE IF NOT EXISTS taints (
+    holder TEXT NOT NULL,
+    taint  TEXT NOT NULL,
+    PRIMARY KEY (holder, taint)
+);
+-- What each request that asks about a disclosure would let be said, and where.
+CREATE TABLE IF NOT EXISTS disclosures (
+    ticket    INTEGER PRIMARY KEY,
+    input     INTEGER NOT NULL,
+    workspace TEXT NOT NULL,
+    channel   TEXT NOT NULL,
+    taints    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS disclosures_input ON disclosures (input);
 -- The browsers notices are sent to.
 CREATE TABLE IF NOT EXISTS notice_devices (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,

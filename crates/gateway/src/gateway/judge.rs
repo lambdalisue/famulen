@@ -439,7 +439,10 @@ impl Gateway {
                 Some(ask) if call.actor != OWNER => ask.clone(),
                 _ => return Ok(Verdict::Allow { reason }),
             },
-            Err(reason) => reason,
+            Err(reason) => match &call.ask {
+                Some(ask) => format!("{ask}\n{reason}"),
+                None => reason,
+            },
         };
         if call.actor == OWNER || call.waive {
             return Ok(Verdict::Allow {

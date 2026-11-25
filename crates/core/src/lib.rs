@@ -12,6 +12,7 @@ pub mod claude;
 pub mod config;
 pub mod console_log;
 pub mod contracts;
+pub mod disclosure;
 pub mod dream_schedule;
 pub mod dream_settings;
 pub mod dreaming;

@@ -12,12 +12,13 @@ use serde_json::{Value, json};
 use famulen_gateway::{Question, Ticket};
 
 use crate::asking;
+use crate::disclosure;
 use crate::input::{Input, Reach, Sender, Source};
 use crate::permissions::Permissions;
 use crate::slack::clients::SlackClients;
 use crate::slack::events::Action;
 use crate::slack::mrkdwn::escape;
-use crate::slack::web::{Outgoing, Slack};
+use crate::slack::web::{Outgoing, Room, Slack};
 use crate::store::{Store, now};
 use crate::wording;
 
@@ -232,7 +233,7 @@ impl<S: Slack> Approvals<S> {
         let Some(slack) = &self.slack else {
             return Ok(());
         };
-        let message = self.ask_message(id, &tool, input);
+        let message = self.ask_message(ticket, &tool);
         match self.ask_in_conversation(ticket, &message).await {
             Ok(true) => return Ok(()),
             Ok(false) => {}
@@ -250,6 +251,27 @@ impl<S: Slack> Approvals<S> {
 
     fn owner(&self, workspace: &str) -> &str {
         self.owners.get(workspace).map_or("", String::as_str)
+    }
+
+    pub(crate) fn slack(&self) -> Option<&SlackClients<S>> {
+        self.slack.as_ref()
+    }
+
+    /// The workspace a call names; the main one when it names none.
+    pub(crate) fn workspace<'a>(&'a self, named: &'a str) -> &'a str {
+        match &self.slack {
+            Some(slack) if named.is_empty() => slack.main_id(),
+            _ => named,
+        }
+    }
+
+    /// What Slack tells of a conversation; nothing when it cannot be asked.
+    pub(crate) async fn room(&self, workspace: &str, channel: &str) -> Room {
+        let slack = self.slack.as_ref();
+        match slack.and_then(|s| s.get(Some(workspace)).ok()) {
+            Some(slack) => slack.room_or_unknown(channel).await,
+            None => Room::default(),
+        }
     }
 
     /// Whether `channel` is the bot's DM with the owner, in `workspace` or
@@ -393,13 +415,16 @@ impl<S: Slack> Approvals<S> {
     }
 
     /// The message that asks for an answer to a request.
-    fn ask_message(&self, id: i64, tool: &str, input: &Value) -> Outgoing {
+    fn ask_message(&self, ticket: &Ticket, tool: &str) -> Outgoing {
+        let (id, input) = (ticket.id, &ticket.shown);
         let questions = questions(&self.permissions, tool, input);
         if questions.is_empty() {
             let asked = Asked::of(&self.permissions, tool);
-            return request_message(id, &asked, input, None, once(&self.permissions, tool));
+            let once = once(&self.permissions, tool) || discloses(ticket);
+            let summary = summary(ticket);
+            return request_message(id, &asked, input, summary, None, once);
         }
-        question_message(id, tool, input, &questions)
+        question_message(id, tool, summary(ticket), &questions)
     }
 
     /// Put every ticket still held that the owner has not been shown.
@@ -456,6 +481,11 @@ impl<S: Slack> Approvals<S> {
         if let Some(ticket) = self.asked(id)? {
             return self.settle_asked(ticket, answer, None).await;
         }
+        let before = self.permissions.gateway().ticket(id)?;
+        let answer = match answer {
+            Answer::AlwaysAllow if before.as_ref().is_some_and(discloses) => Answer::Approve,
+            answer => answer,
+        };
         let Some(answered) = self
             .permissions
             .gateway()
@@ -515,20 +545,27 @@ impl<S: Slack> Approvals<S> {
             return Ok(None);
         };
         self.tell_console();
+        if discloses(&answered.ticket) {
+            crate::journal::Journal::new(self.store.clone()).record(
+                disclosure::JOURNAL,
+                format!("確認 #{id}：{}", answer.note()),
+            );
+        }
         if let Some(clients) = &self.slack {
             let place = place_of(&self.store, id)?;
             let workspace = place.as_ref().map(|p| p.workspace.as_str());
             match (clients.get(workspace), channel, ts, &place) {
                 (Ok(slack), Some(channel), Some(ts), _) => {
                     let asked = Asked::of(&self.permissions, &tool);
+                    let summary = summary(&answered.ticket);
                     let failed = match &answered.ran {
                         Some(Err(error)) => Some(format!("届けられませんでした: {error:#}")),
                         _ => None,
                     };
                     let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
                     let message = match note {
-                        Some(note) => noted_message(id, &asked, &input, &note),
-                        None => request_message(id, &asked, &input, Some(answer), false),
+                        Some(note) => noted_message(id, &asked, summary, &note),
+                        None => request_message(id, &asked, &input, summary, Some(answer), false),
                     };
                     slack.update(&channel, &ts, message).await?;
                 }
@@ -731,6 +768,12 @@ pub fn may_show_secret(ticket: &Ticket) -> bool {
     exposure::kept_to_dm(ticket)
 }
 
+/// Whether a request asks to let be said what may be confidential. It is asked
+/// each time.
+pub fn discloses(ticket: &Ticket) -> bool {
+    disclosure::reason_of(&ticket.reason).is_some()
+}
+
 /// Whether the owner answers questions in a request instead of approving it.
 pub fn asks_questions(permissions: &Permissions, ticket: &Ticket) -> bool {
     !questions(permissions, &ticket_tool(ticket), &ticket.shown).is_empty()
@@ -751,10 +794,11 @@ pub fn questions(permissions: &Permissions, tool: &str, shown: &Value) -> Vec<Qu
         .unwrap_or_default()
 }
 
-/// What the secretary says of a request beside what is asked.
-pub fn summary(shown: &Value) -> Option<&str> {
-    shown["call"]["summary"]
-        .as_str()
+/// What is said of a request beside what is asked: by the secretary, or why
+/// it would disclose something.
+pub fn summary(ticket: &Ticket) -> Option<&str> {
+    disclosure::reason_of(&ticket.reason)
+        .or_else(|| ticket.shown["call"]["summary"].as_str())
         .filter(|s| !s.trim().is_empty())
 }
 
@@ -787,9 +831,9 @@ impl Asked {
 }
 
 /// The part of a request's message that says what it is about.
-fn heading(id: i64, what: &str, shown: &Value) -> Vec<Value> {
+fn heading(id: i64, what: &str, summary: Option<&str>) -> Vec<Value> {
     let mut blocks = vec![section(&format!("*確認 #{id}* {what}"))];
-    if let Some(summary) = summary(shown) {
+    if let Some(summary) = summary {
         let text: String = crate::slack::mrkdwn::to_mrkdwn(summary)
             .chars()
             .take(INPUT_PREVIEW_CHARS)
@@ -799,13 +843,13 @@ fn heading(id: i64, what: &str, shown: &Value) -> Vec<Value> {
     blocks
 }
 
-fn question_message(id: i64, tool: &str, shown: &Value, asked: &[Question]) -> Outgoing {
+fn question_message(id: i64, tool: &str, summary: Option<&str>, asked: &[Question]) -> Outgoing {
     let what = if tool == asked::TOOL {
         "ほかの人からの質問"
     } else {
         "セッションからの質問"
     };
-    let mut blocks = heading(id, what, shown);
+    let mut blocks = heading(id, what, summary);
     match asking::blocks(id, asked) {
         Some(asking) => blocks.extend(asking),
         None => blocks.push(context("長くて全部は出せないので、コンソールで答える")),
@@ -824,8 +868,8 @@ fn question_message(id: i64, tool: &str, shown: &Value, asked: &[Question]) -> O
 }
 
 /// A request's message once it is answered, with how.
-fn noted_message(id: i64, asked: &Asked, shown: &Value, note: &str) -> Outgoing {
-    let mut blocks = heading(id, &asked.mrkdwn(), shown);
+fn noted_message(id: i64, asked: &Asked, summary: Option<&str>, note: &str) -> Outgoing {
+    let mut blocks = heading(id, &asked.mrkdwn(), summary);
     blocks.push(json!({ "type": "section", "text": { "type": "plain_text", "text": note.chars().take(INPUT_PREVIEW_CHARS).collect::<String>() } }));
     Outgoing {
         text: format!("確認 #{id}: {note}"),
@@ -838,10 +882,11 @@ fn request_message(
     id: i64,
     asked: &Asked,
     input: &Value,
+    summary: Option<&str>,
     answered: Option<Answer>,
     once: bool,
 ) -> Outgoing {
-    let mut blocks = heading(id, &format!("{}を許しますか？", asked.mrkdwn()), input);
+    let mut blocks = heading(id, &format!("{}を許しますか？", asked.mrkdwn()), summary);
     // What is decided is shown as it is, without the secretary's own words.
     let input = input.get("decides").unwrap_or(input);
     let said = said(input);
@@ -1449,7 +1494,7 @@ mod tests {
             place: "どこか".into(),
         };
         let buttons = |input: &Value, once: bool| -> Vec<String> {
-            let blocks = request_message(1, &asked, input, None, once)
+            let blocks = request_message(1, &asked, input, None, None, once)
                 .blocks
                 .unwrap();
             blocks

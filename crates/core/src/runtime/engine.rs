@@ -20,6 +20,7 @@ use crate::approvals::Answer;
 use crate::claude::session::{Options, Services};
 use crate::claude::skills;
 use crate::config::Config;
+use crate::disclosure::ModelReader;
 use crate::dream_settings::DreamSettings;
 use crate::gateway::Arrival;
 use crate::hub::OwnTools;
@@ -66,6 +67,11 @@ pub(super) fn start_engine(
     services.turn_ended = Some(app.inputs.clone());
     services.in_flight = links.in_flight.clone();
     services.gateway = Some(app.gateway.clone());
+    services.reader = Some(Arc::new(ModelReader::new(
+        app.models.clone(),
+        app.settings.clone(),
+    )));
+    services.workdir = config.workdir();
     services.approvals = services.approvals.with_notices(app.notices.clone());
     let services = Arc::new(services);
     install_answerer(app, &services);
