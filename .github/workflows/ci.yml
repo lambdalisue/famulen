@@ -52,8 +52,14 @@ jobs:
           CI: "1"
 
   # The console driven in a browser against a fresh backend. Browsers are
-  # installed per run, so this stays on one OS.
+  # installed per run, so this stays on one OS. The test files are split over
+  # runners rather than run side by side on one: each has a backend and a
+  # processor to itself, as locally.
   e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/4, 2/4, 3/4, 4/4]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -72,7 +78,7 @@ jobs:
         with:
           shared-key: workspace
           save-if: false
-      - run: just e2e
+      - run: just e2e --shard=${{ matrix.shard }}
         env:
           CI: "1"
 
