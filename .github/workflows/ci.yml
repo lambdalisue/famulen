@@ -71,14 +71,13 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      # The store the development shell comes from, and what Nix unpacked of
-      # the inputs it is evaluated from. Only an exact match is restored, and
-      # only main saves, so pull requests cannot evict the caches each other
-      # start from.
+      # The store the development shell comes from. Only an exact match is
+      # restored, and only main saves, so pull requests cannot evict the
+      # caches each other start from. Nothing of the home directory goes with
+      # it: it is unpacked as root, which would leave ~/.cache to root.
       - uses: nix-community/cache-nix-action@v7.0.2
         with:
-          primary-key: nix-shell-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust-toolchain.toml') }}
-          paths: ~/.cache/nix
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust-toolchain.toml') }}
           save: ${{ github.ref == 'refs/heads/main' }}
       # Load the development shell (flake.nix) into the job, so the steps
       # below run the same commands as local development.
@@ -116,8 +115,7 @@ jobs:
             experimental-features = nix-command flakes
       - uses: nix-community/cache-nix-action@v7.0.2
         with:
-          primary-key: nix-shell-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust-toolchain.toml') }}
-          paths: ~/.cache/nix
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'rust-toolchain.toml') }}
           save: false
       - uses: nicknovitski/nix-develop@v1.2.1
       - uses: Swatinem/rust-cache@v2.9.3
