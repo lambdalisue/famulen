@@ -35,6 +35,7 @@ fn work() -> Work {
             sealed: vec![PathBuf::from("/data/notebook")],
             unread: vec![PathBuf::from("/runs")],
             readable: vec![PathBuf::from("/w")],
+            hosts: vec!["127.0.0.1".into()],
         },
         ..Work::default()
     }
@@ -62,6 +63,12 @@ fn it_is_started_with_nothing_but_what_it_was_handed() {
     let files = &settings["sandbox"]["filesystem"];
     assert_eq!(files["denyRead"], json!(["/data/notebook", "/runs"]));
     assert_eq!(files["allowRead"], json!(["/w"]));
+    let network = &settings["sandbox"]["network"];
+    assert_eq!(network["deniedDomains"], json!(["127.0.0.1"]));
+    assert_eq!(network["allowUnixSockets"], json!([]));
+    for open in ["allowLocalBinding", "allowAllUnixSockets"] {
+        assert_eq!(network[open], false, "{open}");
+    }
     assert!(after("--disallowedTools").contains("Task"));
     assert_eq!(files["allowWrite"], json!([]));
     assert_eq!(launch.env["ENABLE_CLAUDEAI_MCP_SERVERS"], "false");
@@ -235,4 +242,164 @@ async fn it_is_asked_of_its_version_and_login_alone() {
     assert!(probe.supported);
     assert_eq!(probe.logged_in, Some(false));
     assert!(Claude.probe(Some("/nowhere/claude")).await.is_err());
+}
+
+/// What a real Claude Code lets a shell command reach, told by the command
+/// itself. The model is made up here and asks for that one command, so no
+/// login is needed.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "needs claude and its sandbox on this machine"]
+async fn a_shell_command_reaches_nothing_the_fence_keeps() {
+    use std::os::unix::net::UnixListener;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+
+    let dir = crate::notebook::testing::TempDir::new("claude-fence");
+    // Where none of a system's own temporary places is.
+    let home = crate::sealed::home()
+        .unwrap()
+        .join(format!(".famulen-fence-{}", std::process::id()));
+    let (workdir, notebook, runs) = (home.join("w"), home.join("notebook"), home.join("runs"));
+    for made in [&workdir, &notebook, &runs] {
+        std::fs::create_dir_all(made).unwrap();
+        std::fs::write(made.join("a.md"), "written").unwrap();
+    }
+    let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = api.local_addr().unwrap().port();
+    let socket = home.join("s");
+    let _unix = UnixListener::bind(&socket).unwrap();
+    let probe = format!(
+        r#"import socket, urllib.request
+def told(name, do):
+    try: print(name, (do(), "reached")[1])
+    except Exception as e: print(name, "kept", type(e).__name__)
+def tcp(): socket.create_connection(("127.0.0.1", {port}), 3)
+def unix():
+    s = socket.socket(socket.AF_UNIX); s.connect("{socket}")
+def http(): urllib.request.urlopen("http://localhost:{port}/", timeout=3)
+told("own", lambda: open("{w}/a.md").read())
+told("notebook", lambda: open("{n}/a.md").read())
+told("write", lambda: open("{n}/b.md", "w"))
+told("tcp", tcp)
+told("http", http)
+told("unix", unix)
+told("bind", lambda: socket.create_server(("127.0.0.1", 0)))
+"#,
+        socket = socket.display(),
+        w = workdir.display(),
+        n = notebook.display(),
+    );
+    std::fs::write(workdir.join("probe.py"), probe).unwrap();
+
+    let heard: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let model = {
+        let heard = heard.clone();
+        move |body: String| {
+            let asked: Value = serde_json::from_str(&body).unwrap_or_default();
+            let answered = body.contains("tool_result");
+            heard.lock().unwrap().push(asked);
+            let command = json!({ "command": "python3 probe.py", "description": "probe" });
+            let (block, delta, stop) = if answered {
+                (
+                    json!({ "type": "text", "text": "" }),
+                    json!({ "type": "text_delta", "text": "done" }),
+                    "end_turn",
+                )
+            } else {
+                (
+                    json!({ "type": "tool_use", "id": "t1", "name": "Bash", "input": {} }),
+                    json!({ "type": "input_json_delta", "partial_json": command.to_string() }),
+                    "tool_use",
+                )
+            };
+            let events = [
+                json!({ "type": "message_start", "message": { "id": "m", "type": "message", "role": "assistant", "model": "opus", "content": [], "stop_reason": null, "usage": { "input_tokens": 1, "output_tokens": 1 } } }),
+                json!({ "type": "content_block_start", "index": 0, "content_block": block }),
+                json!({ "type": "content_block_delta", "index": 0, "delta": delta }),
+                json!({ "type": "content_block_stop", "index": 0 }),
+                json!({ "type": "message_delta", "delta": { "stop_reason": stop, "stop_sequence": null }, "usage": { "output_tokens": 1 } }),
+                json!({ "type": "message_stop" }),
+            ];
+            let text: String = events
+                .iter()
+                .map(|e| format!("event: {}\ndata: {e}\n\n", e["type"].as_str().unwrap()))
+                .collect();
+            async move { ([("content-type", "text/event-stream")], text) }
+        }
+    };
+    let app = axum::Router::new().fallback(model);
+    let at = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", at.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(at, app).await });
+
+    let work = Work {
+        message: "probe".into(),
+        tools: vec!["Bash".into()],
+        workdir: workdir.clone(),
+        fence: Fence {
+            sealed: vec![notebook.clone()],
+            unread: vec![runs],
+            readable: vec![workdir.clone()],
+            hosts: vec!["127.0.0.1".into(), "localhost".into()],
+        },
+        ..Work::default()
+    };
+    let launch = Claude.launch(&work, None).unwrap();
+    let mut child = tokio::process::Command::new(&launch.program)
+        .args(&launch.args)
+        .envs(&launch.env)
+        .env("ANTHROPIC_BASE_URL", base)
+        .env("ANTHROPIC_AUTH_TOKEN", "made-up")
+        .env("CLAUDE_CONFIG_DIR", dir.path())
+        .current_dir(&workdir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for line in &launch.input {
+        stdin
+            .write_all(format!("{line}\n").as_bytes())
+            .await
+            .unwrap();
+    }
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut codec = Claude.codec();
+    let told = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        let mut told = String::new();
+        while let Some(line) = lines.next_line().await.unwrap() {
+            for body in codec.read(&line) {
+                match body {
+                    Body::Asked { question } => {
+                        let answer = match &question.ask {
+                            // As the worker's bounds would: nothing but it.
+                            Ask::Tool { tool, .. } if tool == "Bash" => Answer::Allow,
+                            Ask::Tool { .. } => Answer::Refuse { why: "no".into() },
+                            Ask::Server { .. } | Ask::Unknown { .. } => continue,
+                        };
+                        let line = Claude.answer(&question, &answer).unwrap();
+                        stdin
+                            .write_all(format!("{line}\n").as_bytes())
+                            .await
+                            .unwrap();
+                    }
+                    Body::ToolAnswered { output, .. } => told.push_str(&output),
+                    Body::TurnEnded { .. } => return told,
+                    _ => {}
+                }
+            }
+        }
+        told
+    })
+    .await;
+    let written = notebook.join("b.md").exists();
+    std::fs::remove_dir_all(&home).ok();
+    assert!(!written, "what it wrote is nowhere");
+    let told = told.expect("an end in time");
+    assert!(told.contains("own reached"), "{told}");
+    for kept in ["notebook", "tcp", "http", "unix"] {
+        assert!(told.contains(&format!("{kept} kept")), "{kept}: {told}");
+    }
 }

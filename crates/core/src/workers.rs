@@ -87,6 +87,15 @@ impl Settings {
     }
 }
 
+/// What no agent doing a delegated task may reach.
+#[derive(Debug, Clone, Default)]
+pub struct Kept {
+    /// On top of what is sealed for the secretary: the notebook and Famulen's
+    /// own data.
+    pub places: Vec<PathBuf>,
+    pub hosts: Vec<String>,
+}
+
 /// What the rest of Famulen shares with the pool.
 #[derive(Clone)]
 pub struct Workers {
@@ -96,9 +105,7 @@ pub struct Workers {
     pub(crate) dir: PathBuf,
     /// The processes agents run under, each named by its run.
     pub(crate) executors: Executors,
-    /// Where no agent's tool may reach, on top of what is sealed for the
-    /// secretary: the notebook and Famulen's own data.
-    pub(crate) sealed: Vec<PathBuf>,
+    pub(crate) kept: Kept,
     poke: Arc<Notify>,
     /// Adroit sessions something was told of, to be looked at at once.
     heard: Arc<Mutex<HashSet<String>>>,
@@ -109,13 +116,13 @@ pub struct Workers {
 }
 
 impl Workers {
-    pub fn new(store: Store, dir: PathBuf, executors: Executors, sealed: Vec<PathBuf>) -> Self {
+    pub fn new(store: Store, dir: PathBuf, executors: Executors, kept: Kept) -> Self {
         Self {
             runs: Runs::new(store),
             sights: Sights::default(),
             dir,
             executors,
-            sealed,
+            kept,
             poke: Arc::default(),
             heard: Arc::default(),
             closed: Arc::default(),
@@ -158,7 +165,7 @@ impl Workers {
                 .iter()
                 .any(|p| of.iter().any(|d| p.starts_with(d) || d.starts_with(p)))
         };
-        if let Some(place) = self.sealed.iter().chain([&self.dir]).find(overlaps) {
+        if let Some(place) = self.kept.places.iter().chain([&self.dir]).find(overlaps) {
             anyhow::bail!(
                 "no agent works in {}: {} is kept from it",
                 directory.display(),
@@ -196,7 +203,10 @@ mod tests {
             Store::open_in_memory().unwrap(),
             "/data/workers".into(),
             Executors::new("/data/executors", "key", executor_program().unwrap()),
-            vec!["/data/notebook".into()],
+            Kept {
+                places: vec!["/data/notebook".into()],
+                ..Kept::default()
+            },
         );
         for directory in [
             "/data",

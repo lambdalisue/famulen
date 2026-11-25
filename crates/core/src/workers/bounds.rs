@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use super::Kept;
 use super::order::may_hand;
 use crate::paths::under;
 use crate::permissions::{DELEGATE_INSTEAD, LAUNCHERS, split_tool};
@@ -17,6 +18,7 @@ pub(super) struct Bounds {
     workdir: PathBuf,
     roots: Vec<PathBuf>,
     sealed: Sealed,
+    hosts: Vec<String>,
 }
 
 impl Bounds {
@@ -24,7 +26,7 @@ impl Bounds {
         tools: &[String],
         workdir: &Path,
         directory: Option<&Path>,
-        sealed: &[PathBuf],
+        kept: &Kept,
     ) -> Self {
         Self {
             tools: tools.to_vec(),
@@ -33,7 +35,8 @@ impl Bounds {
                 .chain(directory)
                 .map(Path::to_owned)
                 .collect(),
-            sealed: Sealed::new(sealed, workdir),
+            sealed: Sealed::new(&kept.places, workdir),
+            hosts: kept.hosts.clone(),
         }
     }
 
@@ -75,6 +78,9 @@ impl Bounds {
         if let Some(refused) = self.sealed.refusal(tool, input) {
             return Some(refused);
         }
+        if tool == "WebFetch" {
+            return self.refused_host(input);
+        }
         let mut fields = PATH_FIELDS.iter().filter(|(name, _)| *name == tool);
         let (_, field) = fields.next()?;
         // What is not read here as the model CLI would read it is not run.
@@ -114,12 +120,47 @@ impl Bounds {
         ))
     }
 
+    /// Why a page is not read: it is on this machine, or cannot be told where
+    /// it is.
+    fn refused_host(&self, input: &Value) -> Option<String> {
+        let text = input.get("url").and_then(Value::as_str).unwrap_or_default();
+        let Ok(url) = url::Url::parse(text.trim()) else {
+            return Some(format!("WebFetch: {text:?} cannot be told where it leads."));
+        };
+        let near = match url.host() {
+            None => true,
+            Some(url::Host::Ipv4(ip)) => is_near(ip),
+            Some(url::Host::Ipv6(ip)) => {
+                ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                    || ip.to_ipv4_mapped().is_some_and(is_near)
+            }
+            // A name without a dot is one of the network here.
+            Some(url::Host::Domain(name)) => {
+                let name = name.trim_end_matches('.');
+                !name.contains('.') || name.ends_with(".localhost")
+            }
+        };
+        let bare = |host: &str| host.trim_matches(['[', ']', '.']).to_ascii_lowercase();
+        let host = bare(url.host_str().unwrap_or_default());
+        (near || self.hosts.iter().any(|h| bare(h) == host))
+            .then(|| format!("WebFetch: {host} is kept from you."))
+    }
+
     /// Whether `path`, its links followed, stays in a root.
     fn inside(&self, path: &Path) -> bool {
         // Told strictly: what may be inside under another name is not.
         let path = resolved(path);
         self.roots.iter().any(|root| under(&path, &resolved(root)))
     }
+}
+
+/// Whether an address is of this machine or the network it is in.
+fn is_near(ip: std::net::Ipv4Addr) -> bool {
+    let shared = ip.octets()[0] == 100 && (64..128).contains(&ip.octets()[1]);
+    ip.is_loopback() || ip.is_unspecified() || ip.is_private() || ip.is_link_local() || shared
 }
 
 #[cfg(test)]
@@ -137,7 +178,10 @@ mod tests {
             &tools,
             &dir.path().join("work"),
             Some(&dir.path().join("repo")),
-            &[dir.path().join("notebook")],
+            &Kept {
+                places: vec![dir.path().join("notebook")],
+                hosts: vec!["famulen.example.ts.net".into()],
+            },
         )
     }
 
@@ -202,6 +246,35 @@ mod tests {
         ];
         for (tool, input) in refused {
             assert!(b.refusal(tool, &input).is_some(), "{tool} {input}");
+        }
+    }
+
+    #[test]
+    fn no_page_of_this_machine_or_of_famulen_is_read() {
+        let dir = TempDir::new("bounds-hosts");
+        let b = bounds(&dir, &["WebFetch"]);
+        let read = |url: &str| b.refusal("WebFetch", &json!({ "url": url }));
+        for url in [
+            "http://127.0.0.1:7790/health",
+            "http://127.1:7790",
+            "http://2130706433/",
+            "http://localhost:3000",
+            "http://a.localhost.",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://0.0.0.0/",
+            "http://192.168.1.2:7790/",
+            "http://100.100.1.2/",
+            "http://[fd7a::1]:7790/",
+            "http://console:3000/",
+            "https://FAMULEN.example.ts.net/",
+            "file:///etc/hosts",
+            "",
+        ] {
+            assert!(read(url).is_some(), "{url}");
+        }
+        for url in ["https://example.com/a", "http://93.184.216.34/"] {
+            assert_eq!(read(url), None, "{url}");
         }
     }
 

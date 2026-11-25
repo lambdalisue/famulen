@@ -181,6 +181,12 @@ fn args(work: &Work, resume: Option<&str>) -> Vec<String> {
         );
     }
     files["allowRead"] = json!(work.fence.readable);
+    settings["sandbox"]["network"] = json!({
+        "deniedDomains": work.fence.hosts,
+        "allowLocalBinding": false,
+        "allowUnixSockets": [],
+        "allowAllUnixSockets": false,
+    });
     put("--settings", settings.to_string());
     put("--append-system-prompt", work.instructions.clone());
     put("--disallowedTools", work.withheld.join(","));

@@ -20,6 +20,7 @@ use crate::permissions::Permissions;
 use crate::records::Records;
 use crate::settings::Settings;
 use crate::store::Store;
+use crate::workers::Kept;
 use crate::workgroups::Workgroups;
 
 /// Open everything Famulen keeps where `config` says, without starting
@@ -36,6 +37,41 @@ pub(super) fn sealed_places(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
         executors_dir(config),
         std::env::current_dir()?.join(".env"),
     ])
+}
+
+/// The hosts no agent doing a delegated task may reach: this machine, with
+/// the API, the console and the receivers on it, by every name it is known
+/// to go by.
+fn hosts_kept_from_workers(config: &Config) -> Vec<String> {
+    let mut hosts: Vec<String> = [
+        "localhost",
+        "*.localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "::1",
+        "[::1]",
+        "::",
+        "[::]",
+        "host.docker.internal",
+    ]
+    .map(String::from)
+    .into();
+    let urls = [&config.console_url, &config.receive_url];
+    hosts.extend(
+        urls.into_iter()
+            .flatten()
+            .filter_map(|u| url::Url::parse(u).ok()?.host_str().map(str::to_owned)),
+    );
+    hosts.extend(config.api.hosts.iter().cloned());
+    for listen in std::iter::once(config.api.listen).chain(config.receive_listen) {
+        hosts.push(listen.ip().to_string());
+        if listen.is_ipv6() {
+            hosts.push(format!("[{}]", listen.ip()));
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    hosts.retain(|h| seen.insert(h.clone()));
+    hosts
 }
 
 /// Where the processes agents run under keep what they keep and are asked.
@@ -78,6 +114,7 @@ fn sealed_from_workers(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
     let mut places = sealed_places(config)?;
     places.push(config.notebook_dir());
     places.push(config.workdir());
+    places.extend(config.workers_sealed.iter().cloned());
     let database = config.database_path();
     for suffix in ["", "-wal", "-shm"] {
         let mut path = database.clone().into_os_string();
@@ -181,7 +218,10 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
             store.clone(),
             config.data_dir.join("workers"),
             executors(config, &store)?,
-            sealed_from_workers(config)?,
+            Kept {
+                places: sealed_from_workers(config)?,
+                hosts: hosts_kept_from_workers(config),
+            },
         ),
         lookout: lookout.clone(),
         triage: crate::triage::Triage::new(store.clone()),
@@ -258,7 +298,47 @@ mod tests {
         let app = crate::runtime::testing::app(dir.path());
         let claude = super::claudes().unwrap();
         for said in ["projects", "history.jsonl"] {
-            assert!(app.workers.sealed.contains(&claude.join(said)), "{said}");
+            assert!(
+                app.workers.kept.places.contains(&claude.join(said)),
+                "{said}"
+            );
+        }
+    }
+
+    #[test]
+    fn famulen_and_the_notebook_wherever_it_is_cloned_are_kept_from_workers() {
+        let dir = TempDir::new("kept-from-workers");
+        let config = crate::config::Config::load(
+            Some(
+                "console_url = \"https://famulen.example.ts.net\"\n[api]\nhosts = [\"backend\"]\n",
+            ),
+            |name| (name == "HOME").then(|| crate::paths::at("/home/me")),
+            crate::config::Defaults {
+                data_dir: dir.path().to_owned(),
+                timezone: chrono_tz::Asia::Tokyo,
+            },
+        )
+        .unwrap();
+        let places = super::sealed_from_workers(&config).unwrap();
+        let clone = std::path::PathBuf::from(crate::paths::at("/home/me")).join("notebook");
+        for place in [
+            config.gateway_dir(),
+            config.notebook_dir(),
+            config.database_path(),
+            super::executors_dir(&config),
+            clone,
+        ] {
+            assert!(places.contains(&place), "{}", place.display());
+        }
+        let hosts = super::hosts_kept_from_workers(&config);
+        for host in [
+            "localhost",
+            "127.0.0.1",
+            "[::1]",
+            "famulen.example.ts.net",
+            "backend",
+        ] {
+            assert!(hosts.iter().any(|h| h == host), "{host}");
         }
     }
 }
