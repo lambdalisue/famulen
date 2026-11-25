@@ -93,6 +93,8 @@ pub(crate) const AGAIN_AFTER: i64 = 30 * 60;
 const WAITS: i64 = 14 * 24 * 3600;
 /// How much of a mail's text the model reads.
 const TEXT_CHARS: usize = 6000;
+/// How many of one mark in a row may tell something.
+const MARKS: usize = 3;
 /// The tool that reads a message whole.
 const READ: &str = "read_message";
 /// A mail that waits to be read.
@@ -292,7 +294,7 @@ fn may_ask(app: &App) -> anyhow::Result<bool> {
 
 async fn answer(app: &App, system: &str, prompt: &str, schema: &Value) -> anyhow::Result<Value> {
     app.models
-        .complete(Role::Lookout, app.tz(), system, prompt, Some(schema))
+        .complete_alone(Role::Lookout, app.tz(), system, prompt, Some(schema))
         .await?
         .json
         .ok_or_else(|| anyhow::anyhow!("the model answered without JSON"))
@@ -450,8 +452,61 @@ fn text_of(app: &App, message: &Value) -> anyhow::Result<String> {
         "{}\nreceived: {received}\n{}\n{}",
         head.title,
         head.body,
-        text.chars().take(TEXT_CHARS).collect::<String>()
+        essence(&text).chars().take(TEXT_CHARS).collect::<String>()
     ))
+}
+
+/// A mail's text without what costs the model much and tells it nothing: what
+/// follows the host in a link, rules drawn of marks, and blank lines.
+fn essence(text: &str) -> String {
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let line = squeezed(&unlinked(line));
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    lines.join("\n")
+}
+
+/// A line whose links are no more than their hosts.
+fn unlinked(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(at) = rest.find("://") {
+        let scheme = ["https", "http"].iter().find(|s| {
+            rest.get(at.saturating_sub(s.len())..at)
+                .is_some_and(|there| there.eq_ignore_ascii_case(s))
+        });
+        let Some(scheme) = scheme else {
+            out.push_str(&rest[..at + 3]);
+            rest = &rest[at + 3..];
+            continue;
+        };
+        out.push_str(&rest[..at - scheme.len()]);
+        let link = &rest[at + 3..];
+        let end = link
+            .find(|c: char| !c.is_ascii_graphic() || "<>()[]{}\"'`|,;".contains(c))
+            .unwrap_or(link.len());
+        let host = link[..end].find(['/', '?', '#']).unwrap_or(end);
+        out.push_str(&link[..host]);
+        rest = &link[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A line with its words one space apart and a mark repeated once.
+fn squeezed(text: &str) -> String {
+    let mut out = String::new();
+    let mut run = (' ', 0);
+    for c in line(text).chars() {
+        run = if c == run.0 { (c, run.1 + 1) } else { (c, 1) };
+        if run.1 <= MARKS || c.is_alphanumeric() {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The text of a message: its plain part, or what its HTML shows when that
@@ -685,6 +740,15 @@ pub(crate) mod tests {
             { "mimeType": "text/plain", "filename": "a.txt", "body": { "data": b64("添付") } },
         ] });
         assert_eq!(mail_text(&attached), None);
+    }
+
+    #[test]
+    fn a_mail_is_read_without_its_links_rules_and_blank_lines() {
+        let text = "注文はhttps://shop.example/o?id=1&t=abcを\n\n ======== \r\nhttp://a.example <https://b.example/x>\n(https://c.example/i/1),1980JPY,x2\n注文番号 1111-1111111\nsee ftp://c.example/y ***";
+        assert_eq!(
+            essence(text),
+            "注文はshop.exampleを\n===\na.example <b.example>\n(c.example),1980JPY,x2\n注文番号 1111-1111111\nsee ftp://c.example/y ***"
+        );
     }
 
     pub(crate) async fn with_model(app: &App, answer: Value) {

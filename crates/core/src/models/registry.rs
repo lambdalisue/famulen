@@ -471,6 +471,29 @@ impl Models {
         Ok(completion)
     }
 
+    /// [`Models::complete`] through [`models::complete_alone`].
+    pub async fn complete_alone(
+        &self,
+        role: Role,
+        tz: chrono_tz::Tz,
+        system: &str,
+        prompt: &str,
+        schema: Option<&serde_json::Value>,
+    ) -> anyhow::Result<models::Completion> {
+        let (spec, effort) = self.spec_for(role, tz)?;
+        let completion = models::complete_alone(
+            &spec,
+            effort.as_deref(),
+            system,
+            prompt,
+            schema,
+            self.via(role),
+        )
+        .await?;
+        self.record(role, &spec, &completion.usage)?;
+        Ok(completion)
+    }
+
     /// [`Models::complete`] for a short judgement, through
     /// [`models::complete_brief`].
     pub async fn complete_brief(
