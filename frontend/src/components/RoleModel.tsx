@@ -101,6 +101,11 @@ function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: st
               if (model !== r().model) void assign(model, r().cap);
             }}
           >
+            <Show when={!r().model}>
+              <option value="" selected>
+                {choices().length ? "選んでいない" : "選べるモデルがない"}
+              </option>
+            </Show>
             <For each={choices()}>
               {(m) => (
                 <option value={m.id} selected={m.id === r().model}>
@@ -113,6 +118,8 @@ function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: st
         <Show when={kind() === ModelKind.AGENT_CLI}>
           <Effort effort={r().effort} fallback={r().defaultEffort} onChange={(effort) => void assign(r().model, r().cap, effort)} />
         </Show>
+        {/* A cap is kept with a model, so it is set once one is chosen. */}
+        <Show when={r().model}>
         <NumberField
           label="一日の上限"
           min={0}
@@ -128,6 +135,7 @@ function Model(props: { setting: RoleSetting; models: RegisteredModel[]; cap: st
           hint={props.cap}
           onSave={(cap) => void assign(r().model, cap)}
         />
+        </Show>
       </div>
       {props.children}
     </Section>

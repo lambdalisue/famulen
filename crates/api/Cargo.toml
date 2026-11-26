@@ -28,3 +28,6 @@ url.workspace = true
 
 [build-dependencies]
 connectrpc-build.workspace = true
+
+[dev-dependencies]
+base64.workspace = true

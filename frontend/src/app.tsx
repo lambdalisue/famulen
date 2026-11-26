@@ -1,7 +1,7 @@
 import { MetaProvider } from "@solidjs/meta";
 import { Router } from "@solidjs/router";
 import { FileRoutes } from "@solidjs/start/router";
-import { Suspense } from "solid-js";
+import { Show, Suspense } from "solid-js";
 import Shell from "./components/Shell";
 import { OwnerProvider } from "./lib/owner";
 import { WorkgroupsProvider } from "./lib/workgroups";
@@ -15,7 +15,10 @@ export default function App() {
           <Suspense>
             <OwnerProvider>
               <WorkgroupsProvider>
-                <Shell>{props.children}</Shell>
+                {/* The glasses' page draws on the glasses; the phone holding it shows no console. */}
+                <Show when={!(props.location.pathname === "/g2" || props.location.pathname.startsWith("/g2/"))} fallback={props.children}>
+                  <Shell>{props.children}</Shell>
+                </Show>
               </WorkgroupsProvider>
             </OwnerProvider>
           </Suspense>

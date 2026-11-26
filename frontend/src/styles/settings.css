@@ -176,3 +176,7 @@
 .model-limit > .sub { overflow-wrap: anywhere; }
 .model-limit[data-tone=warn] .meter > div { background: var(--warn); }
 .model-limit[data-tone=danger] .meter > div { background: var(--danger); }
+
+/* The phone that holds the Even G2 page: the glasses show the console, the phone only how it goes. */
+.g2-phone { max-width: 420px; margin: 0 auto; padding: var(--s5); display: flex; flex-direction: column; gap: var(--s2); }
+.g2-phone h1 { margin: 0; }

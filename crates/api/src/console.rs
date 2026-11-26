@@ -7,6 +7,7 @@ use famulen_core::connections::Connection;
 use famulen_core::console_log::{self, Event, Who};
 use famulen_core::conversations::{self, message_key};
 use famulen_core::input::{Input, ReplyTo, Sender, Source};
+use famulen_core::models::Pcm;
 use famulen_core::store::StoredInput;
 use famulen_core::wording;
 use famulen_core::working;
@@ -16,6 +17,10 @@ use serde_json::json;
 use crate::paging::{page, page_limit};
 use crate::pb::{self, *};
 use crate::{Api, OrFail, fail, given};
+
+/// The longest the glasses listen to one thing said, with room to spare. At
+/// 16 kHz it stays within what one request may carry.
+const MAX_SPOKEN_SECONDS: usize = 90;
 
 fn meta_text<'a>(m: &'a console_log::Message, key: &str) -> Option<&'a str> {
     m.meta.get(key).and_then(serde_json::Value::as_str)
@@ -577,7 +582,11 @@ impl ConsoleService for Api {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        let meta = json!({ "origin": "コンソール", "about": about, "workgroup": workgroup.id, "attached": attached });
+        let origin = match r.device.as_str() {
+            "g2" => "Even G2",
+            _ => "コンソール",
+        };
+        let meta = json!({ "origin": origin, "about": about, "workgroup": workgroup.id, "attached": attached });
         let m = self.say(Who::Owner, text, meta, to.as_ref()).or_fail()?;
         let input = Input {
             sender: Sender::Owner,
@@ -690,6 +699,45 @@ impl ConsoleService for Api {
                 .into_iter()
                 .map(crate::link_previews::link_preview)
                 .collect(),
+            ..Default::default()
+        })
+    }
+
+    async fn transcribe(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, TranscribeRequest>,
+    ) -> ServiceResult<TranscribeResponse> {
+        let r = request.to_owned_message();
+        if r.pcm.is_empty() {
+            return Response::ok(TranscribeResponse::default());
+        }
+        let rate = u32::try_from(r.rate)
+            .ok()
+            .filter(|rate| (8_000..=16_000).contains(rate))
+            .ok_or_else(|| fail(format!("rate must be 8000 to 16000: {}", r.rate)))?;
+        if !r.pcm.len().is_multiple_of(2) {
+            return Err(fail("pcm must be whole 16-bit samples"));
+        }
+        if r.pcm.len() > MAX_SPOKEN_SECONDS * rate as usize * 2 {
+            return Err(fail(format!(
+                "what is said is at most {MAX_SPOKEN_SECONDS} seconds"
+            )));
+        }
+        let sound = Pcm {
+            samples: r.pcm.to_vec(),
+            rate,
+        };
+        // Everything Famulen says and reads is Japanese; a short utterance
+        // left to detection is often heard as another language.
+        let text = self
+            .app
+            .models
+            .transcribe(self.app.tz(), &sound, Some("ja"), r.preview)
+            .await
+            .or_fail()?;
+        Response::ok(TranscribeResponse {
+            text,
             ..Default::default()
         })
     }

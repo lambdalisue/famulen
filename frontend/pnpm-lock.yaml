@@ -23,6 +23,9 @@ importers:
       '@connectrpc/connect-web':
         specifier: 2.3.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.17.0))
+      '@evenrealities/even_hub_sdk':
+        specifier: 0.0.16
+        version: 0.0.16
       '@solidjs/meta':
         specifier: 0.29.8
         version: 0.29.8(solid-js@1.9.20)
@@ -196,6 +199,10 @@ packages:
 
   '@emnapi/wasi-threads@2.2.0':
     resolution: {integrity: sha512-JP7OYH38Q7+pyTAe14raZHLQIK7BDKbdwji+Xi3pcd/6QkJYQH3SX4wu6EplGrGJWRepoNzedfm0G3B9Z4e9Rw==}
+
+  '@evenrealities/even_hub_sdk@0.0.16':
+    resolution: {integrity: sha512-8/qMR4W3vna6xAM5/dFDmKoTR98D7Vo3TDBrtS0JgdUSvBVyAnUXuhODI3H587fI2TfLbp4T+FNT3EdkB3+Big==}
+    engines: {node: ^20.0.0 || >=22.0.0}
 
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
@@ -1860,6 +1867,8 @@ snapshots:
     dependencies:
       tslib: 2.9.1
     optional: true
+
+  '@evenrealities/even_hub_sdk@0.0.16': {}
 
   '@floating-ui/core@1.8.0':
     dependencies:
