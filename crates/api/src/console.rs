@@ -364,7 +364,7 @@ impl Api {
                 .map(approval_given)
                 .collect(),
             once: approvals::once(&self.app.permissions, &r.tool)
-                || ticket.as_ref().is_some_and(approvals::discloses),
+                || ticket.as_ref().is_some_and(approvals::answered_once),
             questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
                 .into_iter()
                 .map(|q| pb::ApprovalQuestion {

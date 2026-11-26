@@ -69,7 +69,7 @@ impl Runners for Fake {
             }
             Ok(Began::Running(match run.order.runner {
                 Runner::Adroit => format!("s{}", run.id),
-                Runner::Agent => String::new(),
+                Runner::Agent | Runner::Direct => String::new(),
             }))
         })
     }
@@ -2268,3 +2268,5 @@ async fn a_session_whose_start_was_not_told_is_found_however_many_sessions_ended
 
 #[cfg(unix)]
 mod again;
+#[cfg(unix)]
+mod direct;

@@ -277,16 +277,16 @@ sections:
 
 | `Delegation` の欄 | 中身 |
 | --- | --- |
-| `Runner` | 何に委ねるか。`adroit`（Adroit のセッション）か `agent`（道具を絞ったエージェント）。書かれていなければ委ねない |
+| `Runner` | 何に委ねるか。`adroit`（Adroit のセッション）、`agent`（道具を絞ったエージェント）か `direct`（Famulen が直接動かすコードの仕事）。書かれていなければ委ねない |
 | `Connection` | Adroit のつなぎ先。一つしかなければ書かなくてよい |
-| `Directory` | 働くディレクトリの絶対パス。`adroit` には要る |
+| `Directory` | 働くディレクトリの絶対パス。`adroit` と `direct` には要る |
 | `Worktree`・`Base` | 新しいワークツリーで働くか、その元の版 |
 | `Agent`・`Agent model` | セッションのエージェントとモデル。Claude Code でモデルを書かなければ手代のモデルで動くので、重い仕事にだけ `opus` などを書く |
 | `Permissions` | `default` か `read_only` |
 | `Tools` | `agent` に渡す道具の名前の並び |
 | `Files` | `agent` に読ませる手帳のファイルの並び。手帳の根からのパスか wiki リンク |
 
-`Directory`・`Tools`・`Files` は `agent` に、`Connection`・`Directory`・`Worktree`・`Base`・`Agent`・`Agent model`・`Permissions` は `adroit` に効く。
+`Directory`・`Tools`・`Files` は `agent` に、`Connection`・`Directory`・`Worktree`・`Base`・`Agent`・`Agent model`・`Permissions` は `adroit` に効く。`direct` には `Directory`・`Base`（jj の revset。書かなければ本流）・`Tools` が効き、`Agent` は書かないか `claude`。
 
 ```markdown
 # ログインの失敗を直す

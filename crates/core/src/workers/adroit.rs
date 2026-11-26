@@ -466,7 +466,7 @@ fn taking_up(session: &Value, asked: i64, now: i64) -> bool {
 /// Whether a turn that failed saying this was cut off by a fault that passes
 /// by itself. What it is not known to be, it is not: a session whose allowance
 /// is used up or that is logged out would fail again.
-fn passes(why: &str) -> bool {
+pub(super) fn passes(why: &str) -> bool {
     let why = why.to_lowercase();
     if why.contains("not your usage limit") {
         return true;

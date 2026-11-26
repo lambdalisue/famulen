@@ -19,6 +19,10 @@ pub(super) struct Bounds {
     roots: Vec<PathBuf>,
     sealed: Sealed,
     hosts: Vec<String>,
+    /// What its file tools may read but not write.
+    unwritable: Vec<PathBuf>,
+    /// Names its file tools write no file or directory by, at any depth.
+    unwritable_names: Vec<String>,
 }
 
 impl Bounds {
@@ -37,6 +41,25 @@ impl Bounds {
                 .collect(),
             sealed: Sealed::new(&kept.places, workdir),
             hosts: kept.hosts.clone(),
+            unwritable: Vec::new(),
+            unwritable_names: Vec::new(),
+        }
+    }
+
+    /// Keep its file tools from writing `places`, as its shell is kept.
+    pub(super) fn with_unwritable(self, places: Vec<PathBuf>) -> Self {
+        Self {
+            unwritable: places,
+            ..self
+        }
+    }
+
+    /// Keep its file tools from writing anything called one of `names`, or
+    /// inside such a directory, wherever it is.
+    pub(super) fn with_unwritable_names(self, names: &[&str]) -> Self {
+        Self {
+            unwritable_names: names.iter().map(|n| (*n).to_owned()).collect(),
+            ..self
         }
     }
 
@@ -112,6 +135,18 @@ impl Bounds {
                 places = read.concat();
             }
         }
+        let writes = matches!(tool, "Write" | "Edit" | "MultiEdit" | "NotebookEdit");
+        if writes
+            && let Some(kept) = places.iter().find(|place| {
+                let place = folded(&resolved(place));
+                self.unwritable
+                    .iter()
+                    .any(|u| under(&place, &folded(&resolved(u))))
+                    || self.names_unwritable(&place)
+            })
+        {
+            return Some(format!("{tool}: {} is not to be written.", kept.display()));
+        }
         // A path that may mean several places stays inside in each of them.
         let outside = places.iter().find(|place| !self.inside(place))?;
         Some(format!(
@@ -149,11 +184,39 @@ impl Bounds {
             .then(|| format!("WebFetch: {host} is kept from you."))
     }
 
+    /// Whether `place`, as it is folded, is or is inside something called
+    /// one of the names nothing is written by, below the root it is in.
+    fn names_unwritable(&self, place: &Path) -> bool {
+        let names: Vec<PathBuf> = self
+            .unwritable_names
+            .iter()
+            .map(|n| folded(Path::new(n)))
+            .collect();
+        self.roots
+            .iter()
+            .filter_map(|root| place.strip_prefix(folded(&resolved(root))).ok())
+            .any(|below| {
+                below
+                    .components()
+                    .any(|c| names.iter().any(|n| n.as_os_str() == c.as_os_str()))
+            })
+    }
+
     /// Whether `path`, its links followed, stays in a root.
     fn inside(&self, path: &Path) -> bool {
         // Told strictly: what may be inside under another name is not.
         let path = resolved(path);
         self.roots.iter().any(|root| under(&path, &resolved(root)))
+    }
+}
+
+/// `path` as the file system tells names apart: macOS's does not tell
+/// cases apart.
+fn folded(path: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        PathBuf::from(path.to_string_lossy().to_lowercase())
+    } else {
+        path.to_owned()
     }
 }
 
@@ -183,6 +246,39 @@ mod tests {
                 hosts: vec!["famulen.example.ts.net".into()],
             },
         )
+    }
+
+    #[test]
+    fn what_its_files_may_not_be_written_is_read_and_not_written() {
+        let dir = TempDir::new("bounds-unwritable");
+        let kept = dir.path().join("repo/.claude/settings.json");
+        let b = bounds(&dir, &["Read", "Write", "Edit"]).with_unwritable(vec![kept.clone()]);
+        let at = |tool: &str, path: &Path| b.refusal(tool, &json!({ "file_path": path }));
+        assert_eq!(at("Read", &kept), None);
+        for tool in ["Write", "Edit"] {
+            let why = at(tool, &kept).unwrap_or_default();
+            assert!(why.contains("not to be written"), "{tool}: {why}");
+        }
+        assert_eq!(at("Write", &dir.path().join("repo/a.rs")), None);
+        let deep = b.clone().with_unwritable_names(&[".claude", ".mcp.json"]);
+        for kept in ["repo/crates/x/.claude/settings.json", "repo/sub/.mcp.json"] {
+            let why = deep.refusal("Write", &json!({ "file_path": dir.path().join(kept) }));
+            assert!(why.is_some(), "{kept}");
+        }
+        assert_eq!(
+            deep.refusal(
+                "Write",
+                &json!({ "file_path": dir.path().join("repo/claude.md") })
+            ),
+            None
+        );
+        if cfg!(target_os = "macos") {
+            let shouted = dir.path().join("repo/.CLAUDE/settings.json");
+            assert!(
+                at("Write", &shouted).is_some(),
+                "the same place by another case"
+            );
+        }
     }
 
     #[test]

@@ -36,6 +36,7 @@ fn work() -> Work {
             unread: vec![PathBuf::from("/runs")],
             readable: vec![PathBuf::from("/w")],
             hosts: vec!["127.0.0.1".into()],
+            ..Fence::default()
         },
         ..Work::default()
     }
@@ -87,6 +88,57 @@ fn a_conversation_is_gone_on_with_and_told_in_parts_only_when_asked() {
     let args = Claude.launch(&work, Some("s1")).unwrap().args;
     assert!(args.windows(2).any(|w| w == ["--resume", "s1"]));
     assert!(args.contains(&"--include-partial-messages".to_owned()));
+}
+
+#[test]
+fn a_new_conversation_takes_the_id_chosen_for_it_and_one_gone_on_with_keeps_its_own() {
+    let work = Work {
+        conversation: Some("c1".into()),
+        ..work()
+    };
+    let new = Claude.launch(&work, None).unwrap().args;
+    assert!(new.windows(2).any(|w| w == ["--session-id", "c1"]));
+    let resumed = Claude.launch(&work, Some("c1")).unwrap().args;
+    assert!(resumed.windows(2).any(|w| w == ["--resume", "c1"]));
+    assert!(!resumed.contains(&"--session-id".to_owned()));
+}
+
+#[test]
+fn what_it_writes_beside_its_directory_is_named_and_what_inside_that_it_may_not() {
+    let work = Work {
+        fence: Fence {
+            writable: vec![PathBuf::from("/src/.jj"), PathBuf::from("/data/notebook/x")],
+            unwritable: vec![PathBuf::from("/src/.jj/repo/config.toml")],
+            ..work().fence
+        },
+        ..work()
+    };
+    let args = Claude.launch(&work, None).unwrap().args;
+    let at = args.iter().position(|a| a == "--settings").unwrap();
+    let settings: Value = serde_json::from_str(&args[at + 1]).unwrap();
+    let files = &settings["sandbox"]["filesystem"];
+    assert_eq!(
+        files["allowWrite"],
+        json!(["/src/.jj"]),
+        "never what is sealed"
+    );
+    assert_eq!(
+        files["denyWrite"],
+        json!(["/data/notebook", "/src/.jj/repo/config.toml"])
+    );
+}
+
+#[test]
+fn a_conversation_is_found_where_claude_code_keeps_it_and_nothing_else_is() {
+    let dir = crate::notebook::testing::TempDir::new("claude-find");
+    let project = dir.path().join("projects/-src-a");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("c1.jsonl"), "{}\n").unwrap();
+    let kept = |id: &str| conversation_in(dir.path(), id);
+    assert!(kept("c1"));
+    for not in ["c2", "", "../projects/-src-a/c1", "*"] {
+        assert!(!kept(not), "{not}");
+    }
 }
 
 #[test]
@@ -342,6 +394,7 @@ told("bind", lambda: socket.create_server(("127.0.0.1", 0)))
             unread: vec![runs],
             readable: vec![workdir.clone()],
             hosts: vec!["127.0.0.1".into(), "localhost".into()],
+            ..Fence::default()
         },
         ..Work::default()
     };

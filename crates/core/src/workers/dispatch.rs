@@ -105,7 +105,7 @@ fn time(text: &str, last: bool) -> Option<NaiveDateTime> {
 }
 
 fn capped(c: &Candidate, limits: &Limits) -> bool {
-    limits.agents_left == Some(0) && c.runner == Ok(Runner::Agent)
+    limits.agents_left == Some(0) && c.runner.as_ref().is_ok_and(|r| r.runs_here())
 }
 
 /// Whether a `Start` as written has not come.
@@ -204,7 +204,7 @@ pub fn plan(candidates: &[Candidate], limits: &Limits, now: NaiveDateTime) -> Ve
                 _ => false,
             };
             // What starts now counts for those after it.
-            if start && c.runner == Ok(Runner::Agent) {
+            if start && c.runner.as_ref().is_ok_and(|r| r.runs_here()) {
                 limits.agents_left = limits.agents_left.map(|n| n.saturating_sub(1));
             }
             Placed {

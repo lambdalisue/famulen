@@ -131,6 +131,12 @@ impl Api {
 
     /// A run with what its session asks the owner, for the owner alone.
     fn asking(&self, run: Run, sight: &Sight) -> anyhow::Result<WorkerRun> {
+        if run.order.runner == Runner::Direct {
+            return Ok(match workers::direct_question(&self.app, &run) {
+                Some(q) => self.asking_directly(run, sight, q),
+                None => seen(run, sight),
+            });
+        }
         let question = workers::adroit::question(&self.app, &run, sight)?;
         let mut run = seen(run, sight);
         if let Some(q) = question {
@@ -150,6 +156,56 @@ impl Api {
             .into();
         }
         Ok(run)
+    }
+
+    /// A run run directly, with what it asks the owner: a request of the
+    /// gateway as the inbox shows it, or what it asks its user.
+    fn asking_directly(&self, run: Run, sight: &Sight, q: workers::DirectQuestion) -> WorkerRun {
+        // A request as the gateway keeps it, with its secrets sealed.
+        let input = if q.ticket > 0 {
+            match self.app.gateway.ticket(q.ticket).ok().flatten() {
+                Some(ticket) => ticket.shown.to_string(),
+                // What cannot be read is not put to the owner half told.
+                None => return seen(run, sight),
+            }
+        } else {
+            q.input.to_string()
+        };
+        let mut approval = self.approval(famulen_core::approvals::Request {
+            id: q.ticket,
+            tool: q.tool,
+            input,
+            status: "pending".into(),
+            created_at: 0,
+        });
+        // What the inbox would show of it, descriptions and all, where it can
+        // be read so.
+        if q.ticket == 0 && approval.questions.is_empty() {
+            approval.questions = q
+                .choices
+                .into_iter()
+                .map(|(question, options, several)| ApprovalQuestion {
+                    question,
+                    several,
+                    choices: options
+                        .into_iter()
+                        .map(|label| ApprovalChoice {
+                            label,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    ..Default::default()
+                })
+                .collect();
+        }
+        let mut run = seen(run, sight);
+        run.question = Some(RunQuestion {
+            id: q.id,
+            approval: Some(approval).into(),
+            ..Default::default()
+        })
+        .into();
+        run
     }
 
     /// How a run stands, read anew, without what it did.
@@ -189,8 +245,8 @@ impl WorkerService for Api {
         if r.title.trim().is_empty() {
             return Err(fail("a record needs a title"));
         }
-        let runner =
-            Runner::parse(r.runner.trim()).ok_or_else(|| fail("a runner is adroit or agent"))?;
+        let runner = Runner::parse(r.runner.trim())
+            .ok_or_else(|| fail("a runner is adroit, agent or direct"))?;
         let trimmed = |text: &str| text.trim().to_owned();
         let order = Order {
             title: trimmed(&r.title),
@@ -413,6 +469,14 @@ impl WorkerService for Api {
     ) -> ServiceResult<Empty> {
         let r = request.to_owned_message();
         let answer = crate::console::answer_of(&r.answer)?;
+        let run = self.app.workers.runs.get(r.run).or_fail()?;
+        if run.is_some_and(|run| run.order.runner == workers::Runner::Direct) {
+            workers::answer_direct(&self.app, r.run, &r.question, answer, r.replies)
+                .await
+                .or_fail()?;
+            changed(self);
+            return Response::ok(Empty::default());
+        }
         workers::adroit::answer(&self.app, r.run, &r.question, answer, r.replies)
             .await
             .or_fail()?;
@@ -425,6 +489,12 @@ impl WorkerService for Api {
         _ctx: RequestContext,
         request: ServiceRequest<'_, AskRunAgainRequest>,
     ) -> ServiceResult<Empty> {
+        let run = self.app.workers.runs.get(request.run).or_fail()?;
+        if run.is_some_and(|run| run.order.runner == workers::Runner::Direct) {
+            return Err(fail(
+                "what work run directly asks is put to the owner once; answer it here or in the inbox",
+            ));
+        }
         workers::adroit::ask_again(&self.app, request.run, request.question)
             .await
             .or_fail()?;

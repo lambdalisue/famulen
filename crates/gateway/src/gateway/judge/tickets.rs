@@ -163,6 +163,21 @@ impl Gateway {
         Ok(true)
     }
 
+    /// Use up the pass an answered ticket left, whether or not a call used it.
+    pub fn drop_pass(&self, ticket: i64) -> anyhow::Result<()> {
+        self.take_pass_of(ticket).map(|_| ())
+    }
+
+    /// Use the pass an answered ticket left, that one alone; whether it was
+    /// there to be used.
+    pub fn take_pass_of(&self, ticket: i64) -> anyhow::Result<bool> {
+        let changed = self.store.conn().execute(
+            "UPDATE passes SET used = 1 WHERE ticket = ?1 AND used = 0",
+            params![ticket],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Whether the call an answered ticket let run was not made yet.
     pub fn has_pass(&self, ticket: i64) -> anyhow::Result<bool> {
         Ok(self.store.conn().query_row(

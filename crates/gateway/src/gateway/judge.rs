@@ -192,6 +192,15 @@ impl Gateway {
         Ok(())
     }
 
+    /// Take back all that was granted to `actor`.
+    pub fn revoke(&self, actor: impl AsRef<str>) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "DELETE FROM actor_grants WHERE actor = ?1",
+            params![actor.as_ref()],
+        )?;
+        Ok(())
+    }
+
     fn granted(&self, call: &Call) -> anyhow::Result<bool> {
         if call.actor == OWNER {
             return Ok(true);

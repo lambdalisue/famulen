@@ -39,6 +39,10 @@ pub const API_HOSTS_ENV: &str = "FAMULEN_API_HOSTS";
 /// own, as `PATH` lists places.
 pub const WORKERS_SEALED_ENV: &str = "FAMULEN_WORKERS_SEALED";
 
+/// The one repository where delegated work on code may run in an agent
+/// Famulen starts itself rather than in Adroit.
+pub const WORKERS_DIRECT_ENV: &str = "FAMULEN_WORKERS_DIRECT";
+
 /// Where the owner keeps a clone of the notebook, unless they say otherwise.
 const CLONES: &[&str] = &["~/notebook"];
 
@@ -66,6 +70,8 @@ pub struct Config {
     /// The places no agent doing a delegated task may reach, beside Famulen's
     /// own.
     pub workers_sealed: Vec<PathBuf>,
+    /// The one repository work may run directly in; none runs so without it.
+    pub workers_direct: Option<PathBuf>,
     /// Where the owner opens the console, if set.
     pub console_url: Option<String>,
     /// The key the vault seals secrets with, from the environment only.
@@ -97,6 +103,7 @@ struct File {
 #[serde(deny_unknown_fields)]
 struct Workers {
     sealed: Option<Vec<PathBuf>>,
+    direct: Option<PathBuf>,
 }
 
 /// What applies when neither the environment nor the file says.
@@ -228,6 +235,22 @@ impl Config {
                 place.display()
             );
         }
+        let workers_direct = match env(WORKERS_DIRECT_ENV) {
+            Some(place) => Some((PathBuf::from(place.trim()), WORKERS_DIRECT_ENV)),
+            None => file.workers.direct.map(|p| (p, "[workers] direct")),
+        };
+        let workers_direct = match workers_direct {
+            Some((place, named)) => {
+                let place = below_home(place)?;
+                anyhow::ensure!(
+                    place.is_absolute(),
+                    "{named} names a repository whole, not {}",
+                    place.display()
+                );
+                Some(place)
+            }
+            None => None,
+        };
         let mut claude = file.claude;
         if let Some(model) = env(MODEL_ENV) {
             claude.model = Some(model.trim().to_owned());
@@ -262,6 +285,7 @@ impl Config {
             claude,
             api,
             workers_sealed,
+            workers_direct,
             console_url: env(CONSOLE_URL_ENV)
                 .or(file.console_url)
                 .map(|u| u.trim().trim_end_matches('/').to_owned()),
@@ -443,6 +467,25 @@ mod tests {
         );
         assert!(load(None, &[]).unwrap().vault_key.is_none());
         assert!(load(None, &[(crate::gateway::KEY_VAR, "short")]).is_err());
+    }
+
+    #[test]
+    fn work_runs_directly_only_in_the_one_repository_named_and_nowhere_unless_named() {
+        assert_eq!(load(None, &[]).unwrap().workers_direct, None);
+        let named = |file, env: &[(&str, &str)]| load(file, env).unwrap().workers_direct;
+        assert_eq!(
+            named(Some("[workers]\ndirect = \"/src/a\"\n"), &[]),
+            Some(PathBuf::from("/src/a"))
+        );
+        assert_eq!(
+            named(
+                Some("[workers]\ndirect = \"/src/a\"\n"),
+                &[(WORKERS_DIRECT_ENV, "~/src/b"), ("HOME", "/home/me")]
+            ),
+            Some(PathBuf::from("/home/me/src/b"))
+        );
+        let error = load(None, &[(WORKERS_DIRECT_ENV, "src")]).unwrap_err();
+        assert!(error.to_string().contains(WORKERS_DIRECT_ENV), "{error}");
     }
 
     #[test]

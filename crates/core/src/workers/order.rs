@@ -58,6 +58,9 @@ pub enum Runner {
     /// An agent CLI session Famulen starts, with nothing but the tools and
     /// files handed to it.
     Agent,
+    /// Claude Code, started by Famulen itself to work on code in a workspace
+    /// of its own; tried in the one repository the owner names.
+    Direct,
 }
 
 impl Runner {
@@ -65,11 +68,17 @@ impl Runner {
         match self {
             Runner::Adroit => "adroit",
             Runner::Agent => "agent",
+            Runner::Direct => "direct",
         }
     }
 
+    /// Whether Famulen runs the agent itself, under an executor.
+    pub fn runs_here(self) -> bool {
+        matches!(self, Runner::Agent | Runner::Direct)
+    }
+
     pub fn parse(text: &str) -> Option<Self> {
-        [Runner::Adroit, Runner::Agent]
+        [Runner::Adroit, Runner::Agent, Runner::Direct]
             .into_iter()
             .find(|r| r.as_str() == text)
     }
@@ -79,6 +88,7 @@ impl Runner {
         match self {
             Runner::Adroit => "Adroit",
             Runner::Agent => "手代",
+            Runner::Direct => "直接",
         }
     }
 }
@@ -142,7 +152,7 @@ impl Order {
                 .collect()
         };
         let runner = Runner::parse(&text("Runner"))
-            .context("its Delegation names no Runner: adroit or agent")?;
+            .context("its Delegation names no Runner: adroit, agent or direct")?;
         let order = Self {
             code: code.to_owned(),
             title: task.title(),
@@ -240,6 +250,40 @@ impl Order {
                         HANDABLE.join(", ")
                     );
                 }
+            }
+            Runner::Direct => {
+                anyhow::ensure!(
+                    !self.directory.is_empty(),
+                    "a task run directly needs a Directory"
+                );
+                anyhow::ensure!(
+                    self.agent.is_empty() || self.agent == "claude",
+                    "only Claude runs directly, not {}",
+                    self.agent
+                );
+                for (field, set) in [
+                    ("Worktree", self.worktree),
+                    ("Connection", !self.connection.is_empty()),
+                    ("Permissions", !self.permissions.is_empty()),
+                    ("Agent model", !self.model.is_empty()),
+                ] {
+                    anyhow::ensure!(!set, "{field} is for Adroit, not for work run directly");
+                }
+                for tool in &self.tools {
+                    anyhow::ensure!(
+                        split_tool(tool).is_none(),
+                        "{tool:?}: no connection is handed to work run directly yet"
+                    );
+                    anyhow::ensure!(
+                        may_hand(tool),
+                        "{tool:?} is never handed to a worker; it may have {}",
+                        HANDABLE.join(", ")
+                    );
+                }
+                anyhow::ensure!(
+                    self.files.is_empty(),
+                    "no file of the notebook is handed to work run directly yet"
+                );
             }
         }
         Ok(())
@@ -380,6 +424,39 @@ pub(super) mod tests {
             (
                 &[("Runner", "agent"), ("Tools", "mcp__mail__a b")][..],
                 "never handed",
+            ),
+            (&[("Runner", "direct")][..], "needs a Directory"),
+            (
+                &[
+                    ("Runner", "direct"),
+                    ("Directory", "/src"),
+                    ("Worktree", "yes"),
+                ][..],
+                "for Adroit",
+            ),
+            (
+                &[
+                    ("Runner", "direct"),
+                    ("Directory", "/src"),
+                    ("Agent", "codex"),
+                ][..],
+                "only Claude",
+            ),
+            (
+                &[
+                    ("Runner", "direct"),
+                    ("Directory", "/src"),
+                    ("Tools", "mcp__mail__search"),
+                ][..],
+                "no connection",
+            ),
+            (
+                &[
+                    ("Runner", "direct"),
+                    ("Directory", "/src"),
+                    ("Files", "memory/core.md"),
+                ][..],
+                "no file of the notebook",
             ),
         ] {
             let error = order(&r, delegated("x", fields)).unwrap_err().to_string();

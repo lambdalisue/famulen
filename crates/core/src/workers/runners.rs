@@ -128,34 +128,70 @@ impl Real {
     async fn look_at_agent(&self, run: &Run) -> anyhow::Result<Looked> {
         if !self.agents().contains_key(&run.id) {
             match agent::executor(&self.app, run.id).standing().await? {
-                Standing::None | Standing::Gone => return Ok(Looked::Lost),
+                Standing::None | Standing::Gone => return self.lost(run).await,
                 Standing::Working | Standing::Foreign | Standing::Over => {
                     self.attend(run.id, Job::again(&self.app, run));
                 }
             }
         }
-        let agents = self.agents();
-        let Some(working) = agents.get(&run.id) else {
-            return Ok(Looked::Lost);
+        let finish = {
+            let agents = self.agents();
+            let Some(working) = agents.get(&run.id) else {
+                return Ok(Looked::Lost);
+            };
+            // Asked before the finish is read: an agent that ends in between
+            // has its finish read below, and is not taken for lost.
+            let over = working.abort.is_finished();
+            let finish = working
+                .finish
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            match finish {
+                Some(Finish::Done(text)) => return Ok(Looked::Done(text)),
+                Some(Finish::Failed(text)) => return Ok(Looked::Failed(text)),
+                Some(Finish::Lost) => Finish::Lost,
+                None if over => Finish::Lost,
+                None => {
+                    if let Some(trouble) = working.job.trouble() {
+                        anyhow::bail!(trouble);
+                    }
+                    return Ok(if working.job.owes() {
+                        Looked::Waiting
+                    } else {
+                        Looked::Working
+                    });
+                }
+            }
         };
-        // Asked before the finish is read: an agent that ends in between has
-        // its finish read below, and is not taken for lost.
-        let over = working.abort.is_finished();
-        let finish = working
-            .finish
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        Ok(match finish {
-            Some(Finish::Done(text)) => Looked::Done(text),
-            Some(Finish::Failed(text)) => Looked::Failed(text),
-            Some(Finish::Lost) => Looked::Lost,
-            None if over => Looked::Lost,
-            None => match working.job.trouble() {
-                Some(trouble) => anyhow::bail!(trouble),
-                None => Looked::Working,
-            },
-        })
+        debug_assert_eq!(finish, Finish::Lost);
+        self.agents().remove(&run.id);
+        self.lost(run).await
+    }
+
+    /// A run whose process went away with what it ran under. Work run
+    /// directly goes on in its conversation, when it can.
+    async fn lost(&self, run: &Run) -> anyhow::Result<Looked> {
+        if run.order.runner != Runner::Direct {
+            return Ok(Looked::Lost);
+        }
+        // What still runs is attended to again, not gone on with beside it.
+        if let Standing::Working | Standing::Foreign =
+            agent::executor(&self.app, run.id).standing().await?
+        {
+            self.attend(run.id, Job::again(&self.app, run));
+            return Ok(Looked::Working);
+        }
+        match Job::resume(&self.app, run).await {
+            Ok(job) => {
+                self.attend(run.id, job);
+                Ok(Looked::Working)
+            }
+            Err(error) => {
+                tracing::warn!(run = run.id, %error, "could not go on with work run directly");
+                Ok(Looked::Lost)
+            }
+        }
     }
 
     /// End what is left of runs that are over, or of which nothing is known.
@@ -163,7 +199,7 @@ impl Real {
         let workers = &self.app.workers;
         let mut open = BTreeSet::new();
         for run in workers.runs.open()? {
-            if run.order.runner != Runner::Agent || run.state == State::Ending {
+            if !run.order.runner.runs_here() || run.state == State::Ending {
                 continue;
             }
             open.insert(run.id);
@@ -197,7 +233,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::begin(&self.app, run).await,
-                Runner::Agent => {
+                Runner::Agent | Runner::Direct => {
                     let job = Job::begin(&self.app, run).await?;
                     let attended = self
                         .agents()
@@ -216,7 +252,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::find(&self.app, run).await,
-                Runner::Agent => self.find_agent(run).await,
+                Runner::Agent | Runner::Direct => self.find_agent(run).await,
             }
         })
     }
@@ -225,7 +261,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::look(&self.app, run).await,
-                Runner::Agent => self.look_at_agent(run).await,
+                Runner::Agent | Runner::Direct => self.look_at_agent(run).await,
             }
         })
     }
@@ -238,17 +274,44 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::go_on(&self.app, run).await,
-                Runner::Agent => anyhow::bail!("an agent has no session to go on"),
+                Runner::Agent | Runner::Direct => {
+                    anyhow::bail!("an agent has no session to go on")
+                }
             }
         })
     }
 
     fn stop(&self, run: &Run) {
-        if run.order.runner != Runner::Agent {
+        if !run.order.runner.runs_here() {
             return;
         }
-        if let Some(working) = self.agents().remove(&run.id) {
+        let working = self.agents().remove(&run.id);
+        // Its turn is over when its finish was read. One nobody attends to is
+        // not known to be in a turn, and is not waited for.
+        let ended = working
+            .as_ref()
+            .is_none_or(|w| w.finish.lock().unwrap_or_else(|p| p.into_inner()).is_some());
+        if let Some(working) = working {
             working.abort.abort();
+        }
+        if run.order.runner == Runner::Direct {
+            let (app, run) = (self.app.clone(), run.id);
+            tokio::spawn(async move {
+                if let Err(error) = agent::stop_direct(&app, run, ended).await {
+                    tracing::warn!(run, %error, "could not end work run directly");
+                } else {
+                    return;
+                }
+                // What cannot be ended now is ended at the next start.
+                for _ in 0..CLEAR_TRIES {
+                    tokio::time::sleep(CLEAR_AGAIN).await;
+                    match agent::clear(&app, run).await {
+                        Ok(()) => return,
+                        Err(error) => tracing::warn!(run, %error, "could not end a worker"),
+                    }
+                }
+            });
+            return;
         }
         // What it was handed is gone at once, whatever it takes to end it.
         std::fs::remove_dir_all(agent::workdir(&self.app, run.id)).ok();

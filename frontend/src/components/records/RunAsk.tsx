@@ -1,13 +1,13 @@
 import { createMemo, For, Show } from "solid-js";
 import { SessionAsk } from "~/components/ApprovalCard";
 import { Button, SendTogether } from "~/components/ui";
-import type { ApprovalAnswer } from "~/gen/famulen/v1/console_pb";
+import { ApprovalAnswer } from "~/gen/famulen/v1/console_pb";
 import type { RunQuestion } from "~/gen/famulen/v1/workers_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import type { WorkerRun } from "~/lib/workers";
 
-function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint }) {
+function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint; adroit: boolean }) {
   const about = () => ({ run: props.run, question: props.question.id });
   const answer = (given: ApprovalAnswer, replies: string[] = []) =>
     act(() => api.workers.answerRun({ ...about(), answer: given, replies }), "答えを届けた");
@@ -16,7 +16,7 @@ function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint }) {
       <div class="approval asked-in" role="group" aria-label="セッションの問い">
         <div class="row">
           <b class="asked-does grow">{props.question.approval?.deed}</b>
-          <Show when={!props.question.truncated}>
+          <Show when={props.adroit && !props.question.truncated}>
             <Button
               small
               title="会話と Slack に、同じ問いを確認として出し直す"
@@ -31,9 +31,16 @@ function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint }) {
         </Show>
         <Show
           when={!props.question.truncated && props.question.approval}
-          fallback={<p class="sub">ここでは読み切れない。Adroit で答える。</p>}
+          fallback={<p class="sub">{props.adroit ? "ここでは読み切れない。Adroit で答える。" : props.ticket > 0n ? "ここでは読み切れない。受け箱の確認で答える。" : "ここでは読み切れない。"}</p>}
         >
           {(approval) => <SessionAsk approval={approval()} onAnswer={answer} />}
+        </Show>
+        <Show when={!props.adroit && props.ticket === 0n}>
+          <div class="row">
+            <Button small title="答えずに、エージェントに自分で決めさせる" onClick={() => answer(ApprovalAnswer.DENY)}>
+              答えずに任せる
+            </Button>
+          </div>
         </Show>
       </div>
     </SendTogether>
@@ -51,9 +58,9 @@ export default function RunAsk(props: { run: WorkerRun }) {
   }, []);
   return (
     <>
-      <For each={kept()}>{(q) => <Ask run={props.run.id} question={q} ticket={props.run.question?.approval?.id ?? 0n} />}</For>
+      <For each={kept()}>{(q) => <Ask run={props.run.id} question={q} ticket={props.run.question?.approval?.id ?? 0n} adroit={props.run.runner === "adroit"} />}</For>
       <Show when={props.run.state === "waiting" && !props.run.question}>
-        <p class="sub">何を尋ねているかを読めていない。急ぐなら Adroit で答える。</p>
+        <p class="sub">{props.run.runner === "adroit" ? "何を尋ねているかを読めていない。急ぐなら Adroit で答える。" : "何を尋ねているかを読めていない。受け箱の確認で答える。"}</p>
       </Show>
     </>
   );

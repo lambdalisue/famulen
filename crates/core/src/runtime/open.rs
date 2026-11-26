@@ -32,11 +32,32 @@ pub fn open_app(config: &Config) -> anyhow::Result<App> {
 /// Where no tool of the secretary's may reach: the gateway's own data and
 /// the file the secrets are started from.
 pub(super) fn sealed_places(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-    Ok(vec![
+    Ok(sealed_places_from(config, &std::env::current_dir()?))
+}
+
+/// [`sealed_places`] of a Famulen started in `dir`.
+fn sealed_places_from(config: &Config, dir: &std::path::Path) -> Vec<PathBuf> {
+    vec![
         config.gateway_dir(),
         executors_dir(config),
-        std::env::current_dir()?.join(".env"),
-    ])
+        dir.join(".env"),
+    ]
+}
+
+/// What no agent doing a delegated task may reach, as `config` says.
+pub fn kept_from_workers(config: &Config) -> anyhow::Result<Kept> {
+    kept_from_workers_started_in(config, &std::env::current_dir()?)
+}
+
+/// [`kept_from_workers`] of a Famulen started in `dir`.
+pub fn kept_from_workers_started_in(
+    config: &Config,
+    dir: impl AsRef<std::path::Path>,
+) -> anyhow::Result<Kept> {
+    Ok(Kept {
+        places: sealed_from_workers(config, dir.as_ref())?,
+        hosts: hosts_kept_from_workers(config),
+    })
 }
 
 /// The hosts no agent doing a delegated task may reach: this machine, with
@@ -110,8 +131,8 @@ const SAID: &[&str] = &["projects", "history.jsonl", "file-history", "todos"];
 /// Where no tool of an agent doing a delegated task may reach, on top of
 /// that: the notebook, of which it reads only what it was handed, and what
 /// Famulen keeps of the secretary.
-fn sealed_from_workers(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
-    let mut places = sealed_places(config)?;
+fn sealed_from_workers(config: &Config, dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut places = sealed_places_from(config, dir);
     places.push(config.notebook_dir());
     places.push(config.workdir());
     places.extend(config.workers_sealed.iter().cloned());
@@ -218,10 +239,13 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
             store.clone(),
             config.data_dir.join("workers"),
             executors(config, &store)?,
-            Kept {
-                places: sealed_from_workers(config)?,
-                hosts: hosts_kept_from_workers(config),
-            },
+            kept_from_workers(config)?,
+        )
+        .with_direct(
+            config
+                .workers_direct
+                .clone()
+                .map(crate::workers::Direct::new),
         ),
         lookout: lookout.clone(),
         triage: crate::triage::Triage::new(store.clone()),
@@ -320,13 +344,14 @@ mod tests {
             },
         )
         .unwrap();
-        let places = super::sealed_from_workers(&config).unwrap();
+        let places = super::sealed_from_workers(&config, std::path::Path::new("/run")).unwrap();
         let clone = std::path::PathBuf::from(crate::paths::at("/home/me")).join("notebook");
         for place in [
             config.gateway_dir(),
             config.notebook_dir(),
             config.database_path(),
             super::executors_dir(&config),
+            std::path::Path::new("/run").join(".env"),
             clone,
         ] {
             assert!(places.contains(&place), "{}", place.display());

@@ -63,6 +63,11 @@ pub fn fit(app: &App, order: &Order) -> anyhow::Result<()> {
         app.workers
             .may_work_in(std::path::Path::new(&order.directory))?;
     }
+    if order.runner == super::Runner::Direct {
+        use super::direct;
+        let (checkout, _) = direct::checkout(app.workers.direct.as_ref(), order)?;
+        app.workers.may_work_in(&direct::worktrees(&checkout))?;
+    }
     Ok(())
 }
 

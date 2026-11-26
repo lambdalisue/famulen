@@ -207,7 +207,11 @@ impl Pool {
         else {
             return Wanted::No;
         };
-        let begun = !run.session.is_empty() || run.state == State::Running;
+        // Work run directly has no session; one that could not be seen for a
+        // while began all the same.
+        let begun = !run.session.is_empty()
+            || matches!(run.state, State::Running | State::Waiting)
+            || run.order.runner == Runner::Direct && run.state == State::Unreachable;
         let pending = matches!(
             task.body.value("Status").as_deref(),
             None | Some("" | "pending")
@@ -247,7 +251,7 @@ impl Pool {
             },
             // An agent that began after all is not kept waiting for a slot: what
             // it asks is to be answered.
-            State::Starting if run.order.runner == Runner::Agent && run.tries > 0 => {
+            State::Starting if run.order.runner.runs_here() && run.tries > 0 => {
                 match self.runners.find(run).await {
                     Ok(Some(began)) => {
                         self.began(run, began)?;
@@ -519,6 +523,7 @@ impl Pool {
                 let on = match run.order.runner {
                     Runner::Adroit => format!("Adroit のセッション {session}"),
                     Runner::Agent => "手代".to_owned(),
+                    Runner::Direct => "直接".to_owned(),
                 };
                 // The run goes on whether or not this can be written; its
                 // end is written again until it can.
