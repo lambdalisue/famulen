@@ -649,6 +649,10 @@ pub async fn answer(
     answer: Answer,
     replies: Vec<String>,
 ) -> anyhow::Result<()> {
+    let _answering = app
+        .workers
+        .answering(run)
+        .ok_or_else(|| anyhow::anyhow!("この問いには、いま答えか聞き直しを届けています"))?;
     let (run, question) = asked(app, run, id)?;
     let (allowed, words) = (answer == Answer::Approve, replies.join("\n"));
     anyhow::ensure!(
@@ -699,6 +703,10 @@ pub async fn answer(
 /// Put what a run's session asks to the owner anew, in place of any request
 /// that does already.
 pub async fn ask_again(app: &App, run: i64, id: &str) -> anyhow::Result<()> {
+    let _answering = app
+        .workers
+        .answering(run)
+        .ok_or_else(|| anyhow::anyhow!("この問いには、いま答えか聞き直しを届けています"))?;
     let (_, question) = asked(app, run, id)?;
     let asked = hold(app, &question.call).await?;
     if asked == question.ticket {

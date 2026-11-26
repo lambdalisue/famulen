@@ -116,6 +116,8 @@ pub struct Workers {
     closed: Arc<Notify>,
     /// Held while what delegated work left is cleared away.
     tidying: Arc<tokio::sync::Mutex<()>>,
+    /// Runs whose question is being answered now.
+    answering: Arc<Mutex<HashSet<i64>>>,
 }
 
 impl Workers {
@@ -130,6 +132,7 @@ impl Workers {
             heard: Arc::default(),
             closed: Arc::default(),
             tidying: Arc::default(),
+            answering: Arc::default(),
         }
     }
 
@@ -187,12 +190,43 @@ impl Workers {
             .insert(session.to_owned());
     }
 
+    /// Take up answering or asking again what `run` asks, unless one of them
+    /// is on its way already: two that arrive together would both pass every
+    /// look at whether it still waits, as it waits until the session has the
+    /// answer. A run asks one thing at a time, so it is held run by run.
+    pub(crate) fn answering(&self, run: i64) -> Option<Answering> {
+        let taken = self
+            .answering
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(run);
+        taken.then(|| Answering {
+            runs: self.answering.clone(),
+            run,
+        })
+    }
+
     /// Whether `session` was told of since the last time this was asked.
     fn take_heard(&self, session: &str) -> bool {
         self.heard
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(session)
+    }
+}
+
+/// An answer on its way to a run; the run is free to answer again once it is dropped.
+pub(crate) struct Answering {
+    runs: Arc<Mutex<HashSet<i64>>>,
+    run: i64,
+}
+
+impl Drop for Answering {
+    fn drop(&mut self) {
+        self.runs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.run);
     }
 }
 

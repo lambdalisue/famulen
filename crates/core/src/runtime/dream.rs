@@ -34,14 +34,24 @@ pub enum Dreamt {
 
 /// Dream once and record how it went, unless a dream is already running.
 pub async fn dream_and_record(app: &App) -> Dreamt {
-    if app.store.state(DREAMING_KEY).ok().flatten().is_some()
-        || notebook_place::moving(&app.store).is_ok_and(|to| to.is_some())
-    {
+    if notebook_place::moving(&app.store).is_ok_and(|to| to.is_some()) {
         return Dreamt::Busy;
     }
-    let _ = app
+    // Two asked for together would both see none running if it were looked
+    // at before it is set.
+    match app
         .store
-        .set_state(DREAMING_KEY, Utc::now().timestamp().to_string());
+        .claim_state(DREAMING_KEY, Utc::now().timestamp().to_string())
+    {
+        Ok(true) => {}
+        Ok(false) => return Dreamt::Busy,
+        Err(error) => {
+            tracing::warn!(%error, "could not mark that a dream runs");
+            app.journal
+                .record("dream", format!("見られなかった（{error}）"));
+            return Dreamt::Failed;
+        }
+    }
     app.console.notify(Event::Records);
     let dreamt = match dream(app).await {
         Ok((status, applied)) => {
