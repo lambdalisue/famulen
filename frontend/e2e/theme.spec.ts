@@ -64,6 +64,8 @@ test("the bar of a phone takes the color the page has at its top", async ({ page
     await expect(page.locator("body")).toHaveClass(/chat-open/);
     const [still, over] = await bar();
     expect(still).toBe(over);
+    // Left open, the page read again would show it open.
+    await page.getByRole("button", { name: "閉じる" }).click();
   }
 });
 

@@ -1,6 +1,6 @@
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Title } from "@solidjs/meta";
-import { revalidate, useLocation, useNavigate } from "@solidjs/router";
+import { revalidate, useIsRouting, useLocation, useNavigate } from "@solidjs/router";
 import * as icons from "~/lib/icons";
 import { createEffect, createSignal, ErrorBoundary, For, type JSX, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { chooseWorkgroup, workgroup } from "~/lib/workgroup";
@@ -18,6 +18,7 @@ import { createKept } from "~/lib/kept";
 import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { followKeyboard, isNarrow, layoutHeld } from "~/lib/viewport";
 import { openTalk, place } from "~/lib/talks";
+import { followChatHistory } from "~/lib/chatHistory";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import ThemeChoice from "./ThemeChoice";
@@ -61,6 +62,7 @@ export default function Shell(props: { children?: JSX.Element }) {
   const owner = useOwner();
   followPortrait();
   const [chatOpen, setChatOpen] = createSignal(false);
+  followChatHistory({ open: chatOpen, setOpen: setChatOpen, routing: useIsRouting(), address: () => `${location.pathname}${location.search}${location.hash}` });
   let workgroupSheet: HTMLDialogElement | undefined;
 
   const tab = () => tabOf(location.pathname);

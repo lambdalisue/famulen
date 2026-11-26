@@ -3,7 +3,9 @@ import AideIcon from "~/components/AideIcon";
 import ApprovalCard from "~/components/ApprovalCard";
 import { DraftList } from "~/components/Attachments";
 import Message, { Quote } from "~/components/Message";
+import { holdPageBehind } from "~/components/hold";
 import { createPull } from "~/components/pull";
+import { createSwipeBack } from "~/components/swipe";
 import Talk, { TalkHead } from "~/components/Talk";
 import TalkList, { type Waits } from "~/components/TalkList";
 import Thread from "~/components/Thread";
@@ -24,7 +26,7 @@ import { offsetIn, pointOut } from "~/lib/scroll";
 import { createTalk, createTalks, forgetLast, go, lastOpen, openTalk, type Place, place, restorePlace, titleOf } from "~/lib/talks";
 import { createThread } from "~/lib/thread";
 import { useOwner } from "~/lib/owner";
-import { isNarrow } from "~/lib/viewport";
+import { isNarrow, narrow } from "~/lib/viewport";
 import { selection, setSelection, view } from "~/lib/view";
 import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Keyed, Tag } from "~/components/ui";
 import { createResizer } from "~/components/ui/resize";
@@ -340,6 +342,35 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     sheet: () => column,
     open: () => props.open,
     setOpen: (open) => props.setOpen(open),
+    taken: () => swipe.swiping(),
+  });
+  // Open over the page, the conversation is all a finger moves.
+  holdPageBehind({ over: () => column, on: () => props.open && narrow() });
+  /** The list shows beneath what was opened from it while that is swiped away. */
+  const [beneath, setBeneath] = createSignal(false);
+  const swiped = () => [...(column?.querySelectorAll<HTMLElement>(":scope > :is(.talk-head, .talk-said, .talk-new, .talk:not([hidden]), #approvals, .arrival)") ?? [])];
+  const swipe = createSwipeBack({
+    area: () => column,
+    can: () => isNarrow() && props.open && place().kind !== "list" && !document.body.classList.contains("chat-moving"),
+    open: place,
+    moving: swiped,
+    beneath: (shown) => {
+      const moving = swiped();
+      setBeneath(shown);
+      const list = column?.querySelector<HTMLElement>(":scope > .talk-list") ?? undefined;
+      const [first, last] = [moving[0], moving.at(-1)];
+      if (!list) return undefined;
+      if (shown && first && last) {
+        // It takes the room of what is swiped away, which the list does not have while that is shown.
+        list.style.setProperty("--beneath-top", `${first.offsetTop}px`);
+        list.style.setProperty("--beneath-height", `${last.offsetTop + last.offsetHeight - first.offsetTop}px`);
+      } else {
+        list.style.removeProperty("--beneath-top");
+        list.style.removeProperty("--beneath-height");
+      }
+      return list;
+    },
+    back: () => go({ kind: "list" }),
   });
   /** Counts the times a message was gone to, so that only the latest is followed through. */
   let gone = 0;
@@ -505,7 +536,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             <IconButton icon={icons.chevronDown} label="閉じる" variant="ghost" onClick={() => props.setOpen(false)} />
           </div>
         </div>
-        <Show when={place().kind === "list"}>
+        <Show when={place().kind === "list" || beneath()}>
           <TalkList talks={talks} waits={waits} aide={aide()} tz={tz()} />
         </Show>
         <Show when={place().kind === "new"}>
