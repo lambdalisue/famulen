@@ -153,9 +153,14 @@ fn repository_name(address: &str) -> Option<String> {
     named.then(|| format!("{}/{path}", host.to_lowercase()))
 }
 
-/// What a session is asked: the request, then how it is finished.
+/// What a session is told of how its end is read. What it answers when a turn
+/// ends is no sign: a pause, a step on the way and the last word look alike.
+const DONE_BY_PLAN: &str = "Keep the plan of this work on your timeline with `timeline_tasks`, and mark each task completed once it is. Famulen takes the work for done only when your turn has ended and every task on it is completed; until then it is taken for unfinished, whatever your answer says. When you stop short of that, to pause, to wait or because the work was called off, leave what is not done as it stands, blocked with a note where you cannot go on.";
+
+/// What a session is asked: the request, how its end is read, then how it is
+/// finished.
 pub(super) fn prompt(order: &Order) -> String {
-    let request = with_vms(order);
+    let request = format!("{}\n\n---\n\n{DONE_BY_PLAN}", with_vms(order));
     if order.finish.is_empty() {
         return request;
     }
@@ -302,11 +307,21 @@ mod tests {
     #[test]
     fn the_steps_stand_below_the_request() {
         let mut order = order(&at("/src"));
-        assert_eq!(prompt(&order), "Do it.");
         order.finish = "1. Merge it.".into();
         let prompt = prompt(&order);
         assert!(prompt.starts_with("Do it.\n"), "{prompt}");
         assert!(prompt.ends_with("\n1. Merge it."), "{prompt}");
+    }
+
+    #[test]
+    fn a_session_is_told_that_its_work_is_taken_for_done_by_its_plan() {
+        let mut order = order(&at("/src"));
+        for finish in ["", "1. Merge it."] {
+            order.finish = finish.into();
+            let prompt = prompt(&order);
+            assert!(prompt.starts_with("Do it.\n"), "{prompt}");
+            assert!(prompt.contains("timeline_tasks"), "{prompt}");
+        }
     }
 
     #[test]

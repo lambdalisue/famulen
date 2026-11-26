@@ -15,6 +15,9 @@ pub enum State {
     Running,
     /// The Adroit session waits for the owner.
     Waiting,
+    /// The Adroit session ended its turn with tasks of its plan unfinished: it
+    /// waits for something to go on with, or for someone to look.
+    Idle,
     /// Adroit cannot be asked how it stands, or whether it started.
     Unreachable,
     /// It came to an end that is not yet written to the task and told.
@@ -29,6 +32,7 @@ impl State {
             State::Asking => "asking",
             State::Running => "running",
             State::Waiting => "waiting",
+            State::Idle => "idle",
             State::Unreachable => "unreachable",
             State::Ending => "ending",
             State::Ended => "ended",
@@ -41,6 +45,7 @@ impl State {
             State::Asking,
             State::Running,
             State::Waiting,
+            State::Idle,
             State::Unreachable,
             State::Ending,
         ]
@@ -50,8 +55,9 @@ impl State {
     }
 
     /// Whether a run in this state takes one of the slots. One that waits on
-    /// the owner does not, however long they take, nor one that cannot be
-    /// seen while Adroit is away.
+    /// the owner does not, however long they take, nor one whose turn ended
+    /// with its plan unfinished, nor one that cannot be seen while Adroit is
+    /// away.
     pub fn takes_slot(self) -> bool {
         matches!(self, State::Starting | State::Running)
     }
@@ -61,6 +67,9 @@ impl State {
 pub enum Outcome {
     Done,
     Failed,
+    /// Its session was closed before every task of its plan was completed:
+    /// whether its work was done is for someone to check.
+    Unsure,
     /// The owner did not approve its start.
     Refused,
     /// Its task was cancelled, taken back or removed.
@@ -74,6 +83,7 @@ impl Outcome {
         match self {
             Outcome::Done => "done",
             Outcome::Failed => "failed",
+            Outcome::Unsure => "unsure",
             Outcome::Refused => "refused",
             Outcome::Stopped => "stopped",
             Outcome::Interrupted => "interrupted",
@@ -84,6 +94,7 @@ impl Outcome {
         [
             Outcome::Done,
             Outcome::Failed,
+            Outcome::Unsure,
             Outcome::Refused,
             Outcome::Stopped,
             Outcome::Interrupted,

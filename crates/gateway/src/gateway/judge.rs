@@ -55,6 +55,9 @@ pub struct Call {
     pub assessment: Option<Assessment>,
     /// What the call decides, read from where it is, for the owner to see.
     pub decides: Option<Value>,
+    /// Keep all that a command prints, not only its head: the caller reads it
+    /// as data, and no model reads it.
+    pub whole: bool,
 }
 
 /// How the refusal of a call that would have been asked about begins.

@@ -411,7 +411,7 @@ impl Gateway {
         };
         let started = std::time::Instant::now();
         let result = self
-            .call_unjudged(&connection, &call.tool, call.input.clone())
+            .call_unjudged(&connection, &call.tool, call.input.clone(), call.whole)
             .await;
         let (outcome, answer) = match &result {
             Ok(r) if r.is_error => ("error".to_owned(), r.text.as_str()),
@@ -465,6 +465,7 @@ impl Gateway {
         connection: &Connection,
         tool: &str,
         arguments: Value,
+        whole: bool,
     ) -> anyhow::Result<ToolResult> {
         let connection = &self
             .sealed()
@@ -473,7 +474,9 @@ impl Gateway {
         match self.definition_of(connection) {
             Some(Err(why)) => anyhow::bail!("{why}"),
             Some(Ok(def)) if def.transport.command.is_some() => {
-                return self.call_command(connection, &def, tool, arguments).await;
+                return self
+                    .call_command(connection, &def, tool, arguments, whole)
+                    .await;
             }
             Some(Ok(def)) if def.transport.http.is_some() => {
                 return self.call_defined(connection, &def, tool, arguments).await;

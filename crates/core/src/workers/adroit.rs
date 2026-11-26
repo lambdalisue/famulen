@@ -195,8 +195,7 @@ fn was_asked(status: &str) -> bool {
 }
 
 /// The session of a run, and every session that goes on in the Adroit it was
-/// started in. Those that ended are not listed: they grow without end, and a
-/// long answer is cut.
+/// started in. Those that ended are not listed: they grow without end.
 pub(super) async fn sessions(app: &App, run: &Run) -> anyhow::Result<(Value, Value)> {
     let kept = connection_kept(app, run)?;
     let connection = if kept.is_empty() {
@@ -238,7 +237,7 @@ pub(super) async fn look(app: &App, run: &Run) -> anyhow::Result<Looked> {
             if taking_up(&session, asked, now) {
                 return Ok(Looked::Working);
             }
-            Ok(read_standing(&session, age))
+            Ok(read_standing(&session, age, now))
         }
         Err(error) => {
             let all = read(app, &connection, "list_sessions", json!({ "ended": true })).await?;
@@ -321,7 +320,9 @@ async fn went_on_in(
         });
         // One that is closed is not listed, and Famulen may not have been
         // there when it was told of: that of a run that failed is read once.
-        let unlisted = trace.is_none() && before.is_none() && run.outcome == Some(Ended::Failed);
+        let unlisted = trace.is_none()
+            && before.is_none()
+            && matches!(run.outcome, Some(Ended::Failed | Ended::Unsure));
         if !heard && !may_have && !unlisted {
             continue;
         }
@@ -373,7 +374,7 @@ fn has_gone_on(session: &Value, run: &Run) -> bool {
         began(t) > ended_at || began(t) == ended_at && (at_work || last > ended_at)
     });
     match run.outcome {
-        Some(Ended::Failed) => at_work || later.next().is_some(),
+        Some(Ended::Failed | Ended::Unsure) => at_work || later.next().is_some(),
         Some(Ended::Done) => later.any(|t| !only_tells(t["prompt"].as_str().unwrap_or_default())),
         _ => false,
     }
@@ -727,22 +728,41 @@ async fn hold(app: &App, call: &Call) -> anyhow::Result<i64> {
     }
 }
 
-/// How a session stands, `age` seconds after it was started.
-fn read_standing(session: &Value, age: i64) -> Looked {
+/// How a session stands at `now`, `age` seconds after it was started. A turn
+/// that ends says nothing of the work: what the session answers may be a
+/// pause or a step on the way, and its next turn may come of what it waits
+/// for. Its work is done once every task of its plan is completed.
+fn read_standing(session: &Value, age: i64, now: i64) -> Looked {
     let reply = session["turns"]
         .as_array()
         .and_then(|t| t.last())
         .and_then(|t| t["reply"].as_str());
-    let delivered = session["undelivered"].as_u64().unwrap_or(0) == 0;
-    let answered = reply.is_some() && delivered;
-    let result: String = reply
-        .unwrap_or_default()
-        .chars()
-        .take(RESULT_CHARS)
-        .collect();
+    // What it says of itself stands in for an answer its last turn did not
+    // give, as when it was closed in the middle of one.
+    let said = reply
+        .or_else(|| session["message"].as_str())
+        .unwrap_or_default();
+    let result: String = said.chars().take(RESULT_CHARS).collect();
+    // One that does not say when it was last active is taken to read what it
+    // was told yet.
+    let active = session["last_active_ms"].as_i64().map(|ms| ms / 1000);
+    let undelivered = session["undelivered"].as_u64().unwrap_or(0) > 0;
+    let takes_up = undelivered && active.is_none_or(|at| now - at <= TAKES_UP_SECS)
+        || reply.is_none() && age <= TAKES_UP_SECS;
+    let unfinished = unfinished(session);
     match session["state"].as_str().unwrap_or_default() {
         "waiting" => Looked::Waiting,
-        "done" | "idle" if answered || delivered && age > TAKES_UP_SECS => Looked::Done(result),
+        "done" | "idle" if takes_up => Looked::Working,
+        "done" | "idle" | "ended" if unfinished.is_none() => Looked::Done(result),
+        "done" | "idle" => Looked::Idle,
+        "ended" => {
+            let why = unfinished.unwrap_or_default();
+            Looked::Unsure(if result.is_empty() {
+                why
+            } else {
+                format!("{why}\n---\n{result}")
+            })
+        }
         "failed" => {
             let said = session["message"].as_str().unwrap_or(&result);
             let why = format!("the session's turn failed: {said}");
@@ -752,10 +772,35 @@ fn read_standing(session: &Value, age: i64) -> Looked {
                 Looked::Failed(why)
             }
         }
-        "ended" if answered => Looked::Done(result),
-        "ended" => Looked::Failed("the session was ended before it answered".into()),
         _ => Looked::Working,
     }
+}
+
+/// What keeps a session's plan from being finished, or nothing once every
+/// task of it is completed.
+fn unfinished(session: &Value) -> Option<String> {
+    let plan = session["timeline"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if plan.is_empty() {
+        return Some(
+            "Its session was closed, and it kept no plan to tell by whether its work was finished."
+                .into(),
+        );
+    }
+    // A task with steps under it is done by them, whatever it says itself.
+    let steps: Vec<&Value> = plan
+        .iter()
+        .filter(|t| !plan.iter().any(|s| s["parent"] == t["id"]))
+        .collect();
+    let left = steps.iter().filter(|t| t["status"] != "completed").count();
+    (left > 0).then(|| {
+        format!(
+            "Its session was closed with {left} of the {} steps of its plan not completed.",
+            steps.len()
+        )
+    })
 }
 
 /// Read something of Adroit. The owner is never asked of it: a read they
@@ -763,6 +808,7 @@ fn read_standing(session: &Value, age: i64) -> Looked {
 async fn read(app: &App, connection: &str, tool: &str, input: Value) -> anyhow::Result<Value> {
     let call = Call {
         never_ask: true,
+        whole: true,
         ..Call::new(WORKER, connection, tool, input)
     };
     match app.gateway.call(&call).await? {
@@ -837,6 +883,8 @@ mod tests {
                 true,
             ),
             ("working", json!([turn(11, "p")]), Ended::Stopped, false),
+            ("working", json!([turn(9, "p")]), Ended::Unsure, true),
+            ("ended", json!([turn(9, "p")]), Ended::Unsure, false),
         ] {
             let session = json!({ "state": state, "turns": turns });
             assert_eq!(
@@ -896,35 +944,147 @@ mod tests {
         }
     }
 
+    /// A session as Adroit shows it an hour after it was last active, with a
+    /// plan whose tasks stand so.
+    fn shown(state: &str, reply: Option<&str>, plan: &[&str]) -> Value {
+        let plan: Vec<Value> = plan
+            .iter()
+            .enumerate()
+            .map(|(n, status)| json!({ "id": format!("t{n}"), "parent": null, "status": status }))
+            .collect();
+        json!({
+            "state": state, "message": "", "last_active_ms": (NOW - 3600) * 1000,
+            "turns": [{ "prompt": "p", "reply": reply }],
+            "timeline": plan, "undelivered": 0,
+        })
+    }
+
+    const NOW: i64 = 100_000;
+    const LONG: i64 = TAKES_UP_SECS + 1;
+
     #[test]
-    fn a_session_is_done_once_its_turn_ended_with_an_answer() {
-        let session = |state: &str, reply: Option<&str>| json!({ "state": state, "turns": [{ "prompt": "p", "reply": reply }], "undelivered": 0 });
-        for (state, reply, age, expected) in [
-            ("starting", None, 1, Looked::Working),
-            ("working", None, 9999, Looked::Working),
-            ("background", Some("so far"), 9999, Looked::Working),
-            ("waiting", None, 1, Looked::Waiting),
-            ("idle", None, 1, Looked::Working),
-            ("idle", None, TAKES_UP_SECS + 1, Looked::Done(String::new())),
-            ("idle", Some("ok"), 1, Looked::Done("ok".into())),
-            ("done", Some("ok"), 1, Looked::Done("ok".into())),
-            ("ended", Some("ok"), 1, Looked::Done("ok".into())),
+    fn a_session_is_done_once_its_turn_ended_with_every_task_of_its_plan_completed() {
+        let done = ["completed", "completed"];
+        for (state, reply, plan, age, expected) in [
+            ("starting", None, &[][..], 1, Looked::Working),
+            ("working", None, &done[..], 9999, Looked::Working),
+            ("background", Some("so far"), &done, 9999, Looked::Working),
+            ("waiting", None, &done, 1, Looked::Waiting),
+            ("idle", None, &done, 1, Looked::Working),
+            ("idle", None, &done, LONG, Looked::Done(String::new())),
+            ("idle", Some("ok"), &done, 1, Looked::Done("ok".into())),
+            ("done", Some("ok"), &done, 1, Looked::Done("ok".into())),
+            ("ended", Some("ok"), &done, 1, Looked::Done("ok".into())),
+            // Paused, or only part of the way: its turn ended, its work did not.
+            (
+                "done",
+                Some("一時停止：未完了です"),
+                &["completed", "in_progress"],
+                LONG,
+                Looked::Idle,
+            ),
+            (
+                "idle",
+                Some("動かし直します。"),
+                &["completed", "pending"],
+                LONG,
+                Looked::Idle,
+            ),
+            (
+                "done",
+                Some("待ちます。"),
+                &["completed", "blocked"],
+                LONG,
+                Looked::Idle,
+            ),
+            ("done", Some("済みました。"), &[], LONG, Looked::Idle),
         ] {
             assert_eq!(
-                read_standing(&session(state, reply), age),
+                read_standing(&shown(state, reply, plan), age, NOW),
                 expected,
-                "{state} {reply:?} {age}"
+                "{state} {reply:?} {plan:?} {age}"
             );
         }
-        let mut waits = session("idle", None);
-        waits["undelivered"] = json!(1);
-        let long = TAKES_UP_SECS + 1;
-        assert_eq!(read_standing(&waits, long), Looked::Working, "not read yet");
-        for state in ["failed", "ended"] {
-            assert!(matches!(
-                read_standing(&session(state, None), 1),
-                Looked::Failed(_)
-            ));
+    }
+
+    #[test]
+    fn a_session_closed_with_its_plan_finished_is_done_though_its_last_turn_did_not_answer() {
+        let session = shown("ended", None, &["completed", "completed"]);
+        assert_eq!(
+            read_standing(&session, LONG, NOW),
+            Looked::Done(String::new())
+        );
+        let mut said = session;
+        said["message"] = json!("merged");
+        assert_eq!(
+            read_standing(&said, LONG, NOW),
+            Looked::Done("merged".into())
+        );
+    }
+
+    #[test]
+    fn a_session_closed_before_its_plan_was_finished_cannot_be_told_done_or_failed() {
+        for plan in [&["pending"][..], &["completed", "in_progress"], &[]] {
+            let looked = read_standing(&shown("ended", Some("まず調べます。"), plan), LONG, NOW);
+            let Looked::Unsure(why) = looked else {
+                panic!("{plan:?}: {looked:?}");
+            };
+            assert!(
+                why.contains("まず調べます。"),
+                "what it left is kept: {why}"
+            );
         }
+    }
+
+    #[test]
+    fn a_session_that_has_yet_to_take_up_what_it_was_told_is_not_done_but_one_that_never_does_is() {
+        let mut session = shown("done", None, &["completed"]);
+        session["undelivered"] = json!(5);
+        session["message"] = json!("merged");
+        session["last_active_ms"] = json!((NOW - 10) * 1000);
+        assert_eq!(
+            read_standing(&session, LONG, NOW),
+            Looked::Working,
+            "not read yet"
+        );
+        session["last_active_ms"] = json!((NOW - LONG) * 1000);
+        assert_eq!(
+            read_standing(&session, LONG, NOW),
+            Looked::Done("merged".into()),
+            "it does not read them"
+        );
+    }
+
+    #[test]
+    fn a_plan_is_finished_by_the_tasks_with_none_under_them() {
+        let task = |id: &str, parent: Value, status: &str| json!({ "id": id, "parent": parent, "status": status });
+        let mut session = shown("done", Some("済んだ"), &[]);
+        session["timeline"] = json!([
+            task("g", Value::Null, "in_progress"),
+            task("a", json!("g"), "completed"),
+            task("b", json!("g"), "completed"),
+        ]);
+        assert_eq!(
+            read_standing(&session, LONG, NOW),
+            Looked::Done("済んだ".into())
+        );
+        session["timeline"][2]["status"] = json!("pending");
+        assert_eq!(read_standing(&session, LONG, NOW), Looked::Idle);
+    }
+
+    #[test]
+    fn a_session_that_does_not_say_when_it_was_active_takes_up_what_it_was_told() {
+        let mut session = shown("done", Some("ok"), &["completed"]);
+        session["undelivered"] = json!(1);
+        session.as_object_mut().unwrap().remove("last_active_ms");
+        assert_eq!(read_standing(&session, LONG, NOW), Looked::Working);
+    }
+
+    #[test]
+    fn a_failed_turn_fails() {
+        assert!(matches!(
+            read_standing(&shown("failed", None, &["completed"]), 1, NOW),
+            Looked::Failed(_)
+        ));
     }
 }

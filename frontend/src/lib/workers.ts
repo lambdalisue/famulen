@@ -26,12 +26,14 @@ const STATES: { [state: string]: string } = {
   unreachable: "Adroit に届かない",
   running: "実行中",
   waiting: "あなたの答え待ち",
+  idle: "予定を残して手が止まっている",
   still: "止まっている",
 };
 
 const OUTCOMES: { [outcome: string]: string } = {
   done: "済んだ",
   failed: "うまくいかなかった",
+  unsure: "済んだか分からない",
   refused: "承認されなかった",
   stopped: "止めた",
   interrupted: "途中で切れた",
@@ -50,6 +52,7 @@ const RUN_STATES: { [state: string]: string } = {
   asking: "承認待ち",
   running: "実行中",
   waiting: "あなたの答え待ち",
+  idle: "予定を残して手が止まっている",
   unreachable: "Adroit に届かない",
   ending: "終わりを書いている",
 };
@@ -105,7 +108,7 @@ export function stageOf(t: DelegatedTask): Stage {
   if (t.state === "running") return "running";
   if (t.state === "starting") return "soon";
   if (["queued", "approved"].includes(t.state)) return "next";
-  return ["asking", "waiting", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "held";
+  return ["asking", "waiting", "idle", "unfit", "still", "unreachable"].includes(t.state) ? "owner" : "held";
 }
 
 type Look = { tone?: "warn" | "danger" | "info" | "ok" | "plan"; icon: string };
@@ -124,7 +127,7 @@ export const stageLook = (stage: Stage) => STAGE_LOOKS[stage];
 /** The same of one task, which may be held up by something that went wrong. */
 export const standingLook = (t: DelegatedTask): Look => (isBad(t) ? { tone: "danger", icon: icons.alertTriangle } : stageLook(stageOf(t)));
 
-const OUTCOME_LOOKS: { [outcome: string]: Look } = { done: { tone: "ok", icon: icons.check }, interrupted: { icon: icons.plugConnectedX } };
+const OUTCOME_LOOKS: { [outcome: string]: Look } = { done: { tone: "ok", icon: icons.check }, unsure: { tone: "warn", icon: icons.handStop }, interrupted: { icon: icons.plugConnectedX } };
 
 export const outcomeLook = (outcome: string): Look =>
   isBadOutcome(outcome) ? { tone: "danger", icon: icons.alertTriangle } : OUTCOME_LOOKS[outcome] ?? { icon: icons.playerStop };

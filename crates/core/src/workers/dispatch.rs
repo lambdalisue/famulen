@@ -65,6 +65,8 @@ pub enum Standing {
     Running,
     /// Its session waits for the owner.
     Waiting,
+    /// Its session ended its turn with tasks of its plan unfinished.
+    Idle,
     /// Its start failed, or was cut off, and is tried again in a while.
     Retrying,
     /// Adroit cannot be asked of it.
@@ -133,6 +135,7 @@ fn standing(c: &Candidate, limits: &Limits, now: NaiveDateTime) -> Standing {
         (Some(State::Asking), Asked::Approved) if limits.paused => return Standing::Paused,
         (Some(State::Asking), Asked::Approved) => return Standing::Approved,
         (Some(State::Waiting), _) => return Standing::Waiting,
+        (Some(State::Idle), _) => return Standing::Idle,
         (Some(State::Unreachable), _) => return Standing::Unreachable,
         (Some(State::Starting), _) if limits.paused => return Standing::Paused,
         (Some(State::Starting), _) if capped(c, limits) => return Standing::Capped,
@@ -297,8 +300,8 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_waits_on_the_owner_takes_no_slot() {
-        for state in [State::Waiting, State::Asking, State::Ending] {
+    fn a_run_that_waits_on_the_owner_or_rests_with_its_plan_unfinished_takes_no_slot() {
+        for state in [State::Waiting, State::Idle, State::Asking, State::Ending] {
             let waiting = Candidate {
                 run: Some(state),
                 pending: false,
@@ -310,6 +313,11 @@ mod tests {
                 "{state:?}"
             );
         }
+        let idle = Candidate {
+            run: Some(State::Idle),
+            ..task("a")
+        };
+        assert_eq!(standing_of(idle, limits(1)), Standing::Idle);
     }
 
     #[test]
