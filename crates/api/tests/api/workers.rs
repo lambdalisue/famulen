@@ -4,7 +4,7 @@
 use famulen_api::{SECRETARY, WORKER};
 use serde_json::{Value, json};
 
-use crate::support::{call, call_as, open, temp, try_call};
+use crate::support::{call, call_as, open, temp, try_call, watch};
 
 fn agent(title: &str) -> Value {
     json!({ "title": title, "request": "調べて結果を書く", "runner": "agent", "tools": ["WebSearch"] })
@@ -575,4 +575,119 @@ async fn the_secretary_neither_reads_the_question_there_nor_answers_for_the_owne
     for tool in ["answer_run", "ask_run_again"] {
         assert!(!tools.list().iter().any(|t| t.name == tool), "{tool}");
     }
+}
+
+/// A run of an agent that has done something.
+async fn agent_run(api: &famulen_api::Api) -> i64 {
+    let app = api.app().clone();
+    let t = call(api, "WorkerService/DelegateTask", agent("読む")).await;
+    let id = t["id"].as_str().unwrap();
+    let task = app
+        .records
+        .get(famulen_core::records::TASKS, id)
+        .unwrap()
+        .unwrap();
+    let order = famulen_core::workers::Order::of(&task, t["code"].as_str().unwrap()).unwrap();
+    let run = app.workers.runs.begin(id, &order).unwrap().id;
+    let ledger = app.workers.sights.ledger();
+    ledger
+        .put(
+            run,
+            "a",
+            1,
+            famulen_core::workers::Item::Asked {
+                text: "読んで".into(),
+            },
+        )
+        .unwrap();
+    let steps = vec![famulen_core::workers::Step {
+        id: "g".into(),
+        title: "読む".into(),
+        status: "in_progress".into(),
+        weight: 1.0,
+        ..Default::default()
+    }];
+    ledger
+        .put(
+            run,
+            "p",
+            2,
+            famulen_core::workers::Item::Plan {
+                from: famulen_core::workers::PlanFrom::Timeline,
+                steps,
+            },
+        )
+        .unwrap();
+    run
+}
+
+#[tokio::test]
+async fn what_a_run_did_and_how_its_plan_changed_are_read_with_it() {
+    let dir = temp();
+    let api = open(&dir);
+    let run = agent_run(&api).await;
+    let output = call(&api, "WorkerService/ReadRun", json!({ "id": run })).await;
+    assert_eq!(output["entries"][0]["asked"]["text"], "読んで", "{output}");
+    assert_eq!(output["entries"][1]["plan"]["from"], "timeline");
+    assert_eq!(output["run"]["planFrom"], "timeline");
+    assert_eq!(output["run"]["doing"], "読む");
+    let changes: Vec<_> = output["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["change"].as_str().unwrap(),
+                c["to"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(changes, [("added", ""), ("status", "in_progress")]);
+}
+
+#[tokio::test]
+async fn a_run_is_watched_from_what_it_did_to_what_it_is_writing() {
+    let dir = temp();
+    let api = open(&dir);
+    let run = agent_run(&api).await;
+    let ledger = api.app().workers.sights.ledger().clone();
+    let later = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        ledger.part(
+            run,
+            3,
+            famulen_core::workers::PartOf::Said("m".into()),
+            "書".into(),
+        );
+        ledger
+            .put(
+                run,
+                "s",
+                4,
+                famulen_core::workers::Item::Said {
+                    message: "m".into(),
+                    text: "書いた".into(),
+                },
+            )
+            .unwrap();
+    });
+    let told = watch(
+        &api,
+        "WorkerService/WatchRun",
+        json!({ "id": run, "after": 1 }),
+        4,
+    )
+    .await;
+    later.await.unwrap();
+    assert_eq!(told[0]["state"]["run"]["id"], run.to_string(), "{told:?}");
+    assert!(
+        told[0]["state"]["entries"].is_null(),
+        "how it stands comes alone"
+    );
+    assert_eq!(
+        told[1]["entry"]["seq"], "2",
+        "what came after the one asked for"
+    );
+    assert_eq!(told[2]["part"]["text"], "書");
+    assert_eq!(told[3]["entry"]["said"]["text"], "書いた");
 }

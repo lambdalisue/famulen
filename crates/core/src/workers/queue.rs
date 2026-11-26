@@ -143,14 +143,15 @@ pub async fn watch(app: &App, id: i64) -> anyhow::Result<(Run, Sight, String)> {
     } else {
         WATCH_EVERY
     };
-    let mut why = String::new();
-    if !run.session.is_empty()
-        && app.workers.sights.due(id, every)
-        && let Err(error) = super::adroit::watch(app, &run).await
-    {
-        why = format!("{error:#}");
+    if !run.session.is_empty() && app.workers.sights.due(id, every) {
+        let why = match super::adroit::watch(app, &run).await {
+            Ok(()) => String::new(),
+            Err(error) => format!("{error:#}"),
+        };
+        app.workers.sights.troubled(id, why);
     }
     let sight = app.workers.sights.of(id);
+    let why = app.workers.sights.trouble(id);
     Ok((run, sight, why))
 }
 

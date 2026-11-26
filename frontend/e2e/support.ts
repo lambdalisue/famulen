@@ -63,7 +63,7 @@ export async function onFrame<T>(page: Page, look: () => Promise<T>): Promise<T>
 }
 
 /** Let the stand-in for Claude Code go on past where it waits; see fake-claude.pl. */
-export function letOn(...gates: ("search" | "found" | "end" | "written")[]) {
+export function letOn(...gates: ("search" | "found" | "end" | "written" | "open" | "half" | "rich")[]) {
   for (const gate of gates) writeFileSync(join(process.env.E2E_GATES ?? "", gate), "");
 }
 

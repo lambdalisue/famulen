@@ -359,3 +359,58 @@ test.describe("a session that waits on the owner", () => {
     await left(page, "答え: --allow");
   });
 });
+
+test("a worker's run is followed as it writes, each tool in its own part, and its plan as a tree and over time", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await settle(request, false);
+  const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title: "ログインを直す", request: "e2e-rich", runner: "agent" });
+  await visit(page, `/tasks?tab=delegated&id=${t.id}`, /タスク/);
+  await detail(page).getByRole("link", { name: "「ログインを直す」の出力を見る" }).click();
+  await expectView(page, "タスク · 委託 · ログインを直す");
+  const output = page.getByRole("region", { name: "出力" });
+  await expect(page.getByRole("list", { name: "予定" })).toContainText("テストを流す", { timeout: 20_000 });
+  letOn("open");
+  // What is being written shows before it is whole.
+  await expect(output.locator(".run-live")).toContainText("テストを流して", { timeout: 20_000 });
+  await expect(output).toContainText("書いている");
+  await expect(page.getByRole("list", { name: "予定" })).toContainText("テストを流す");
+  await expect(page.locator(".run-plan")).toContainText("Famulen の道具で書いた段取り");
+  await page.screenshot({ path: test.info().outputPath("run-writing.png") });
+  letOn("half");
+  await expect(output.locator(".run-said")).toContainText("テストを流して確かめる。");
+  const tests = output.locator(".run-tool").filter({ hasText: "cargo test -p login" });
+  await expect(tests).toHaveCount(2);
+  // A failing test opens by itself; one that passed stays folded.
+  await expect(tests.first()).toContainText("11 通過・1 失敗");
+  await expect(tests.first().getByLabel("出力")).toBeVisible();
+  await expect(tests.first().getByLabel("出力")).toContainText("FAILED");
+  await expect(tests.last()).toContainText("12 通過・0 失敗");
+  await expect(tests.last().getByLabel("出力")).toBeHidden();
+  const edit = output.locator(".run-tool").filter({ hasText: "/src/login.rs" });
+  await expect(edit).toContainText("+1");
+  await edit.getByRole("button").first().click();
+  await expect(edit.getByLabel("/src/login.rs の差分")).toContainText("retry(2)");
+  // All that was read, what came from a cache among it.
+  await expect(output).toContainText("入力 2.0k（うちキャッシュ 800）");
+
+  // The plan leads to what was done then.
+  const plan = page.getByRole("list", { name: "予定" });
+  await plan.getByRole("button", { name: /^テストを流す/ }).click();
+  await expect(plan).toContainText("cargo test で今の様子を見る");
+  await plan.getByRole("button", { name: "「テストを流す」の時の出力へ" }).click();
+  await expect(output.locator(".run-line.flash")).toHaveCount(1);
+  await page.getByRole("radiogroup", { name: "予定の見方" }).getByTitle("時間の流れ").click();
+  await expect(page.getByRole("list", { name: "時間の流れ" }).getByRole("listitem")).toHaveCount(3);
+  await page.screenshot({ path: test.info().outputPath("run-time.png") });
+  await page.getByRole("radiogroup", { name: "予定の見方" }).getByTitle("木").click();
+
+  letOn("rich");
+  await expect(output).toContainText("直した。12 のテストが通る。");
+  await expect(page.locator(".run-page .tag").first()).toHaveText("済んだ", { timeout: 15_000 });
+  await page.screenshot({ path: test.info().outputPath("run-done.png"), fullPage: true });
+
+  // What it did is read again whole, as it was.
+  await page.reload();
+  await expect(output).toContainText("テストを流して確かめる。");
+  await expect(output.locator(".run-tool")).toHaveCount(3);
+});

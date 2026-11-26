@@ -148,8 +148,7 @@ impl Bench {
     }
 
     fn texts(&self) -> Vec<String> {
-        let sight = self.famulen().app.workers.sights.of(self.run().id);
-        sight.lines.into_iter().map(|l| l.text).collect()
+        self.famulen().app.workers.sights.said(self.run().id)
     }
 }
 
@@ -194,7 +193,7 @@ fn an_agent_goes_on_and_what_it_wrote_and_asked_meanwhile_is_neither_lost_nor_do
     );
     b.famulen().tick();
     b.famulen()
-        .until("one", |app| !app.workers.sights.of(1).lines.is_empty());
+        .until("one", |app| !app.workers.sights.said(1).is_empty());
     assert!(b.wait_for("first").contains("\"allow\""));
     b.stop_famulen();
 

@@ -7,6 +7,7 @@ mod agent;
 mod bounds;
 mod dispatch;
 mod finish;
+mod ledger;
 mod order;
 mod pool;
 mod queue;
@@ -15,10 +16,12 @@ mod runs;
 mod sight;
 mod spent;
 mod tidy;
+mod timeline;
 
 pub(crate) use agent::executor_program;
 pub use dispatch::*;
 pub use finish::*;
+pub use ledger::*;
 pub use order::*;
 pub use pool::{Pool, run};
 pub use queue::*;
@@ -118,8 +121,8 @@ pub struct Workers {
 impl Workers {
     pub fn new(store: Store, dir: PathBuf, executors: Executors, kept: Kept) -> Self {
         Self {
-            runs: Runs::new(store),
-            sights: Sights::default(),
+            runs: Runs::new(store.clone()),
+            sights: Sights::new(store),
             dir,
             executors,
             kept,

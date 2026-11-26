@@ -1,7 +1,9 @@
 //! Delegated tasks and the pool that runs them.
 
 use chrono::Utc;
-use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc::{
+    ConnectError, RequestContext, Response, ServiceRequest, ServiceResult, ServiceStream,
+};
 use famulen_core::conversations::task_key;
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
@@ -48,18 +50,8 @@ fn run(r: Run) -> WorkerRun {
 /// A run with what can be seen of it.
 fn seen(r: Run, sight: &Sight) -> WorkerRun {
     WorkerRun {
-        steps: sight
-            .steps
-            .iter()
-            .map(|s| WorkerStep {
-                id: s.id.clone(),
-                parent: s.parent.clone(),
-                title: s.title.clone(),
-                status: s.status.clone(),
-                note: s.note.clone(),
-                ..Default::default()
-            })
-            .collect(),
+        steps: sight.steps.iter().map(crate::runs::step).collect(),
+        plan_from: sight.from.map(|f| f.as_str()).unwrap_or_default().into(),
         percent: (sight.done().unwrap_or_default() * 100.0) as i32,
         doing: sight.doing(),
         ..run(r)
@@ -157,6 +149,22 @@ impl Api {
             .into();
         }
         Ok(run)
+    }
+
+    /// How a run stands, read anew, without what it did.
+    pub(crate) async fn run_state(&self, id: i64) -> anyhow::Result<RunOutput> {
+        let (run, sight, why) = workers::watch(&self.app, id).await?;
+        let usage = self.app.models.run_usage(run.id)?;
+        Ok(RunOutput {
+            usage: usage
+                .into_iter()
+                .filter_map(crate::models::usage_row)
+                .collect(),
+            changes: crate::runs::changes(&self.app, run.id)?,
+            run: Some(self.asking(run, &sight)?).into(),
+            why,
+            ..Default::default()
+        })
     }
 
     /// Change a delegated task, and have the pool see it.
@@ -312,28 +320,36 @@ impl WorkerService for Api {
         _ctx: RequestContext,
         request: ServiceRequest<'_, ReadRunRequest>,
     ) -> ServiceResult<RunOutput> {
-        let (run, sight, why) = workers::watch(&self.app, request.id).await.or_fail()?;
-        let usage = self.app.models.run_usage(run.id).or_fail()?;
-        Response::ok(RunOutput {
-            usage: usage
-                .into_iter()
-                .filter_map(crate::models::usage_row)
-                .collect(),
-            run: Some(self.asking(run, &sight).or_fail()?).into(),
-            lines: sight
-                .lines
-                .into_iter()
-                .map(|l| WorkerLine {
-                    id: l.id,
-                    at: l.at,
-                    kind: l.kind.as_str().into(),
-                    text: l.text,
-                    ..Default::default()
-                })
-                .collect(),
-            why,
-            ..Default::default()
-        })
+        let mut output = self.run_state(request.id).await.or_fail()?;
+        let (app, id) = (self.app.clone(), request.id);
+        // Read apart from the runtime: a run may have kept megabytes.
+        output.entries = tokio::task::spawn_blocking(move || crate::runs::entries(&app, id, 0))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|read| read)
+            .or_fail()?;
+        Response::ok(output)
+    }
+
+    async fn watch_run(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, WatchRunRequest>,
+    ) -> ServiceResult<ServiceStream<RunEvent>> {
+        let (id, after) = (request.id, request.after);
+        if self.app.workers.runs.get(id).or_fail()?.is_none() {
+            return Err(ConnectError::not_found(format!("no run #{id}")));
+        }
+        // Before what is kept is read, so that nothing falls between.
+        let (live, writing) = self.app.workers.sights.ledger().watch(id);
+        let first = self.run_state(id).await.or_fail()?;
+        Response::stream_ok(crate::runs::watch(
+            self.clone(),
+            id,
+            after,
+            first,
+            (live, writing),
+        ))
     }
 
     async fn retry_delegated(

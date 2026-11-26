@@ -1470,8 +1470,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"済んだ"
     let (app, _dir, _id) = run_agent("pool-agent-watched", script, &[("Runner", "agent")]).await;
     let (run, sight, why) = crate::workers::watch(&app, 1).await.unwrap();
     assert_eq!((run.state, why.as_str()), (State::Ended, ""));
-    let texts: Vec<_> = sight.lines.iter().map(|l| l.text.as_str()).collect();
-    assert_eq!((texts, sight.done()), (vec!["読む。"], Some(1.0)));
+    let texts = app.workers.sights.said(1);
+    assert_eq!(
+        (texts, sight.done()),
+        (vec!["読む。".to_owned()], Some(1.0))
+    );
     assert!(crate::workers::watch(&app, 2).await.is_err());
 }
 

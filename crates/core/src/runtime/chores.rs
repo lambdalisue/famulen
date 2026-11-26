@@ -116,6 +116,9 @@ pub(super) async fn chores(app: App) {
         if let Err(error) = app.attachments.forget_old(now.timestamp()) {
             tracing::warn!(%error, "could not throw away old attachments");
         }
+        if let Err(error) = app.workers.sights.ledger().forget_old(now.timestamp()) {
+            tracing::warn!(%error, "could not forget what old runs did");
+        }
         app.read_every_mail().await;
         app.renew_google_watches(app.receive_url.as_deref()).await;
         if let Err(error) = app.gateway.refresh_due().await {
