@@ -168,6 +168,9 @@ impl Pool {
                         order.scopes = scopes(&self.app, &next.task.id, &order)?;
                         let settings = super::Settings::load(&self.app.store)?;
                         order.finish = steps_for(&settings.finishes, &order).await;
+                        if order.runner == Runner::Adroit {
+                            super::adroit::name_the_model(&self.app, &mut order)?;
+                        }
                         self.app.workers.runs.begin(&next.task.id, &order)?
                     }
                 });

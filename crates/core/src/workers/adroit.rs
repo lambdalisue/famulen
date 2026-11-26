@@ -18,6 +18,7 @@ use crate::app::App;
 use crate::approvals::Answer;
 use crate::connections::{Connection, Transport};
 use crate::gateway::{Call, OWNER, Outcome, Ticket};
+use crate::models::Role;
 use crate::permissions::SECRETARY;
 
 /// The bundled definition of Adroit.
@@ -31,6 +32,8 @@ pub const LAUNCH: &[&str] = &[START, "resume_session"];
 const PUT_QUESTION: &str = "put_question";
 /// Its tool that asks a session to go on.
 const SEND: &str = "send_to_session";
+/// The agent Adroit names Claude Code by.
+const CLAUDE: &str = "claude";
 const ANSWER_PERMISSION: &str = "answer_permission";
 /// How much of a session's answer is kept.
 const RESULT_CHARS: usize = 6000;
@@ -137,6 +140,31 @@ fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
         ask: app.permissions.ask_outside(&connection, &order.scopes)?,
         ..Call::new(WORKER, connection, START, input)
     })
+}
+
+/// Names the model of a Claude Code session the order names none for: the
+/// worker's, not Adroit's default, so that the owner chooses it in one place.
+/// The agent is named with it, since a model is only valid for its own agent.
+/// It is fixed in the order once, so a start held for approval is made again
+/// as it was asked, whatever the worker's model is by then.
+pub(super) fn name_the_model(app: &App, order: &mut Order) -> anyhow::Result<()> {
+    let claude = order.agent.is_empty() || order.agent == CLAUDE;
+    if !order.model.is_empty() || !claude {
+        return Ok(());
+    }
+    let Some(assigned) = app.models.assignment(Role::Worker)? else {
+        return Ok(());
+    };
+    let model = app
+        .models
+        .model(&assigned.model)?
+        .map(|m| m.spec.model)
+        .unwrap_or_default();
+    if !model.is_empty() {
+        order.agent = CLAUDE.to_owned();
+        order.model = model;
+    }
+    Ok(())
 }
 
 pub(super) async fn begin(app: &App, run: &Run) -> anyhow::Result<Began> {
