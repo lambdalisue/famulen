@@ -1,5 +1,6 @@
 import { createAsync } from "@solidjs/router";
 import { createSignal, For, onMount, Show } from "solid-js";
+import EvenG2Open from "~/components/EvenG2Open";
 import { ChannelSwitch, MainWorkspace } from "~/components/ServiceSections";
 import { ConnectionState } from "~/gen/famulen/v1/services_pb";
 import { channelsQuery } from "~/lib/connections";
@@ -45,9 +46,12 @@ export default function Channels() {
           title="Even G2"
           sub={`Even App で開く · ${origin() ? `${origin()}/g2` : "/g2"}`}
           end={
-            <a class="tag" href="/settings/roles/voice">
-              声の聞き取り
-            </a>
+            <>
+              <Show when={origin()}>{(at) => <EvenG2Open origin={at()} />}</Show>
+              <a class="tag" href="/settings/roles/voice">
+                声の聞き取り
+              </a>
+            </>
           }
         />
         <For each={channels() ?? []}>
@@ -78,7 +82,7 @@ export default function Channels() {
         </p>
       </Show>
       <p class="sub">
-        Even G2 には、スマートフォンの Even App の開発者向けの読み込みで上の番地を開くと、このコンソールが出る。スマートフォンがこのコンソールを開ける網の中にいるときだけ使える。声で話すには、
+        Even G2 には、上の「QR コード」をスマートフォンの Even App で読むと、このコンソールが出る。スマートフォンがこのコンソールを開ける網の中にいるときだけ使える。声で話すには、
         <a href="/settings/roles/voice">声の聞き取り</a>
         のモデルを選ぶ。
       </p>
