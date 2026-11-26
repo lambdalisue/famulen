@@ -60,33 +60,40 @@ impl Gateway {
                 .values()
                 .map(|(at, _)| if away.is_some() { (*at).min(look) } else { *at })
                 .min();
-            let line = tokio::select! {
-                line = lines.next_line() => line?,
-                () = async {
-                    match due {
-                        Some(at) => tokio::time::sleep_until(at).await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    let now = Instant::now();
-                    let gone = match away {
-                        Some(away) => self.owner_elsewhere(away, connect.front.as_deref()).await,
-                        None => false,
-                    };
-                    look = now + LOOK_FOR_OWNER;
-                    let settled: Vec<String> = waiting
-                        .iter()
-                        .filter(|(_, (at, _))| gone || *at <= now)
-                        .map(|(about, _)| about.clone())
-                        .collect();
-                    for about in settled {
-                        if let Some((_, event)) = waiting.remove(&about) {
-                            self.hand_over(id, receiver, &about, event, false)?;
+            // What is already due is looked at before more is read, so that a
+            // command that has just ended does not take the look with it.
+            let read = if due.is_some_and(|at| at <= Instant::now()) {
+                None
+            } else {
+                tokio::select! {
+                    line = lines.next_line() => Some(line?),
+                    () = async {
+                        match due {
+                            Some(at) => tokio::time::sleep_until(at).await,
+                            None => std::future::pending().await,
                         }
-                    }
-                    self.go_on_from(&key, &waiting, &next)?;
-                    continue;
+                    } => None,
                 }
+            };
+            let Some(line) = read else {
+                let now = Instant::now();
+                let gone = match away {
+                    Some(away) => self.owner_elsewhere(away, connect.front.as_deref()).await,
+                    None => false,
+                };
+                look = now + LOOK_FOR_OWNER;
+                let settled: Vec<String> = waiting
+                    .iter()
+                    .filter(|(_, (at, _))| gone || *at <= now)
+                    .map(|(about, _)| about.clone())
+                    .collect();
+                for about in settled {
+                    if let Some((_, event)) = waiting.remove(&about) {
+                        self.hand_over(id, receiver, &about, event, false)?;
+                    }
+                }
+                self.go_on_from(&key, &waiting, &next)?;
+                continue;
             };
             let Some(line) = line else {
                 break;

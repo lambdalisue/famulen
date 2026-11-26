@@ -593,7 +593,10 @@ async fn a_socket_event_is_acknowledged_and_handed_over_untouched() {
 
 /// A chat gateway whose sockets open at `ws`, with everything quiet for
 /// long counted in milliseconds.
-async fn chat_on(ws: &tokio::net::TcpListener) -> (Gateway, Arc<Mutex<Vec<Arrival>>>) {
+async fn chat_on(
+    ws: &tokio::net::TcpListener,
+    quiet: std::time::Duration,
+) -> (Gateway, Arc<Mutex<Vec<Arrival>>>) {
     let ws_url = format!("ws://{}/", ws.local_addr().unwrap());
     let open = axum::Router::new().route(
         "/open",
@@ -608,7 +611,7 @@ async fn chat_on(ws: &tokio::net::TcpListener) -> (Gateway, Arc<Mutex<Vec<Arriva
     let (g, got) = gateway(&[("chat.toml", CHAT)]);
     let g = g.with_endpoints(Endpoints {
         socket_open: open_url,
-        socket_quiet: std::time::Duration::from_millis(200),
+        socket_quiet: quiet,
         socket_retry: std::time::Duration::from_millis(10),
         ..Default::default()
     });
@@ -631,7 +634,7 @@ fn chat_event(text: &str) -> tokio_tungstenite::tungstenite::Message {
 #[tokio::test]
 async fn a_socket_that_went_dead_without_closing_is_opened_again() {
     let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let (g, got) = chat_on(&ws).await;
+    let (g, got) = chat_on(&ws, std::time::Duration::from_millis(200)).await;
     tokio::spawn(async move {
         // Never read again, so it neither answers a ping nor closes.
         let (stream, _) = ws.accept().await.unwrap();
@@ -659,7 +662,7 @@ async fn a_socket_that_went_dead_without_closing_is_opened_again() {
 #[tokio::test]
 async fn a_socket_that_never_finishes_opening_is_opened_again() {
     let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let (g, got) = chat_on(&ws).await;
+    let (g, got) = chat_on(&ws, std::time::Duration::from_millis(200)).await;
     tokio::spawn(async move {
         let _stuck = ws.accept().await.unwrap();
         let (stream, _) = ws.accept().await.unwrap();
@@ -683,23 +686,33 @@ async fn a_socket_that_never_finishes_opening_is_opened_again() {
 #[tokio::test]
 async fn a_quiet_socket_that_answers_stays_open() {
     let ws = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let (g, got) = chat_on(&ws).await;
+    // Room for a busy machine to open it and answer.
+    let (g, got) = chat_on(&ws, std::time::Duration::from_secs(1)).await;
     let opened: Arc<Mutex<usize>> = Arc::default();
     let count = opened.clone();
+    let (pinged, mut pings) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
         loop {
             let (stream, _) = ws.accept().await.unwrap();
             *count.lock().unwrap() += 1;
+            let pinged = pinged.clone();
             tokio::spawn(async move {
                 let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
                 // Reading answers the pings and says nothing else.
-                while let Some(Ok(_)) = socket.next().await {}
+                while let Some(Ok(message)) = socket.next().await {
+                    if message.is_ping() {
+                        let _ = pinged.send(());
+                    }
+                }
             });
         }
     });
 
     g.sync_connections().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    for _ in 0..3 {
+        let ping = tokio::time::timeout(std::time::Duration::from_secs(30), pings.recv());
+        ping.await.expect("pinged while quiet");
+    }
 
     assert_eq!(*opened.lock().unwrap(), 1);
     assert!(got.lock().unwrap().is_empty());
@@ -799,6 +812,58 @@ settle = "1s"
         g.store.state("receive.resume.say.asks").unwrap().as_deref(),
         Some(r#"["--since","3"]"#)
     );
+}
+
+#[tokio::test]
+async fn what_waits_is_looked_at_though_the_command_has_ended_meanwhile() {
+    let say = r#"
+format = 1
+id = "say"
+name = "Say"
+
+[transport.command]
+program = "perl"
+
+[[commands]]
+name = "hi"
+description = "Hi."
+args = ["-e", "1"]
+read_only = true
+
+[receive.asks]
+destination = "here"
+
+[receive.asks.connect]
+protocol = "command-lines"
+args = ["-e", "sub say_ {{ print qq({{\"seq\":$_[0],\"id\":\"$_[1]\",\"state\":\"$_[2]\"}}\n) }} say_(1,'b','done'); say_(2,'a','waiting')"]
+when = { "{/state}" = ["waiting"] }
+per = "{/id}"
+settle = "1h"
+away = "60s"
+"#;
+    let say = say.replace("{{", "{").replace("}}", "}");
+    let (g, _) = gateway(&[("say.toml", &say)]);
+    let g = g.with_presence(crate::presence::Presence::default);
+    add(&g, "say", "say", &[]);
+    let seen: Arc<Mutex<Vec<Arrival>>> = Arc::default();
+    let here = seen.clone();
+    g.register_destination(
+        "here",
+        Arc::new(move |a: Arrival| {
+            // Handing over the first line takes until the command has ended.
+            if a.over {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            here.lock().unwrap().push(a);
+        }),
+    );
+    g.set_destination(super::super::OWNER, "say", "asks", Some("here"))
+        .unwrap();
+
+    g.lines_once("say", "asks").await.unwrap();
+
+    let waited = seen.lock().unwrap().iter().filter(|a| !a.over).count();
+    assert_eq!(waited, 1);
 }
 
 #[tokio::test]
