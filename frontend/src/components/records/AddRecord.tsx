@@ -1,6 +1,6 @@
 import { createAsync, useNavigate } from "@solidjs/router";
 import { createSignal, For } from "solid-js";
-import { Dialog, DialogActions, Field, TextField } from "~/components/ui";
+import { Dialog, DialogActions, Field, Form, TextField } from "~/components/ui";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { withParams } from "~/lib/params";
@@ -54,7 +54,7 @@ export default function AddRecord(props: {
   };
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.label}>
-      <form class="dialog-form" onSubmit={add}>
+      <Form class="dialog-form" onSubmit={add}>
         <Field label={props.titleLabel}>
           <TextField name="title" required autofocus />
         </Field>
@@ -71,7 +71,7 @@ export default function AddRecord(props: {
           )}
         </For>
         <DialogActions submit="足す" />
-      </form>
+      </Form>
     </Dialog>
   );
 }

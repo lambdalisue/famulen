@@ -3,7 +3,7 @@ import { AgentCli, type Model, ModelKind } from "~/gen/famulen/v1/settings_pb";
 import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import * as icons from "~/lib/icons";
-import { Button, Dialog, DialogActions, DialogTrigger, Field, RadioCards, Segmented, TextField } from "~/components/ui";
+import { Button, Dialog, DialogActions, DialogTrigger, Field, Form, RadioCards, Segmented, TextField } from "~/components/ui";
 
 type Preset = { label: string; url: string };
 
@@ -123,7 +123,7 @@ export default function AddModel(props: { candidates: Model[] }) {
                     <Button
                       small
                       aria-label={`${m.name}を戻す`}
-                      onClick={() => void act(() => api.models.restoreModel({ id: m.id }), "戻した")}
+                      onClick={() => act(() => api.models.restoreModel({ id: m.id }), "戻した")}
                     >
                       戻す
                     </Button>
@@ -222,7 +222,7 @@ function Fields(props: { way: Way; onAdded: () => void }) {
   );
 
   return (
-    <form class="model-fields" autocomplete="off" onSubmit={submit}>
+    <Form class="model-fields" autocomplete="off" onSubmit={submit}>
       <Show when={isCli}>
         <Segments label="道具" items={Object.keys(CLIS)} value={cli()} onChange={setCli} />
       </Show>
@@ -245,7 +245,7 @@ function Fields(props: { way: Way; onAdded: () => void }) {
               }}
             />
             <Show when={isLocal}>
-              <Button disabled={asking() || url().trim() === ""} onClick={() => void ask()}>
+              <Button disabled={asking() || url().trim() === ""} onClick={() => ask()}>
                 {asking() ? "探している" : "モデルを探す"}
               </Button>
             </Show>
@@ -304,6 +304,6 @@ function Fields(props: { way: Way; onAdded: () => void }) {
         <TextField id="m-name" name="name" placeholder={model() || "モデル名になる"} />
       </Field>
       <DialogActions submit="追加" disabled={saving()} />
-    </form>
+    </Form>
   );
 }

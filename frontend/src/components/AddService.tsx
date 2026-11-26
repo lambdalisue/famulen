@@ -15,6 +15,7 @@ import {
   DialogTrigger,
   Disclosure,
   Field,
+  Form,
   Icon,
   SearchBox,
   Segmented,
@@ -258,11 +259,11 @@ function Fill(props: { choice: Choice; onBack: () => void; onAdd: (values: Recor
   const [key, setKey] = createSignal("");
   const c = props.choice;
   return (
-    <form
+    <Form
       class="dialog-form"
       onSubmit={(e) => {
         e.preventDefault();
-        void props.onAdd(values(), key());
+        return props.onAdd(values(), key());
       }}
     >
       <div class="row">
@@ -318,7 +319,7 @@ function Fill(props: { choice: Choice; onBack: () => void; onAdd: (values: Recor
         </Show>
       </Show>
       <DialogActions before={<Back onBack={props.onBack} />} submit={c.unavailable ? undefined : "足す"} />
-    </form>
+    </Form>
   );
 }
 
@@ -418,7 +419,7 @@ function Details(props: { read: ServiceTarget; onBack: () => void; onAdded: (r: 
     props.onAdded(r);
   };
   return (
-    <form class="dialog-form" onSubmit={add}>
+    <Form class="dialog-form" onSubmit={add}>
       <div class="service-read">
         <div class="row">
           <Icon svg={how() === "local" ? icons.terminal : icons.world} size={18} />
@@ -487,6 +488,6 @@ function Details(props: { read: ServiceTarget; onBack: () => void; onAdded: (r: 
         </Disclosure>
       </Show>
       <DialogActions before={<Back onBack={props.onBack} />} submit="つなぐ" disabled={busy()} />
-    </form>
+    </Form>
   );
 }

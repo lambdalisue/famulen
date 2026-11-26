@@ -108,13 +108,13 @@ export default function FolderPicker(props: {
     >
       <div class="folder-picker">
         <div class="folder-bar">
-          <IconButton icon={icons.home} label="ホーム" variant="ghost" onClick={() => void go("")} />
+          <IconButton icon={icons.home} label="ホーム" variant="ghost" onClick={() => go("")} />
           <IconButton
             icon={icons.folderUp}
             label="ひとつ上へ"
             variant="ghost"
             disabled={!folder()?.parent}
-            onClick={() => void go(folder()?.parent ?? "")}
+            onClick={() => go(folder()?.parent ?? "")}
           />
           <span class="mono folder-path" aria-label="いまのフォルダ">
             {folder()?.path ?? "…"}
@@ -151,7 +151,7 @@ export default function FolderPicker(props: {
       <DialogActions
         submit={chosen().length > 0 ? `${chosen().length} 件を足す` : "足す"}
         disabled={chosen().length === 0}
-        onSubmit={() => void add()}
+        onSubmit={() => add()}
       />
     </Dialog>
   );

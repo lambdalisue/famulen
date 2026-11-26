@@ -153,3 +153,34 @@ export async function whollyOnScreen(page: Page, element: Locator) {
   if (!box || !screen) return false;
   return box.width > 0 && box.height > 0 && box.x >= 0 && box.y >= 0 && box.x + box.width <= screen.width && box.y + box.height <= screen.height;
 }
+
+/**
+ * Hold back every call to `method` until they are let go, counting the calls;
+ * once let go, the calls after go through at once. What a call is answered
+ * with is the backend's, unless it is to fail.
+ */
+export async function holdBack(page: Page, method: string) {
+  const held = { calls: 0, fail: false };
+  let letGo = () => {};
+  const gate = new Promise<void>((go) => (letGo = go));
+  await page.route(new RegExp(`/${method}$`), async (route) => {
+    held.calls++;
+    await gate;
+    if (held.fail) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "unavailable", message: "e2e-届かなかった" }) });
+    } else await route.continue();
+  });
+  return {
+    get calls() {
+      return held.calls;
+    },
+    /** Wait until `n` calls are held. */
+    async arrived(n: number) {
+      await expect.poll(() => held.calls).toBe(n);
+    },
+    failing(fail: boolean) {
+      held.fail = fail;
+    },
+    letGo: () => letGo(),
+  };
+}

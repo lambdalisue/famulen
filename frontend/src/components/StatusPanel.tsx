@@ -160,7 +160,7 @@ export default function StatusPanel() {
                   icon={icons.trash}
                   label={`起床予約「${w.note}」を取り消す`}
                   title="取り消す"
-                  onClick={() => void whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
+                  onClick={() => whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
                 />
               </div>
             )}

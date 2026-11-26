@@ -18,8 +18,11 @@
  * - Removing asks first with `confirmed`, unless one value put back by hand
  *   undoes it.
  * - `act` says how a change went; a read that fails shows `ErrorState`.
+ * - What a press or a form sends goes once: a button whose press gives back a
+ *   promise cannot be pressed until it is back, nor can those it is put
+ *   `SendTogether` with; a `Form` is sent once at a time.
  */
-export { BackLink, Button, buttonClass, type ButtonVariant, IconButton, LinkButton } from "./Button";
+export { BackLink, Button, buttonClass, type ButtonVariant, createPress, IconButton, LinkButton } from "./Button";
 export { confirmed, ConfirmHost, whenConfirmed } from "./Confirm";
 export { Dialog, DialogActions, DialogTrigger } from "./Dialog";
 export { Callout, EmptyState, ErrorState, Loading, Meter, Tag, type Tone } from "./feedback";
@@ -30,6 +33,7 @@ export { Disclosure, Legend, PageHeader, Pager, Section, SubSection } from "./la
 export { List, ListRow } from "./List";
 export { RadioCards } from "./RadioCards";
 export { Segmented, SegmentedLinks, SegmentedOf } from "./Segmented";
+export { Form, SendTogether, useSending } from "./Sending";
 export { default as SideSheet } from "./SideSheet";
 export { default as SplitPane } from "./SplitPane";
 export { default as Toast } from "./Toast";

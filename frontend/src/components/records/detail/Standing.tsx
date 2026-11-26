@@ -13,7 +13,7 @@ export default function Standing(props: { record: Rec }) {
         <Callout
           tone="warn"
           action={
-            <Button small onClick={() => void act(() => api.records.clearObsolete({ kind: r().kind, id: r().id }), "印を外した")}>
+            <Button small onClick={() => act(() => api.records.clearObsolete({ kind: r().kind, id: r().id }), "印を外した")}>
               確かめたので印を外す
             </Button>
           }

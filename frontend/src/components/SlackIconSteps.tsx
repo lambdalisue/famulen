@@ -6,7 +6,7 @@ import { api } from "~/lib/api";
 import { slackAppsQuery } from "~/lib/data";
 import { externalLink } from "~/lib/icons";
 import { iconFile, PORTRAITS, type Portrait } from "~/lib/portrait";
-import { Button, Callout, Dialog, DialogActions, DialogTrigger, Field, Icon, Keyed, LinkButton, Tag, TextField } from "~/components/ui";
+import { Button, Callout, Dialog, DialogActions, DialogTrigger, Field, Form, Icon, Keyed, LinkButton, Tag, TextField } from "~/components/ui";
 
 const SLACK_APPS = "https://api.slack.com/apps";
 const STEPS = ["Slack を開く", "トークンを作る", "貼る", "できた"] as const;
@@ -113,7 +113,7 @@ function Steps(props: { app: SlackApp; portrait: Portrait }) {
           </Step>
         </Match>
         <Match when={at() === PASTE}>
-          <form class="dialog-form" onSubmit={paste}>
+          <Form class="dialog-form" onSubmit={paste}>
             <p>
               できた 2 つのうち、<b>Refresh Token</b>（<span class="mono">xoxe-</span> で始まる）の「Copy」を押して、ここに貼る。
             </p>
@@ -143,7 +143,7 @@ function Steps(props: { app: SlackApp; portrait: Portrait }) {
               submit={busy() ? "替えている…" : "アイコンを替える"}
               disabled={busy() || !token().trim()}
             />
-          </form>
+          </Form>
         </Match>
         <Match when={at() === DONE}>
           <div class="dialog-form">

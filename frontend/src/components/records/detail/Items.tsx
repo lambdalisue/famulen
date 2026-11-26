@@ -1,5 +1,5 @@
 import { createSignal, For, Index, Show } from "solid-js";
-import { Button, IconButton, TextField, whenConfirmed } from "~/components/ui";
+import { Button, Form, IconButton, TextField, whenConfirmed } from "~/components/ui";
 import type { SectionType } from "~/gen/famulen/v1/records_pb";
 import * as icons from "~/lib/icons";
 import { type FieldLike, type FieldSpec, type ItemLike, linkOf, nameOf, same, withField } from "~/lib/records";
@@ -41,7 +41,7 @@ function Item(props: {
           icon={icons.trash}
           label="外す"
           title={`「${title()}」を外す`}
-          onClick={() => void whenConfirmed(`${nameOf(props.type.name)}から「${title()}」を外す`, "外す", async () => props.onRemove())}
+          onClick={() => whenConfirmed(`${nameOf(props.type.name)}から「${title()}」を外す`, "外す", async () => props.onRemove())}
         />
       </div>
       <Show
@@ -125,7 +125,7 @@ function NewItem(props: { type: SectionType; onAdd: (i: ItemLike) => void }) {
         <FieldEdit type={first()} label={nameOf(props.type.name)} field={undefined} onSave={(v) => add(v.value || v.values[0] || "")} />
       }
     >
-      <form
+      <Form
         class="rec-new"
         onSubmit={(e) => {
           e.preventDefault();
@@ -156,7 +156,7 @@ function NewItem(props: { type: SectionType; onAdd: (i: ItemLike) => void }) {
         <Button type="submit" small>
           足す
         </Button>
-      </form>
+      </Form>
     </Show>
   );
 }

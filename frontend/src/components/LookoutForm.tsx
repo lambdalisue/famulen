@@ -8,7 +8,7 @@ import { api } from "~/lib/api";
 import { connectionsQuery, lookoutChoicesQuery, workspacesQuery } from "~/lib/connections";
 import { createLate } from "~/lib/kept";
 import * as icons from "~/lib/icons";
-import { DialogActions, Disclosure, Field, Select, TextField } from "~/components/ui";
+import { DialogActions, Disclosure, Field, Form, Select, TextField } from "~/components/ui";
 
 /** A source of one's own: its connection, tool, arguments and interval. */
 export default function LookoutForm(props: {
@@ -77,7 +77,7 @@ export default function LookoutForm(props: {
   const [minutes, setMinutes] = createSignal("");
   const others = () => (list()?.connections ?? []).filter((c) => !spaces()?.workspaces.some((s) => s.id === c.id));
   return (
-    <form
+    <Form
       class="dialog-form"
       onSubmit={async (e) => {
         e.preventDefault();
@@ -144,6 +144,6 @@ export default function LookoutForm(props: {
         />
       </Disclosure>
       <DialogActions submit="足す" />
-    </form>
+    </Form>
   );
 }

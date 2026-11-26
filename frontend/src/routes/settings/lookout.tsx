@@ -172,7 +172,7 @@ export default function Lookout() {
                     label={`${s().name}を外す`}
                     variant="danger"
                     onClick={() =>
-                      void whenConfirmed(`見張り「${s().name}」を外す`, "外す", () =>
+                      whenConfirmed(`見張り「${s().name}」を外す`, "外す", () =>
                         act(() => api.lookout.removeLookout({ id: s().id }), "外した"),
                       )
                     }

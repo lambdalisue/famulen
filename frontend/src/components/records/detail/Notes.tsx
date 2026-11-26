@@ -48,10 +48,10 @@ export default function Notes(props: {
           <Button small variant="ghost" onClick={() => setPreview(!preview())}>
             {preview() ? "書く" : "プレビュー"}
           </Button>
-          <Button small onClick={() => void giveUp()}>
+          <Button small onClick={() => giveUp()}>
             やめる
           </Button>
-          <Button small variant="primary" onClick={() => void save()}>
+          <Button small variant="primary" onClick={() => save()}>
             保存
           </Button>
         </Show>

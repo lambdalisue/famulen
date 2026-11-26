@@ -15,7 +15,7 @@ import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { iconFile, PORTRAITS, type Portrait } from "~/lib/portrait";
 import { setView } from "~/lib/view";
-import { Button, Callout, EmptyState, Icon, LinkButton, PageHeader, RadioCards, Section, Switch, Tag, TextArea, TextField } from "~/components/ui";
+import { Button, Callout, EmptyState, Form, Icon, LinkButton, PageHeader, RadioCards, Section, Switch, Tag, TextArea, TextField } from "~/components/ui";
 
 /** Ways of speaking the owner picks from; the text is what the secretary is told. */
 const TONES = [
@@ -157,12 +157,12 @@ function ToneSection(props: { tone: string; own: string }) {
         }}
       />
       <Show when={chosen() === OWN}>
-        <form
+        <Form
           class="stack"
           onSubmit={(e) => {
             e.preventDefault();
             const text = own?.value.trim() ?? "";
-            void save({ tone: text, ownTone: text });
+            return save({ tone: text, ownTone: text });
           }}
         >
           <TextArea
@@ -179,7 +179,7 @@ function ToneSection(props: { tone: string; own: string }) {
               保存
             </Button>
           </div>
-        </form>
+        </Form>
       </Show>
     </Section>
   );
@@ -270,7 +270,7 @@ function WritableSection() {
                   small
                   icon={x}
                   aria-label={`${p} を外す`}
-                  onClick={() => void act(() => api.settings.removeWritablePlace({ path: p }), "外した")}
+                  onClick={() => act(() => api.settings.removeWritablePlace({ path: p }), "外した")}
                 >
                   外す
                 </Button>
@@ -279,7 +279,7 @@ function WritableSection() {
           </For>
         </ul>
       </Show>
-      <form
+      <Form
         class="place-add"
         classList={{ over: over() }}
         aria-label="フォルダを落とすところ"
@@ -339,7 +339,7 @@ function WritableSection() {
             </ul>
           </div>
         </Show>
-      </form>
+      </Form>
     </Section>
   );
 }
@@ -381,7 +381,7 @@ function NotebookSection() {
               <li>
                 <span class="mono">{p().path}</span>
                 <Show when={p().path !== p().defaultPath}>
-                  <Button small title={p().defaultPath} disabled={!!moving()} onClick={() => void move("")}>
+                  <Button small title={p().defaultPath} disabled={!!moving()} onClick={() => move("")}>
                     既定の場所に戻す
                   </Button>
                 </Show>
@@ -407,11 +407,11 @@ function NotebookSection() {
           </>
         )}
       </Show>
-      <form
+      <Form
         class="place-add"
         onSubmit={(e) => {
           e.preventDefault();
-          if (path().trim()) void move(path().trim());
+          if (path().trim()) return move(path().trim());
         }}
       >
         <div class="place-row">
@@ -427,7 +427,7 @@ function NotebookSection() {
             移す
           </Button>
         </div>
-      </form>
+      </Form>
     </Section>
   );
 }

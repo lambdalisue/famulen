@@ -13,6 +13,7 @@ import * as icons from "~/lib/icons";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, untrack } from "solid-js";
 import { ApprovalAnswer, ApprovalSchema, type ConsoleMessage, HeldInputSchema, Speaker } from "~/gen/famulen/v1/console_pb";
 import { message } from "~/lib/act";
+import { createSending } from "~/lib/sending";
 import { api } from "~/lib/api";
 import { ACCEPTED, createDrafts } from "~/lib/attachments";
 import { workgroup } from "~/lib/workgroup";
@@ -28,7 +29,7 @@ import { createThread } from "~/lib/thread";
 import { useOwner } from "~/lib/owner";
 import { isNarrow, narrow } from "~/lib/viewport";
 import { selection, setSelection, view } from "~/lib/view";
-import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Keyed, Tag } from "~/components/ui";
+import { Button, Callout, EmptyState, ErrorState, Icon, IconButton, Keyed, SendTogether, Tag } from "~/components/ui";
 import { createResizer } from "~/components/ui/resize";
 
 /** What waits for the owner. What is of a conversation that is not on screen is kept there, with what was begun in it. */
@@ -36,13 +37,17 @@ function Inbox(props: { aide: string; shows: (conversation: bigint) => boolean }
   const inbox = createKept(() => inboxQuery());
   const heldOnes = createSame(HeldInputSchema, () => inbox()?.held ?? [], (h) => h.id);
   const approvals = createSame(ApprovalSchema, () => inbox()?.approvals ?? [], (r) => r.id);
+  // The answer is given by then: a reload that fails is no reason to give it again.
+  const reload = () => revalidate("inbox").catch(() => undefined);
   const approve = async (id: bigint, answer: ApprovalAnswer, replies: string[] = []) => {
     await api.console.answerApproval({ id, answer, replies });
-    await revalidate("inbox");
+    await reload();
+    return true;
   };
   const held = async (id: bigint, goOn: boolean) => {
     await api.console.answerHeld({ id, goOn });
-    await revalidate("inbox");
+    await reload();
+    return true;
   };
   return (
     <div id="approvals">
@@ -59,20 +64,22 @@ function Inbox(props: { aide: string; shows: (conversation: bigint) => boolean }
                 {props.aide}{" "}
                 が止まったとき、外への呼び出しがまだ終わっていなかった。もう一度やると、送信などが二重になるかもしれない。済んでいたかを確かめてから選ぶ。
               </p>
-              <div class="row">
-                <Button variant="primary" small onClick={() => held(h.id, true)}>
-                  続ける
-                </Button>
-                <Button small onClick={() => held(h.id, false)}>
-                  やめる
-                </Button>
-              </div>
+              <SendTogether hold>
+                <div class="row">
+                  <Button variant="primary" small onClick={() => held(h.id, true)}>
+                    続ける
+                  </Button>
+                  <Button small onClick={() => held(h.id, false)}>
+                    やめる
+                  </Button>
+                </div>
+              </SendTogether>
             </div>
           </div>
         )}
       </For>
       <Keyed each={approvals()} by={(r) => r.id}>
-        {(r) => <ApprovalCard approval={r()} hidden={!props.shows(r().conversation)} onAnswer={(answer, replies) => void approve(r().id, answer, replies)} />}
+        {(r) => <ApprovalCard approval={r()} hidden={!props.shows(r().conversation)} onAnswer={(answer, replies) => approve(r().id, answer, replies)} />}
       </Keyed>
     </div>
   );
@@ -425,8 +432,12 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     mark(list);
   };
 
-  const send = async (e?: Event) => {
+  const sending = createSending();
+  const submit = (e?: Event) => {
     e?.preventDefault();
+    sending.run(send);
+  };
+  const send = async () => {
     const body = text().trim();
     const files = attached.drafts();
     if (!body && files.length === 0) return;
@@ -630,7 +641,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             </Show>
           </span>
         </button>
-        <form id="composer" class="composer" onSubmit={send}>
+        <form id="composer" class="composer" onSubmit={submit}>
           <div class="dest" role="group" aria-label="送り先">
             <Show when={!replyTo() || place().kind !== "all"} fallback={<span class="sub">返信</span>}>
             <div class="segs">
@@ -723,14 +734,17 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
                 attach(files);
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(e);
               }}
             />
             <Button
               variant="primary"
               icon={icons.send}
               class="send"
-              type="submit" // Taking focus from the box would end the narrow layout's typing
+              type="submit"
+              disabled={sending.busy()}
+              aria-busy={sending.busy() || undefined}
+              // Taking focus from the box would end the narrow layout's typing
               // state and move the button out from under the tap before it lands.
               onMouseDown={(e) => e.preventDefault()}
             >

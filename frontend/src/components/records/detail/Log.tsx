@@ -1,5 +1,5 @@
 import { For, Show } from "solid-js";
-import { Button, TextField } from "~/components/ui";
+import { Button, Form, TextField } from "~/components/ui";
 import type { Rec } from "~/lib/records";
 import LinkedText from "../links/LinkedText";
 
@@ -10,13 +10,13 @@ export default function Log(props: { record: Rec; aide: string; onAdd: (line: st
   return (
     <section class="rec-section">
       <h3>経過</h3>
-      <form
+      <Form
         class="rec-new"
         onSubmit={(e) => {
           e.preventDefault();
           const box = e.currentTarget.querySelector("input");
           if (!box?.value.trim()) return;
-          void props.onAdd(box.value.trim()).then((ok) => {
+          return props.onAdd(box.value.trim()).then((ok) => {
             if (ok) box.value = "";
           });
         }}
@@ -25,7 +25,7 @@ export default function Log(props: { record: Rec; aide: string; onAdd: (line: st
         <Button type="submit" small>
           足す
         </Button>
-      </form>
+      </Form>
       <ol class="rec-log">
         <For each={lines()}>
           {(l) => (
