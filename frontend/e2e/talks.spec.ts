@@ -73,6 +73,18 @@ test("the list tells the title, the last word and what is unread, and opening on
   await expect(row(page, "e2e 一覧 甲の話").getByLabel(/^未読/)).toHaveCount(0);
 });
 
+test("on a wide screen, going between the list and a conversation leaves the browser's history alone", async ({ page, request }) => {
+  await begin(request, "e2e 履歴に残らない話");
+  await settled(request);
+  await visit(page, "/", /^ホーム/);
+  const length = await page.evaluate(() => history.length);
+  await row(page, "e2e 履歴に残らない話").getByRole("button").click();
+  await expect(said(page)).toBeVisible();
+  await page.getByRole("button", { name: /^話の一覧へ/ }).click();
+  await expect(list(page)).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(length);
+});
+
 test("what comes to another conversation is told over the box, and does not turn the page", async ({ page, request }) => {
   const a = await begin(request, "e2e 届く 甲");
   const b = await begin(request, "e2e 届く 乙");
@@ -236,7 +248,8 @@ test("on a phone the conversations open over the page, and where it goes is told
       expect((await dest(page).getByRole("button", { name }).boundingBox())?.width).toBeGreaterThanOrEqual(44);
     }
     expect(await faint(page)).toEqual([]);
+    // Left open, the page read again would show it open.
+    await page.getByRole("button", { name: "閉じる" }).click();
+    await expect(page.locator(".m-peek")).toContainText("e2e 携帯の話 甲");
   }
-  await page.getByRole("button", { name: "閉じる" }).click();
-  await expect(page.locator(".m-peek")).toContainText("e2e 携帯の話 甲");
 });

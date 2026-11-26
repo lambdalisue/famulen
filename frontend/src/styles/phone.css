@@ -142,6 +142,13 @@
   body.chat-open :is(.m-peek, .m-float) { display: none; }
   body.typing :is(.m-tabbar, .m-peek, .m-float) { display: none; }
   body.typing.chat-open .chat { --under: 0px; }
+  /* Open, the conversation is all there is: the page behind neither scrolls nor shows, and keeps where it was. */
+  html:has(> body.chat-open), body.chat-open { overflow: hidden; overscroll-behavior-y: none; }
+  body.chat-open:not(.chat-moving) .main { visibility: hidden; }
+  .chat :is(.messages, .thread-said, .talk-new, #approvals, .composer, .composer textarea, .drafts) { overscroll-behavior-y: contain; }
+  /* What was opened from the list is swiped away to the right, the list coming in beneath it. */
+  .chat.swiping > :is(.talk-head, .talk-said, .talk-new, .talk, #approvals, .arrival) { position: relative; z-index: 1; background: var(--card); box-shadow: -8px 0 16px -8px rgb(0 0 0 / .25); }
+  .chat.swiping > .talk-list { position: absolute; left: 0; right: 0; top: var(--beneath-top, 0); height: var(--beneath-height, auto); z-index: 0; }
 
   .m-float { display: flex; position: fixed; left: 0; right: 0; z-index: 20; bottom: calc(56px + var(--composer, 120px) + env(safe-area-inset-bottom)); margin: 0 !important; padding: 6px 12px; gap: var(--s3); justify-content: space-between; align-items: center; background: var(--card); border-top: 1px solid var(--line); }
   .m-float > * { flex: none; }

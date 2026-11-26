@@ -467,7 +467,17 @@ test("going to another page closes the image, and leaves the conversation folded
   await page.getByRole("button", { name: "移る前.png を拡大する" }).tap();
   const box = page.getByRole("dialog", { name: "移る前.png" });
   await expect(box).toBeVisible();
+  // Back closes the image, and only that.
   await page.goBack();
+  await expect(box).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "閉じる" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "移る前.png を拡大する" })).toBeVisible();
+
+  // Gone straight to the page before, over the steps the open chat put in the history, the image closes too.
+  await page.getByRole("button", { name: "移る前.png を拡大する" }).tap();
+  await expect(box).toBeVisible();
+  const steps = await page.evaluate(() => (history.state?.["famulen.chat"]?.step ?? 0) as number);
+  await page.evaluate((by) => history.go(-1 - by), steps);
   await expectView(page, /^ホーム/);
   await expect(box).toHaveCount(0);
   await expect(page.locator("body")).not.toHaveClass(/chat-open|typing/);
@@ -666,4 +676,280 @@ test("an account's limits fit the narrow layout, one under another", async ({ pa
   const [a, b] = [await first.boundingBox(), await second.boundingBox()];
   expect(b && a && b.y >= a.y + a.height, "the second under the first").toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+type Point = { x: number; y: number };
+
+/** Move a finger from one point to another in steps, and lift it unless told to keep it down: then what moves it on is given back, to be let go once it is lifted. */
+async function drag(page: Page, from: Point, to: Point, { steps = 10, lift = true } = {}) {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (p: Point) => [{ x: p.x, y: p.y }];
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
+  for (let i = 1; i <= steps; i++) {
+    const p = { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps };
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(p) });
+  }
+  if (!lift) return cdp;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+  return undefined;
+}
+
+async function middleOf(page: Page, selector: string): Promise<Point> {
+  const box = await page.locator(selector).boundingBox();
+  if (!box) throw new Error(`no ${selector}`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** Begin a conversation that the secretary answers at length, and then with `last`, and open it from the list. */
+async function openLong(page: Page, request: APIRequestContext, title: string, { answers = 8, last = `${title} の終わり` } = {}) {
+  const begun = await call<{ id: string }>(request, "ConsoleService", "Send", { text: title, workgroup: "all", newConversation: true });
+  await expect.poll(async () => (await call<{ state: string }>(request, "ConsoleService", "GetStatus")).state, { timeout: 20_000 }).not.toBe("running");
+  for (let i = 0; i < answers; i++) await call(request, "ConsoleService", "PostMessage", { text: `${title} の答え ${i}\n\n${"長い答え。".repeat(40)}`, replyTo: begun.id });
+  await call(request, "ConsoleService", "PostMessage", { text: last, replyTo: begun.id });
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await page.getByRole("button", { name: /^話の一覧へ/ }).click();
+  await talkList(page).getByRole("listitem").filter({ hasText: title }).getByRole("button").first().click();
+  await expect(talkSaid(page).getByTestId("message")).toHaveCount(answers + 2);
+}
+
+/** What a swipe left, once it has come to rest. */
+async function rested(page: Page) {
+  await expect(page.locator(".chat.swiping")).toHaveCount(0);
+}
+
+const talkList = (page: Page) => page.getByRole("region", { name: "話の一覧" });
+const talkSaid = (page: Page) => page.getByRole("log", { name: "この話の発言" });
+
+declare global {
+  interface Window {
+    /** Whether each touch move a test watches was kept from scrolling. */
+    held?: boolean[];
+  }
+}
+
+/** Whether the touch moves that come after this were let go on to scroll something. */
+async function watchTouches(page: Page) {
+  await page.evaluate(() => {
+    window.held = [];
+    window.addEventListener("touchmove", (e) => window.held?.push(e.defaultPrevented), { passive: true });
+  });
+  return {
+    held: () => page.evaluate(() => window.held ?? []),
+    clear: () => page.evaluate(() => void (window.held = [])),
+  };
+}
+
+test("the page behind the open chat neither scrolls nor shows, and is where it was once the chat closes", async ({ page, request }) => {
+  await openLong(page, request, "e2e 裏の頁");
+  await page.getByRole("button", { name: "閉じる" }).click();
+  // The page is made long enough to scroll, and scrolled.
+  await page.locator("#pane").evaluate((el) => {
+    el.style.paddingBottom = "4000px";
+    el.scrollTop = 600;
+  });
+  const behind = () => page.evaluate(() => ({ pane: document.getElementById("pane")?.scrollTop, page: document.scrollingElement?.scrollTop }));
+  const before = await behind();
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await expect(talkSaid(page)).toBeVisible();
+  await expect(page.locator("#main")).toBeHidden();
+  const touches = await watchTouches(page);
+
+  // On what does not scroll — the head, the box, and what is said once it is at its end — no move scrolls anything.
+  // The head is pulled down to close, so it is only pushed up.
+  const head = await middleOf(page, ".talk-head .talk-name");
+  await drag(page, head, { x: head.x, y: Math.max(0, head.y - 200) });
+  const box = await middleOf(page, "#composer .view");
+  await drag(page, box, { x: box.x, y: box.y + 200 });
+  await drag(page, box, { x: box.x, y: box.y - 200 });
+  const said = await middleOf(page, ".talk-said");
+  await expect.poll(() => talkSaid(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
+  await touches.clear();
+  await drag(page, said, { x: said.x, y: said.y - 200 });
+  expect(await touches.held()).toContain(true);
+  expect(await behind()).toEqual(before);
+
+  // What is said still scrolls back, and to its top.
+  await touches.clear();
+  await drag(page, { x: said.x, y: said.y - 150 }, { x: said.x, y: said.y + 150 });
+  expect((await touches.held())[0]).toBe(false);
+  await expect.poll(() => talkSaid(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeGreaterThan(100);
+  // What the fling left running has stopped before it is put at its top.
+  const still = () =>
+    talkSaid(page).evaluate((el) => new Promise<boolean>((done) => {
+      const top = el.scrollTop;
+      requestAnimationFrame(() => requestAnimationFrame(() => done(el.scrollTop === top)));
+    }));
+  await expect.poll(still).toBe(true);
+  await talkSaid(page).evaluate((el) => void (el.scrollTop = 0));
+  await expect.poll(() => talkSaid(page).evaluate((el) => el.scrollTop)).toBe(0);
+  await touches.clear();
+  await drag(page, said, { x: said.x, y: said.y + 200 });
+  expect(await touches.held()).toContain(true);
+
+  // So does the list, short as it is.
+  await page.getByRole("button", { name: /^話の一覧へ/ }).click();
+  await expect(talkList(page)).toBeVisible();
+  expect(await behind()).toEqual(before);
+  const list = await middleOf(page, ".talk-list");
+  await touches.clear();
+  await drag(page, list, { x: list.x, y: list.y + 200 });
+  expect(await touches.held()).toContain(true);
+  expect(await behind()).toEqual(before);
+
+  await page.getByRole("button", { name: "閉じる" }).click();
+  await expect(page.locator("#main")).toBeVisible();
+  expect(await behind()).toEqual(before);
+});
+
+test("a conversation goes back to the list with a swipe to the right, under the finger", async ({ page, request }) => {
+  await openLong(page, request, "e2e 滑らせる話");
+  const said = await middleOf(page, ".talk-said");
+  const width = page.viewportSize()?.width ?? 400;
+
+  // Held halfway, the list shows beneath, and going back the way it came leaves the conversation open.
+  const cdp = await drag(page, said, { x: said.x + 120, y: said.y }, { lift: false });
+  if (!cdp) throw new Error("the finger was lifted");
+  await expect(talkList(page)).toBeVisible();
+  const moved = await page.locator(".talk-said").boundingBox();
+  expect(moved?.x).toBeGreaterThan(80);
+  for (let i = 1; i <= 10; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: said.x + 120 - 12 * i, y: said.y }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+  await expect(talkList(page)).toHaveCount(0);
+  await expect.poll(async () => (await page.locator(".talk-said").boundingBox())?.x).toBe(0);
+
+  // Up and down, and a little to the side, it only scrolls.
+  await drag(page, said, { x: said.x + 30, y: said.y + 200 });
+  await rested(page);
+  await expect(talkSaid(page)).toBeVisible();
+  await expect(talkList(page)).toHaveCount(0);
+
+  // The browser's own swipe from the edge is left to it.
+  await drag(page, { x: 4, y: said.y }, { x: width * 0.8, y: said.y });
+  await rested(page);
+  await expect(talkSaid(page)).toBeVisible();
+
+  await drag(page, { x: 40, y: said.y }, { x: 40 + width * 0.6, y: said.y });
+  await expect(talkList(page)).toBeVisible();
+  await expect(talkSaid(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "閉じる" })).toBeVisible();
+
+  // That was one step back: the next closes the chat, on the same page.
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  await expectView(page, /^ホーム/);
+});
+
+test("a swipe in a conversation leaves alone what scrolls sideways and what is being written", async ({ page, request }) => {
+  const title = "e2e 横に動く話";
+  await openLong(page, request, title, { answers: 1, last: `横に長い\n\n\`\`\`\n${"wide ".repeat(80)}\n\`\`\`` });
+  // Whatever holds the code and scrolls it sideways.
+  await talkSaid(page).evaluate((said) => {
+    const wide = [...said.querySelectorAll<HTMLElement>("pre, pre *, pre ~ *, .markdown-body *")].find(
+      (el) => el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX),
+    );
+    if (!wide) throw new Error("nothing scrolls sideways");
+    wide.dataset.testid = "wide";
+  });
+  const code = talkSaid(page).getByTestId("wide");
+  await code.evaluate((el) => void (el.scrollLeft = 200));
+  expect(await code.evaluate((el) => el.scrollLeft)).toBe(200);
+  const box = await code.boundingBox();
+  if (!box) throw new Error("no code");
+  const from = { x: box.x + 40, y: box.y + box.height / 2 };
+  await drag(page, from, { x: from.x + 150, y: from.y });
+  await rested(page);
+  await expect(talkSaid(page)).toBeVisible();
+  expect(await code.evaluate((el) => el.scrollLeft)).toBeLessThan(200);
+
+  const say = page.getByPlaceholder(/に頼む$/);
+  await say.fill("書いているところ");
+  const at = await middleOf(page, "#say");
+  await drag(page, { x: at.x - 100, y: at.y }, { x: at.x + 100, y: at.y });
+  await rested(page);
+  await expect(talkSaid(page)).toBeVisible();
+  await expect(say).toHaveValue("書いているところ");
+});
+
+test("the browser's back goes from a conversation to the list, then folds the chat, without leaving the page", async ({ page, request }) => {
+  await openLong(page, request, "e2e 戻る話", { answers: 1 });
+  const url = page.url();
+  await page.goBack();
+  await expect(talkList(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "閉じる" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  expect(page.url()).toBe(url);
+
+  // Opened again on the conversation, the list still comes first on the way back.
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await talkList(page).getByRole("listitem").filter({ hasText: "e2e 戻る話" }).getByRole("button").first().click();
+  await page.getByRole("button", { name: "閉じる" }).click();
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await expect(talkSaid(page)).toBeVisible();
+  await page.goBack();
+  await expect(talkList(page)).toBeVisible();
+
+  // Closed by its button, the chat leaves nothing behind for back to undo.
+  await page.getByRole("button", { name: "閉じる" }).click();
+  const marked = () => page.evaluate(() => history.state?.["famulen.chat"] ?? null);
+  await expect.poll(marked).toBeNull();
+  await page.locator("#m-tabbar").getByRole("link", { name: "タスク" }).click();
+  await expectView(page, /^タスク/);
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  await expect.poll(marked).toBeNull();
+});
+
+test("left for another page with the chat open, back comes to that page with the chat as it was", async ({ page, request }) => {
+  await openLong(page, request, "e2e 離れる話", { answers: 1 });
+  await page.goto("/tasks");
+  await expectView(page, /^タスク/);
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(talkSaid(page)).toContainText("e2e 離れる話 の終わり");
+  await page.goBack();
+  await expect(talkList(page)).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+});
+
+test("a tab pressed with the chat open goes to its page, back comes to the chat as it was, and forward to the page again", async ({ page, request }) => {
+  await openLong(page, request, "e2e タブで移る話", { answers: 1 });
+  await tabbar(page).getByRole("link", { name: "タスク" }).click();
+  await expectView(page, /^タスク/);
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  expect(await page.evaluate(() => history.state?.["famulen.chat"] ?? null)).toBeNull();
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(talkSaid(page)).toContainText("e2e タブで移る話 の終わり");
+  await page.goForward();
+  await expectView(page, /^タスク/);
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+
+  // Gone back over all the chat's steps, forward goes over them again on the way to the page.
+  await page.goBack();
+  await page.goBack();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  await page.goForward();
+  await expect(talkList(page)).toBeVisible();
+  await page.goForward();
+  await expect(talkSaid(page)).toBeVisible();
+  await page.goForward();
+  await expectView(page, /^タスク/);
+});
+
+test("the page read again with a conversation open shows it open, and back still goes to the list and folds the chat", async ({ page, request }) => {
+  await openLong(page, request, "e2e 読み直す話", { answers: 1 });
+  await page.reload();
+  await expectView(page, /^ホーム/);
+  await expect(talkSaid(page)).toContainText("e2e 読み直す話 の終わり");
+  await page.goBack();
+  await expect(talkList(page)).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
 });

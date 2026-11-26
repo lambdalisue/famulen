@@ -1,9 +1,19 @@
-import { onCleanup } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 
 /** The widths of `--phone` in app.css, for what a script decides. */
 const NARROW = "(max-width: 700px)";
 
 export const isNarrow = () => window.matchMedia(NARROW).matches;
+
+const [narrowNow, setNarrowNow] = createSignal(false);
+if (typeof window !== "undefined") {
+  const query = window.matchMedia(NARROW);
+  setNarrowNow(query.matches);
+  query.addEventListener("change", (e) => setNarrowNow(e.matches));
+}
+
+/** Whether the layout is narrow, followed as the screen turns. */
+export const narrow = narrowNow;
 
 let held = false;
 let follow = () => {};

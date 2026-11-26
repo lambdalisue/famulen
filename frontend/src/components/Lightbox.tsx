@@ -40,6 +40,8 @@ export function closeImage() {
   closed();
 }
 
+export const imageShown = () => image() !== undefined;
+
 /**
  * The image open over everything else. It is the browser's own dialog, not
  * Ark's, as that gives the focus back at once: iOS brings the keyboard up
