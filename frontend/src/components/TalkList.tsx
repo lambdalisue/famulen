@@ -2,12 +2,11 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import AideIcon from "~/components/AideIcon";
 import { Button, EmptyState, ErrorState, Keyed, Loading, Tag } from "~/components/ui";
 import { type Conversation, Speaker } from "~/gen/famulen/v1/console_pb";
-import { workgroupsQuery } from "~/lib/data";
 import { clock, dayIn, shortTime, today } from "~/lib/dates";
 import * as icons from "~/lib/icons";
-import { createKept } from "~/lib/kept";
 import { excerptOf } from "~/lib/records";
 import { type createTalks, go, openTalk, SOURCES, titleOf } from "~/lib/talks";
+import { useWorkgroups } from "~/lib/workgroups";
 
 export type Waits = { approvals: number; held: number };
 
@@ -18,7 +17,7 @@ type Kept = "" | "ask" | "unread" | "busy";
 /** One conversation: what it is called, what was said last, and what it waits for. */
 function Row(props: { talk: Conversation; waits: Waits; aide: string; tz: string; today: string }) {
   const c = () => props.talk;
-  const workgroups = createKept(() => workgroupsQuery());
+  const workgroups = useWorkgroups();
   const workgroup = () => workgroups()?.find((w) => w.id === c().workgroup && w.id !== "all")?.name;
   const last = () => c().last;
   return (
