@@ -842,6 +842,29 @@ test("a conversation goes back to the list with a swipe to the right, under the 
   await expectView(page, /^ホーム/);
 });
 
+test("a conversation swiped and brought back is read where it was, the list beneath it filling the room it leaves", async ({ page, request }) => {
+  await openLong(page, request, "e2e 滑らせて戻す話");
+  const read = () => talkSaid(page).evaluate((el) => el.scrollTop);
+  const before = await read();
+  expect(before).toBeGreaterThan(100);
+  const said = await middleOf(page, ".talk-said");
+  const cdp = await drag(page, said, { x: said.x + 120, y: said.y }, { lift: false });
+  if (!cdp) throw new Error("the finger was lifted");
+  await expect(talkList(page)).toBeVisible();
+  expect(await read()).toBe(before);
+  // The list stands where the head and what is said stand, under them, from the head's top to the box.
+  const [head, list, box] = await Promise.all([".talk-head", ".talk-list", "#composer"].map((s) => page.locator(`.chat > ${s}`).boundingBox()));
+  expect(list?.y).toBeCloseTo(head?.y ?? -1, 0);
+  expect((list?.y ?? 0) + (list?.height ?? 0)).toBeLessThanOrEqual((box?.y ?? 0) + 1);
+  expect(list?.height).toBeGreaterThan(300);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: said.x, y: said.y }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+  await rested(page);
+  await expect(talkList(page)).toHaveCount(0);
+  expect(await read()).toBe(before);
+});
+
 test("a swipe in a conversation leaves alone what scrolls sideways and what is being written", async ({ page, request }) => {
   const title = "e2e 横に動く話";
   await openLong(page, request, title, { answers: 1, last: `横に長い\n\n\`\`\`\n${"wide ".repeat(80)}\n\`\`\`` });
