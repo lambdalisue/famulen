@@ -125,6 +125,15 @@ jobs:
       - run: just e2e --shard=${{ matrix.shard }}
         env:
           CI: "1"
+      # A test that fails only now and then cannot be seen again on demand,
+      # so what the browser saw is kept from the run it failed in.
+      - if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: e2e-traces-${{ strategy.job-index }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # The one check to require of a pull request: a job skipped because of the
   # scope is as good as a passed one, and nothing else is.
