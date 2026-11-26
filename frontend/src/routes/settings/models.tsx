@@ -1,10 +1,12 @@
-import { createAsync } from "@solidjs/router";
-import { createSignal, For, Show } from "solid-js";
+import { createAsync, revalidate } from "@solidjs/router";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import AddModel from "~/components/AddModel";
-import { AgentCli, type Model, ModelKind, Role, type RoleSetting } from "~/gen/famulen/v1/settings_pb";
+import { type AccountLimits, AgentCli, type Model, type ModelLimits, ModelKind, Role, type RoleSetting } from "~/gen/famulen/v1/settings_pb";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
-import { modelsQuery, isMetered, KINDS, kindLabel } from "~/lib/models";
+import { createLate } from "~/lib/kept";
+import { modelLimitsQuery, modelsQuery, isMetered, kindLabel, limitView } from "~/lib/models";
+import { useOwner } from "~/lib/owner";
 import * as icons from "~/lib/icons";
 import { setView } from "~/lib/view";
 import { Button, EmptyState, IconButton, List, PageHeader, Tag, TextField, whenConfirmed } from "~/components/ui";
@@ -20,12 +22,15 @@ const ROLE_PAGES: Record<Role, string> = {
   [Role.WORKER]: "/settings/roles/worker",
 };
 
+/** The group of models found nowhere, whose accounts are told by their program. */
+const OWN = "自分で足したもの";
+
 /** The list, parted by where the models come from. */
 const GROUPS: [string, (m: Model) => boolean][] = [
   ["Claude Code", (m) => m.found && m.cli === AgentCli.CLAUDE_CODE],
   ["Codex", (m) => m.found && m.cli === AgentCli.CODEX],
   ["このマシンの Ollama", (m) => m.found && m.kind === ModelKind.LOCAL],
-  ["自分で足したもの", (m) => !m.found],
+  [OWN, (m) => !m.found],
 ];
 
 export default function Models() {
@@ -38,8 +43,36 @@ export default function Models() {
     await act(() => api.models.findModels({}), "探し直した");
     setFinding(false);
   };
+  // Read apart from the list and late, as the agent CLIs take seconds to tell.
+  const read = createLate(() => modelLimitsQuery());
+  // A reading that failed leaves what was read before.
+  const limits = createMemo<ModelLimits | undefined>((before) => read() ?? before);
+  const { tz } = useOwner();
+  const [now, setNow] = createSignal(Date.now());
+  onMount(() => {
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
+    // Just past the five minutes the backend keeps an answer, so each reading is a new one.
+    const reread = setInterval(() => void revalidate(modelLimitsQuery.key), 5.5 * 60_000);
+    onCleanup(() => {
+      clearInterval(tick);
+      clearInterval(reread);
+    });
+  });
   const groups = () =>
     GROUPS.map(([label, holds]) => ({ label, models: (models()?.models ?? []).filter(holds) })).filter((g) => g.models.length > 0);
+  // Apart from the groups, so that limits read again leave the rows, and a key being typed in one, alone.
+  const placed = createMemo(() => {
+    const by = new Map<string, AccountLimits[]>();
+    const shown = new Set<AccountLimits>();
+    for (const g of groups()) {
+      const ids = new Set(g.models.map((m) => m.id));
+      // An account goes with the first group that has one of its models.
+      const accounts = (limits()?.accounts ?? []).filter((a) => !shown.has(a) && a.models.some((id) => ids.has(id)));
+      for (const a of accounts) shown.add(a);
+      by.set(g.label, accounts);
+    }
+    return by;
+  });
 
   return (
     <>
@@ -59,6 +92,9 @@ export default function Models() {
           {(g) => (
             <div class="model-group">
               <h3>{g.label}</h3>
+              <For each={placed().get(g.label) ?? []}>
+                {(a) => <LimitGauges account={a} named={g.label === OWN} now={now()} tz={tz()} />}
+              </For>
               <List>
                 <For each={g.models}>{(m) => <ModelRow model={m} roles={models()?.roles ?? []} />}</For>
               </List>
@@ -67,6 +103,35 @@ export default function Models() {
         </For>
       </section>
     </>
+  );
+}
+
+/** How much of one account's limits is used, and when each starts again. */
+function LimitGauges(props: { account: AccountLimits; named: boolean; now: number; tz: string }) {
+  const title = () => `${props.named ? `${props.account.endpoint} の` : ""}アカウントの利用上限`;
+  return (
+    <div class="model-limits" role="group" aria-label={title()}>
+      <span class="sub model-limits-head">{title()}</span>
+      <For each={props.account.limits}>
+        {(limit) => {
+          const v = () => limitView(limit, props.now, props.tz);
+          return (
+            <div class="model-limit" data-tone={v().tone}>
+              <div class="meter-row">
+                <span>{v().label}</span>
+                <span class="mono">{v().usedText}</span>
+                <div class="meter" role="meter" aria-label={v().label} aria-valuenow={v().used} aria-valuemin={0} aria-valuemax={100}>
+                  <div style={{ width: `${v().used}%` }} />
+                </div>
+              </div>
+              <Show when={v().note}>
+                <span class="sub">{v().note}</span>
+              </Show>
+            </div>
+          );
+        }}
+      </For>
+    </div>
   );
 }
 

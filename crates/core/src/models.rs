@@ -5,11 +5,13 @@ mod codex;
 mod discovery;
 #[cfg(test)]
 mod fake_cli;
+mod limits;
 mod openai;
 mod registry;
 mod spec;
 
 pub use discovery::*;
+pub use limits::*;
 pub use registry::*;
 pub use spec::*;
 

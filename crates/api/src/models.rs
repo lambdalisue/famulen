@@ -3,7 +3,8 @@
 use chrono::Utc;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
 use famulen_core::models::{
-    Cli, ModelKind as Kind, ModelSpec, Price, Role as CoreRole, UsageSpan as CoreSpan,
+    Account, Cli, Limit, ModelKind as Kind, ModelSpec, Price, Role as CoreRole, Severity,
+    UsageSpan as CoreSpan,
 };
 
 use crate::pb::{self, *};
@@ -326,6 +327,26 @@ impl ModelService for Api {
         })
     }
 
+    async fn get_model_limits(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<ModelLimits> {
+        let claude_bin = self.app.settings.effective().or_fail()?.claude.bin;
+        let registered = self.app.models.registered().or_fail()?;
+        let accounts = accounts(registered.iter().map(|m| &m.spec), &claude_bin);
+        let told =
+            futures::future::join_all(accounts.into_iter().map(async |(account, models)| {
+                let limits = self.app.limits.of(&account).await?;
+                (!limits.is_empty()).then(|| account_limits(&account, models, &limits))
+            }))
+            .await;
+        Response::ok(ModelLimits {
+            accounts: told.into_iter().flatten().collect(),
+            ..Default::default()
+        })
+    }
+
     async fn get_usage(
         &self,
         _ctx: RequestContext,
@@ -408,4 +429,130 @@ pub(crate) fn usage_row(row: famulen_core::models::UsageRow) -> Option<UsageRow>
         cached_tokens: row.cached_tokens,
         ..Default::default()
     })
+}
+
+/// The accounts the agent CLI models among `specs` are run on, in the order
+/// they first come, each with the ids of its models.
+fn accounts<'a>(
+    specs: impl IntoIterator<Item = &'a ModelSpec>,
+    claude_bin: &str,
+) -> Vec<(Account, Vec<String>)> {
+    let mut found: Vec<(Account, Vec<String>)> = Vec::new();
+    for spec in specs {
+        let Some(account) = Account::of(spec, claude_bin) else {
+            continue;
+        };
+        match found.iter_mut().find(|(a, _)| *a == account) {
+            Some((_, models)) => models.push(spec.id.clone()),
+            None => found.push((account, vec![spec.id.clone()])),
+        }
+    }
+    found
+}
+
+fn account_limits(account: &Account, models: Vec<String>, limits: &[Limit]) -> AccountLimits {
+    AccountLimits {
+        cli: cli(account.cli).into(),
+        endpoint: account.executable.clone(),
+        models,
+        limits: limits
+            .iter()
+            .map(|l| UsageLimit {
+                label: l.window.label(),
+                percent: l.percent,
+                resets_at_ms: l.resets_ms.unwrap_or(0),
+                severity: match l.severity {
+                    Severity::Normal => pb::LimitSeverity::LIMIT_SEVERITY_NORMAL,
+                    Severity::Warning => pb::LimitSeverity::LIMIT_SEVERITY_WARNING,
+                    Severity::Critical => pb::LimitSeverity::LIMIT_SEVERITY_CRITICAL,
+                }
+                .into(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use famulen_core::models::Window;
+
+    use super::*;
+
+    fn spec(id: &str, kind: Kind, cli: Cli, endpoint: Option<&str>) -> ModelSpec {
+        ModelSpec {
+            id: id.into(),
+            name: id.into(),
+            kind,
+            endpoint: endpoint.map(str::to_owned),
+            model: String::new(),
+            cli,
+            price: Price::default(),
+        }
+    }
+
+    #[test]
+    fn the_models_one_program_runs_share_an_account_and_others_have_none() {
+        let specs = [
+            spec("opus", Kind::AgentCli, Cli::Claude, None),
+            spec("gpt", Kind::AgentCli, Cli::Codex, None),
+            spec("haiku", Kind::AgentCli, Cli::Claude, None),
+            spec(
+                "api",
+                Kind::Api,
+                Cli::Claude,
+                Some("https://api.example.com"),
+            ),
+            spec("mine", Kind::AgentCli, Cli::Claude, Some("/my/claude")),
+        ];
+        let got: Vec<(String, Vec<String>)> = accounts(&specs, "/opt/claude")
+            .into_iter()
+            .map(|(a, models)| (a.executable, models))
+            .collect();
+        let owned =
+            |e: &str, ms: &[&str]| (e.to_owned(), ms.iter().map(|m| m.to_string()).collect());
+        assert_eq!(
+            got,
+            [
+                owned("/opt/claude", &["opus", "haiku"]),
+                owned("codex", &["gpt"]),
+                owned("/my/claude", &["mine"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_limit_is_told_with_its_name_use_reset_and_severity() {
+        let account = Account {
+            cli: Cli::Codex,
+            executable: "codex".into(),
+        };
+        let limits = [
+            Limit {
+                window: Window::Week,
+                percent: 86.0,
+                resets_ms: Some(1_792_677_600_000),
+                severity: Severity::Warning,
+            },
+            Limit {
+                window: Window::Session,
+                percent: 3.0,
+                resets_ms: None,
+                severity: Severity::Normal,
+            },
+        ];
+        let got = account_limits(&account, vec!["gpt".into()], &limits);
+        assert_eq!(got.cli.as_known(), Some(pb::AgentCli::AGENT_CLI_CODEX));
+        assert_eq!(got.models, ["gpt"]);
+        assert_eq!(got.limits[0].label, "週");
+        assert_eq!(got.limits[0].percent, 86.0);
+        assert_eq!(got.limits[0].resets_at_ms, 1_792_677_600_000);
+        assert_eq!(
+            got.limits[0].severity.as_known(),
+            Some(pb::LimitSeverity::LIMIT_SEVERITY_WARNING)
+        );
+        assert_eq!(got.limits[1].label, "5 時間");
+        assert_eq!(got.limits[1].resets_at_ms, 0);
+    }
 }

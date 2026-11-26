@@ -676,6 +676,24 @@ async function useClaudeForDream(request: Parameters<typeof call>[0]) {
 }
 
 test.describe("モデル", () => {
+  test("an agent CLI's account limits are shown by its models with how much is used and when each starts again", async ({ page }) => {
+    await visit(page, "/settings/models", "設定 · 登録したモデル");
+    const claude = page.locator(".model-group").filter({ has: page.getByRole("heading", { name: "Claude Code", exact: true }) });
+    const limits = claude.getByRole("group", { name: "アカウントの利用上限" });
+    await expect(limits.getByRole("meter")).toHaveCount(3);
+    const session = limits.locator(".model-limit").filter({ has: page.getByRole("meter", { name: "5 時間", exact: true }) });
+    await expect(session).toContainText("12% 使った");
+    await expect(session).toContainText(/に戻る（あと 4 時間( \d+ 分)?）/);
+    await expect(session.getByRole("meter")).toHaveAttribute("aria-valuenow", "12");
+    const week = limits.locator(".model-limit").filter({ has: page.getByRole("meter", { name: "週", exact: true }) });
+    await expect(week).toContainText("86% 使った");
+    await expect(week).toContainText(/あと 2 日 3 時間/);
+    await expect(week).toHaveAttribute("data-tone", "warn");
+    await expect(limits.getByRole("meter", { name: "週・Fable" })).toBeVisible();
+    // Only the account an agent CLI is logged in to has limits to show.
+    await expect(page.getByRole("group", { name: /利用上限/ })).toHaveCount(1);
+  });
+
   test("a priced model is registered from the form with its price fields and can be removed", async ({ page }) => {
     await visit(page, "/settings/models", "設定 · 登録したモデル");
     await page.getByRole("button", { name: "モデルの追加" }).click();

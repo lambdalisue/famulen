@@ -316,6 +316,40 @@ message Models {
   repeated Model candidates = 3;
 }
 
+// How near the agent CLI says a limit is.
+enum LimitSeverity {
+  LIMIT_SEVERITY_UNSPECIFIED = 0;
+  LIMIT_SEVERITY_NORMAL = 1;
+  LIMIT_SEVERITY_WARNING = 2;
+  LIMIT_SEVERITY_CRITICAL = 3;
+}
+
+// One of an account's usage limits and how much of it is used.
+message UsageLimit {
+  // The window it counts over, for the owner to read: 5 時間, 週.
+  string label = 1;
+  // Used, from 0 to 100; above 100 once the limit is passed.
+  double percent = 2;
+  // When the window starts again, in Unix milliseconds; 0 when not told.
+  int64 resets_at_ms = 3;
+  LimitSeverity severity = 4;
+}
+
+// The limits of the account one agent CLI program is logged in to.
+message AccountLimits {
+  AgentCli cli = 1;
+  // The executable.
+  string endpoint = 2;
+  // The registered models run by it, which share these limits.
+  repeated string models = 3;
+  repeated UsageLimit limits = 4;
+}
+
+message ModelLimits {
+  // Only the accounts that told their limits.
+  repeated AccountLimits accounts = 1;
+}
+
 message AssignRoleRequest {
   Role role = 1;
   // A registered model id.
@@ -472,6 +506,11 @@ service ModelService {
   }
   // What the secretary's conversations used in a period.
   rpc GetConversationUsage(GetUsageRequest) returns (ConversationUsage) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // How much of each agent CLI account's limits is used, as the CLI tells
+  // without running a turn, asked again once the answer has aged.
+  rpc GetModelLimits(Empty) returns (ModelLimits) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }
