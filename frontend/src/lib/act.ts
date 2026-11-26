@@ -1,4 +1,4 @@
-import { revalidate } from "@solidjs/router";
+import { reread } from "./remember";
 import { createSignal } from "solid-js";
 
 const [toastText, setToastText] = createSignal<{ text: string; bad: boolean } | undefined>();
@@ -26,7 +26,7 @@ export function message(e: unknown): string {
 export async function act<T>(run: () => Promise<T>, done = "保存した"): Promise<T | undefined> {
   try {
     const result = await run();
-    await revalidate();
+    await reread();
     if (done) say(done);
     return result;
   } catch (e) {

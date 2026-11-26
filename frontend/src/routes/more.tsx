@@ -1,4 +1,5 @@
-import { createAsync, query } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
+import { remembered } from "~/lib/remember";
 import { api } from "~/lib/api";
 import { workgroup } from "~/lib/workgroup";
 import * as icons from "~/lib/icons";
@@ -6,7 +7,7 @@ import { setView } from "~/lib/view";
 import { IndexRow } from "~/components/IndexRow";
 import { List } from "~/components/ui";
 
-const countsQuery = query(async (workgroup: string) => {
+const countsQuery = remembered(async (workgroup: string) => {
   const [parties, things, contracts, layers] = await Promise.all([
     api.records.listRecords({ kind: "parties", workgroup }),
     api.records.listRecords({ kind: "holdings", workgroup }),

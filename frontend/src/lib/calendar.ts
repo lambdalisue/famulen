@@ -1,4 +1,4 @@
-import { query } from "@solidjs/router";
+import { remembered } from "./remember";
 import { api } from "./api";
 import { addDays, dateLabel, daysBetween, hm, localDate, minutesOfDay, monthOf, spanLabel, today, weekdayIndex } from "./dates";
 import { valueOf } from "./records";
@@ -105,7 +105,7 @@ export function lanes(spans: [number, number][]): [number, number][] {
 }
 
 /** What the calendar pane shows: events and task due dates in a window. */
-export const calendarQuery = query(async (workgroup: string, unit: Unit, at: string) => {
+export const calendarQuery = remembered(async (workgroup: string, unit: Unit, at: string) => {
   const day = at || today((await api.settings.getPersona({})).timezone);
   const range = rangeOf(unit, day);
   const [listed, calendars, tasks] = await Promise.all([
@@ -128,4 +128,4 @@ export const calendarQuery = query(async (workgroup: string, unit: Unit, at: str
   };
 }, "calendar");
 
-export const calendarsQuery = query(async () => (await api.calendar.listCalendars({})).calendars, "calendars");
+export const calendarsQuery = remembered(async () => (await api.calendar.listCalendars({})).calendars, "calendars");

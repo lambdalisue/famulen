@@ -1,4 +1,4 @@
-import { createAsync, revalidate } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import FolderPicker from "~/components/FolderPicker";
 import NotebookCheck from "~/components/NotebookCheck";
@@ -14,6 +14,7 @@ import { coveringPlace, isUnder, wholePath } from "~/lib/places";
 import { alertTriangle, externalLink, folder, plus, x } from "~/lib/icons";
 import { useOwner } from "~/lib/owner";
 import { iconFile, PORTRAITS, type Portrait } from "~/lib/portrait";
+import { reread } from "~/lib/remember";
 import { setView } from "~/lib/view";
 import { Button, Callout, EmptyState, Form, Icon, LinkButton, PageHeader, RadioCards, Section, Switch, Tag, TextArea, TextField } from "~/components/ui";
 
@@ -355,7 +356,7 @@ function NotebookSection() {
       const now = await api.settings.getNotebookPlace({}).catch(() => undefined);
       if (!now || now.movingTo) return;
       clearInterval(timer);
-      await revalidate();
+      await reread();
       if (!now.failed) say("手帳を移した");
     }, 1000);
     onCleanup(() => clearInterval(timer));
