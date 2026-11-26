@@ -1,10 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { call, dayFromToday, detail, record, row } from "./support";
 
 const ids: { [name: string]: string } = {};
 const made: { kind: string; id: string }[] = [];
 let group = "";
+
+// Characters of one width: a name wider than the last wraps the tags above a record, and moves what is read.
+let names = 0;
+const groupName = () => `巻物の組 ${[...String(++names).padStart(3, "0")].map((d) => "〇一二三四五六七八九"[Number(d)]).join("")}`;
 
 async function add(request: APIRequestContext, kind: string, title: string, given: Parameters<typeof record>[3] = {}) {
   const { id } = await record(request, kind, title, given);
@@ -14,7 +17,7 @@ async function add(request: APIRequestContext, kind: string, title: string, give
 
 test.beforeAll(async ({ request }) => {
   test.setTimeout(120_000);
-  ({ id: group } = await call<{ id: string }>(request, "WorkgroupService", "AddWorkgroup", { name: `巻物の組 ${randomUUID()}`, color: "#0B5650" }));
+  ({ id: group } = await call<{ id: string }>(request, "WorkgroupService", "AddWorkgroup", { name: groupName(), color: "#0B5650" }));
   const notes = "長い備考\n\n".repeat(60);
   for (let i = 100; i < 230; i++) ids.thing = await add(request, "holdings", `巻物の物 ${i}`, { fields: { Category: "巻物" } });
   // Found by words, as digits may stand in the code of any record.
@@ -50,7 +53,7 @@ async function open(page: Page, path: string) {
 
 /** A change that every page reads again for, and the wait until it is on the screen. */
 async function change(request: APIRequestContext, page: Page) {
-  const name = `巻物の組 ${randomUUID()}`;
+  const name = groupName();
   // Each answer brings every list anew, whatever it was that changed.
   await call(request, "WorkgroupService", "UpdateWorkgroup", { id: group, name });
   await expect(page.locator(".app > dialog.sheet")).toContainText(name);
