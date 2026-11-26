@@ -9,9 +9,10 @@ mod names;
 pub use kind::*;
 pub use names::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Context as _;
 
@@ -292,6 +293,7 @@ impl Records {
         check_id(id)?;
         let path = self.path(kind, id);
         if !path.is_file() {
+            forget(&path);
             return Ok(None);
         }
         load(&self.kind(kind)?, id, &path).map(Some)
@@ -300,6 +302,7 @@ impl Records {
     /// Every record of a kind that can be read, by id.
     pub fn list(&self, kind: &str) -> anyhow::Result<Vec<Record>> {
         let files = self.files(kind)?;
+        forget_gone(&self.dir(kind), &files);
         let kind = self.kind(kind)?;
         let mut records = Vec::new();
         for (id, path) in files {
@@ -507,10 +510,74 @@ pub struct Backlink {
     pub from: String,
 }
 
+/// A record as it was last parsed, with the text and kind it was parsed from.
+struct Parsed {
+    text: String,
+    kind: Kind,
+    record: Record,
+}
+
+/// Records as they were last parsed, by path. Parsing is what reading a whole
+/// kind costs, and the background chores and the console read whole kinds
+/// over and over while few records change. The text is compared rather than
+/// the file's time and size, as a file can change without either moving, and
+/// rather than a hash of it, as hashing every file on every read costs more
+/// than comparing it. The lock is held only to take an entry out or put one in.
+static PARSED: LazyLock<Mutex<HashMap<PathBuf, Arc<Parsed>>>> = LazyLock::new(Default::default);
+
+fn parsed_all() -> MutexGuard<'static, HashMap<PathBuf, Arc<Parsed>>> {
+    PARSED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn load(kind: &Kind, id: &str, path: &Path) -> anyhow::Result<Record> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    Record::parse(kind, id, &text).with_context(|| format!("reading {}", path.display()))
+    let had = parsed_all().get(path).cloned();
+    if let Some(p) = had
+        && p.text == text
+        && p.kind == *kind
+        && p.record.id == id
+    {
+        return Ok(p.record.clone());
+    }
+    #[cfg(test)]
+    PARSES.with(|n| n.set(n.get() + 1));
+    let record =
+        Record::parse(kind, id, &text).with_context(|| format!("reading {}", path.display()))?;
+    let parsed = Parsed {
+        text,
+        kind: kind.clone(),
+        record: record.clone(),
+    };
+    parsed_all().insert(path.to_owned(), Arc::new(parsed));
+    Ok(record)
+}
+
+/// Let go of what was parsed from a file that is gone.
+fn forget(path: &Path) {
+    parsed_all().remove(path);
+}
+
+/// Let go of what was parsed from files of a kind that are gone.
+fn forget_gone(dir: &Path, files: &BTreeMap<String, PathBuf>) {
+    parsed_all().retain(|path, _| {
+        path.parent() != Some(dir)
+            || path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|id| files.get(id) == Some(path))
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many records this thread has parsed.
+#[cfg(test)]
+fn parsed() -> usize {
+    PARSES.with(std::cell::Cell::get)
 }
 
 fn now() -> String {
@@ -884,6 +951,66 @@ mod tests {
 
         let ids: Vec<String> = r.list("tasks").unwrap().into_iter().map(|r| r.id).collect();
         assert_eq!(ids, [record.id]);
+    }
+
+    #[test]
+    fn a_record_read_again_unchanged_is_not_parsed_again() {
+        let (_tmp, r) = records("records-parsed-once");
+        let record = task(&r, "一度だけ");
+        r.write(&me(), &record, "足した").unwrap();
+        r.list("tasks").unwrap();
+
+        let before = parsed();
+        r.list("tasks").unwrap();
+        r.get("tasks", &record.id).unwrap();
+
+        assert_eq!(parsed(), before);
+    }
+
+    #[test]
+    fn a_record_changed_on_disk_is_read_as_it_now_is_whatever_its_size_and_time() {
+        let (tmp, r) = records("records-parsed-anew");
+        let record = task(&r, "前の題");
+        r.write(&me(), &record, "足した").unwrap();
+        let path = tmp.path().join(record.rel());
+        let file = std::fs::File::open(&path).unwrap();
+        let written = file.metadata().unwrap().modified().unwrap();
+        assert_eq!(r.list("tasks").unwrap()[0].title(), "前の題");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("前の題", "後の題")).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(written)
+            .unwrap();
+
+        assert_eq!(r.list("tasks").unwrap()[0].title(), "後の題");
+        assert_eq!(
+            r.get("tasks", &record.id).unwrap().unwrap().title(),
+            "後の題"
+        );
+    }
+
+    #[test]
+    fn a_record_is_read_by_its_kind_as_the_readme_now_lays_it_out() {
+        let (tmp, r) = records("records-parsed-relaid");
+        let mut record = task(&r, "置き場");
+        record.body.set_notes("## Where\n\n棚").unwrap();
+        r.write(&me(), &record, "足した").unwrap();
+        let sections = |r: &Records| r.list("tasks").unwrap()[0].body.sections().len();
+        let had = sections(&r);
+
+        let readme = tmp.path().join("records/tasks/README.md");
+        let text = std::fs::read_to_string(&readme).unwrap();
+        std::fs::write(
+            &readme,
+            text.replacen("sections:\n", "sections:\n  Where: {Shelf: text}\n", 1),
+        )
+        .unwrap();
+
+        assert_ne!(sections(&r), had);
     }
 
     #[test]
