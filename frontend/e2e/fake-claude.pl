@@ -12,7 +12,8 @@
 # forgets the long-term item whose id starts with `e2e-done`, so a night with
 # a commit and a reason can be seen; asked to tidy records, it makes a
 # task of those titled `e2e-todo` and doubts those titled `e2e-stale`; any
-# other one-shot call gets no answer.
+# other one-shot call gets no answer. Asked for the account's usage, it tells
+# limits that reset a few hours and a few days from now.
 use strict;
 use warnings;
 $| = 1;
@@ -45,7 +46,19 @@ if (grep { $_ eq "--json-schema" } @ARGV) {
     exit 0;
 }
 if (grep { $_ eq "--no-session-persistence" } @ARGV) {
-    exit 0 unless (<STDIN> // "") =~ /"initialize"/;
+    my $asked = <STDIN> // "";
+    if ($asked =~ /"get_usage"/) {
+        # The account's limits: the session's resets a little over four hours
+        # from now, and the week's is near its end.
+        my $at = sub { my @t = gmtime(time + $_[0]); sprintf "%04d-%02d-%02dT%02d:%02d:%02d+00:00", $t[5] + 1900, $t[4] + 1, @t[3, 2, 1, 0] };
+        my ($session, $week) = ($at->(4 * 3600 + 15 * 60), $at->(2 * 86400 + 3 * 3600 + 30 * 60));
+        print qq({"type":"control_response","response":{"subtype":"success","request_id":"famulen","response":{"rate_limits":{"limits":[)
+            . qq({"kind":"session","percent":12,"severity":"normal","resets_at":"$session"},)
+            . qq({"kind":"weekly_all","percent":86,"severity":"warning","resets_at":"$week"},)
+            . qq({"kind":"weekly_scoped","percent":0,"severity":"normal","resets_at":"$week","scope":{"model":{"display_name":"Fable"}}}]}}}}\n);
+        exit 0;
+    }
+    exit 0 unless $asked =~ /"initialize"/;
     my @models = (
         [default => "Default"], [opus => "Opus 5.5"], [sonnet => "Sonnet 5.5"],
         [haiku => "Haiku 5.5"], ["claude-opus-5" => "Opus 5"],

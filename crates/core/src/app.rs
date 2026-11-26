@@ -46,6 +46,8 @@ pub struct App {
     pub holding_pictures: crate::purchases::pictures::HoldingPictures,
     pub permissions: Permissions,
     pub models: Models,
+    /// How much of each agent CLI account's limits is used, as last asked.
+    pub limits: crate::models::Limits,
     pub workers: crate::workers::Workers,
     pub lookout: crate::lookout::Lookout,
     pub triage: crate::triage::Triage,

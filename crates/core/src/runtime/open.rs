@@ -240,6 +240,7 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         slack_app_icons: Default::default(),
         slack_looks: crate::slack::looks::Looks::new(store.clone()),
         slack_names: Default::default(),
+        limits: Default::default(),
         console_url: config.console_url.clone(),
         receive_url: config.receive_url.clone(),
     };

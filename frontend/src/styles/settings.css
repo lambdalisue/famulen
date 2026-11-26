@@ -170,3 +170,9 @@
 .steps li.now .step-no { border-color: var(--accent); background: var(--accent-soft); }
 .steps li.done .step-no { background: var(--line2); }
 .step-list { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 6px; list-style: decimal; }
+.model-limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px 20px; border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.model-limits-head { grid-column: 1 / -1; }
+.model-limit { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.model-limit > .sub { overflow-wrap: anywhere; }
+.model-limit[data-tone=warn] .meter > div { background: var(--warn); }
+.model-limit[data-tone=danger] .meter > div { background: var(--danger); }
