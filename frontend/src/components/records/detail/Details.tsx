@@ -1,5 +1,5 @@
 import { Index } from "solid-js";
-import { Button, IconButton, TextField, whenConfirmed } from "~/components/ui";
+import { Button, Form, IconButton, TextField, whenConfirmed } from "~/components/ui";
 import * as icons from "~/lib/icons";
 import { type FieldLike, plainField } from "~/lib/records";
 
@@ -30,12 +30,12 @@ export default function Details(props: { fields: FieldLike[]; onSave: (change: (
                 variant="danger"
                 icon={icons.trash}
                 label={`${f().name}を外す`}
-                onClick={() => void whenConfirmed(`「${f().name}」を外す`, "外す", async () => put(at, undefined), f().value)}
+                onClick={() => whenConfirmed(`「${f().name}」を外す`, "外す", async () => put(at, undefined), f().value)}
               />
             </div>
           )}
         </Index>
-        <form
+        <Form
           class="rec-detail-row"
           onSubmit={(e) => {
             e.preventDefault();
@@ -53,7 +53,7 @@ export default function Details(props: { fields: FieldLike[]; onSave: (change: (
           <Button type="submit" small>
             足す
           </Button>
-        </form>
+        </Form>
       </div>
     </section>
   );

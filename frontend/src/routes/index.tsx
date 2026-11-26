@@ -3,7 +3,7 @@ import { createEffect, createMemo, createSignal, For, Index, type JSX, Match, on
 import AideIcon from "~/components/AideIcon";
 import { ProgressLine } from "~/components/records/RunProgress";
 import TaskRow from "~/components/records/TaskRow";
-import { Button, EmptyState, Icon, IconButton, Keyed, LinkButton, List, ListRow, Loading, PageHeader, Select, Tag } from "~/components/ui";
+import { Button, EmptyState, Form, Icon, IconButton, Keyed, LinkButton, List, ListRow, Loading, PageHeader, Select, Tag } from "~/components/ui";
 import { CalendarMode, type CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import type { Tile } from "~/gen/famulen/v1/settings_pb";
 import { own } from "~/lib/colors";
@@ -328,7 +328,7 @@ function SetupGuide() {
       <section class="card stack home-setup">
         <div class="row">
           <h2 class="grow">はじめに</h2>
-          <Button variant="ghost" small onClick={() => void act(() => api.settings.hideSetup({}), "")}>
+          <Button variant="ghost" small onClick={() => act(() => api.settings.hideSetup({}), "")}>
             あとで
           </Button>
         </div>
@@ -420,7 +420,7 @@ export default function Home() {
   };
   const addTile = () => {
     const k = kind() || kinds()[0]?.kind;
-    if (k) void setTiles([...shown(), { kind: k, x: 0, y: below(shown()), width: 6, height: 6 }]);
+    if (k) return setTiles([...shown(), { kind: k, x: 0, y: below(shown()), width: 6, height: 6 }]);
   };
 
   let grid: HTMLDivElement | undefined;
@@ -497,11 +497,11 @@ export default function Home() {
         }
       />
       <Show when={arranging()}>
-        <form
+        <Form
           class="row"
           onSubmit={(e) => {
             e.preventDefault();
-            addTile();
+            return addTile();
           }}
         >
           <Select aria-label="足すタイル" onChange={(e) => setKind(e.currentTarget.value)}>
@@ -516,7 +516,7 @@ export default function Home() {
           <Button type="submit" icon={icons.plus}>
             タイルを足す
           </Button>
-        </form>
+        </Form>
       </Show>
       <Brief aide={owner.aide()} events={ofDay(events()?.events ?? [])} mine={mine()} going={going()} />
       <SetupGuide />
@@ -564,7 +564,7 @@ export default function Home() {
                     <IconButton plain icon={icons.arrowUp} label={`${label(t().kind)}を前へ`} disabled={ranks()[i] === 0} onClick={() => swap(i, -1)} />
                     <IconButton plain icon={icons.arrowDown} label={`${label(t().kind)}を後ろへ`} disabled={ranks()[i] === shown().length - 1} onClick={() => swap(i, 1)} />
                   </span>
-                  <IconButton plain icon={icons.x} label={`${label(t().kind)}を外す`} onClick={() => void remove(i)} />
+                  <IconButton plain icon={icons.x} label={`${label(t().kind)}を外す`} onClick={() => remove(i)} />
                 </Show>
               </header>
               <div class="tile-body">

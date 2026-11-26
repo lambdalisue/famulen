@@ -13,6 +13,7 @@ import * as icons from "~/lib/icons";
 import {
   Button,
   EmptyState,
+  Form,
   IconButton,
   Keyed,
   List,
@@ -150,7 +151,7 @@ export function CalendarsSection(props: { connection: string; account: string; t
                     icon={icons.trash}
                     label={`${c.name}を外す`}
                     onClick={() =>
-                      void whenConfirmed(
+                      whenConfirmed(
                         `カレンダー「${c.name}」を外す`,
                         "外す",
                         () => act(() => api.calendar.removeCalendar({ id: c.id }), "外した"),
@@ -164,7 +165,7 @@ export function CalendarsSection(props: { connection: string; account: string; t
           </For>
         </List>
       </Show>
-      <form class="row" onSubmit={add}>
+      <Form class="row" onSubmit={add}>
         <TextField name="name" required value={props.account} aria-label="カレンダーの名前" />
         <TextField
           class="grow mono"
@@ -178,7 +179,7 @@ export function CalendarsSection(props: { connection: string; account: string; t
         <Button variant="primary" type="submit">
           足す
         </Button>
-      </form>
+      </Form>
     </Section>
   );
 }

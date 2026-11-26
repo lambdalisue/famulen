@@ -49,7 +49,7 @@ function Finish(props: { task: Rec }) {
   const over = () => isOver(props.task);
   return (
     <div>
-      <Button variant={over() ? undefined : "primary"} icon={over() ? icons.arrowBackUp : icons.check} onClick={() => void finish(props.task)}>
+      <Button variant={over() ? undefined : "primary"} icon={over() ? icons.arrowBackUp : icons.check} onClick={() => finish(props.task)}>
         {over() ? "まだに戻す" : "済にする"}
       </Button>
     </div>
@@ -89,7 +89,7 @@ function Wakes() {
                       plain
                       icon={icons.x}
                       label={`起床予約「${w.note}」を取り消す`}
-                      onClick={() => void whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
+                      onClick={() => whenConfirmed(`起床予約「${w.note}」を取り消す`, "取り消す", () => cancelWake(w.id))}
                     />
                   </>
                 }

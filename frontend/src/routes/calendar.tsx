@@ -174,7 +174,7 @@ export default function Calendar() {
                       variant="ghost"
                       icon={icons.refresh}
                       label="カレンダーを読み直す"
-                      onClick={() => void act(() => api.calendar.refreshCalendars({}), "読み直している")}
+                      onClick={() => act(() => api.calendar.refreshCalendars({}), "読み直している")}
                     />
                   </span>
                 }

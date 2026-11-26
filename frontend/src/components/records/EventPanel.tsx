@@ -198,7 +198,7 @@ function FromGoogle(props: { event: CalendarEvent; back: string }) {
           <Show
             when={e().record}
             fallback={
-              <Button small icon={icons.pencil} onClick={() => void addNotes()}>
+              <Button small icon={icons.pencil} onClick={() => addNotes()}>
                 備考やラベルを書き足す
               </Button>
             }

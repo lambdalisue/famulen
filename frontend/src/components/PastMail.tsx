@@ -50,7 +50,7 @@ function Row(props: { of: Mailbox; line: typeof purchases }) {
   const [years, setYears] = createSignal("3");
   const m = () => props.of;
   const going = () => m().state === PastMailState.GOING;
-  const start = (since: string, done: string) => void act(() => props.line.start(m().connection, since), done);
+  const start = (since: string, done: string) => act(() => props.line.start(m().connection, since), done);
   return (
     <div class="item past-mail" role="listitem">
       <Icon svg={icons.deviceLaptop} size={16} />
@@ -88,7 +88,7 @@ function Row(props: { of: Mailbox; line: typeof purchases }) {
               small
               aria-label={`${m().name}の${props.line.title}をさかのぼる`}
               onClick={() =>
-                void whenConfirmed(
+                whenConfirmed(
                   `${m().name}のメールを ${years()} 年さかのぼって、${props.line.adds}を探す`,
                   "さかのぼる",
                   async () => start(yearsBack(owner.today(), Number(years())), "さかのぼり始めた"),
@@ -101,7 +101,7 @@ function Row(props: { of: Mailbox; line: typeof purchases }) {
           </>
         }
       >
-        <Button small aria-label={`${m().name}の${props.line.title}をさかのぼるのを止める`} onClick={() => void act(() => props.line.stop(m().connection), "止めた")}>
+        <Button small aria-label={`${m().name}の${props.line.title}をさかのぼるのを止める`} onClick={() => act(() => props.line.stop(m().connection), "止めた")}>
           止める
         </Button>
       </Show>

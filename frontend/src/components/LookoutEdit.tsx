@@ -7,7 +7,7 @@ import { act, look } from "~/lib/act";
 import { api } from "~/lib/api";
 import { lookoutChoicesQuery } from "~/lib/connections";
 import * as icons from "~/lib/icons";
-import { Dialog, DialogActions, DialogTrigger, Field, Icon, TextField } from "~/components/ui";
+import { Dialog, DialogActions, DialogTrigger, Field, Form, Icon, TextField } from "~/components/ui";
 
 function EditForm(props: { source: LookoutSource; defaults: LookoutDefault[]; sources: LookoutSource[]; onDone: () => void }) {
   const first = props.source;
@@ -62,7 +62,7 @@ function EditForm(props: { source: LookoutSource; defaults: LookoutDefault[]; so
     return true;
   };
   return (
-    <form
+    <Form
       class="dialog-form"
       onSubmit={async (e) => {
         e.preventDefault();
@@ -98,7 +98,7 @@ function EditForm(props: { source: LookoutSource; defaults: LookoutDefault[]; so
       <RouteField route={route()} setRoute={setRoute} />
       <WorkgroupField workgroup={workgroup()} setWorkgroup={setWorkgroup} />
       <DialogActions submit="保存" />
-    </form>
+    </Form>
   );
 }
 

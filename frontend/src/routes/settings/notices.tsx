@@ -91,7 +91,7 @@ export default function NoticesPage() {
                   when={here()}
                   fallback={
                     <div class="row">
-                      <Button variant="primary" icon={bell} disabled={busy()} onClick={() => void run(() => takeNotices(n().key), "受け取るようにした")}>
+                      <Button variant="primary" icon={bell} disabled={busy()} onClick={() => run(() => takeNotices(n().key), "受け取るようにした")}>
                         この端末で受け取る
                       </Button>
                     </div>
@@ -99,10 +99,10 @@ export default function NoticesPage() {
                 >
                   {(d) => (
                     <div class="row">
-                      <Button icon={bell} disabled={busy()} onClick={() => void run(() => api.notices.tryNoticeDevice({ id: d().id }), "送った")}>
+                      <Button icon={bell} disabled={busy()} onClick={() => run(() => api.notices.tryNoticeDevice({ id: d().id }), "送った")}>
                         試しに送る
                       </Button>
-                      <Button disabled={busy()} onClick={() => void remove(d().id, true)}>
+                      <Button disabled={busy()} onClick={() => remove(d().id, true)}>
                         受け取るのをやめる
                       </Button>
                     </div>
@@ -153,7 +153,7 @@ export default function NoticesPage() {
                     icon={x}
                     aria-label={`${d.name} を外す`}
                     disabled={busy()}
-                    onClick={() => void remove(d.id, d.here)}
+                    onClick={() => remove(d.id, d.here)}
                   >
                     外す
                   </Button>

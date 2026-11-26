@@ -70,7 +70,7 @@ function Write(props: { path: string; file: FileContent }) {
       />
       <div class="row">
         <span class="sub grow">保存すると、あなたが直したこととして経緯に残る。</span>
-        <Button variant="primary" disabled={!dirty()} onClick={() => void save()}>
+        <Button variant="primary" disabled={!dirty()} onClick={() => save()}>
           保存
         </Button>
       </div>

@@ -8,7 +8,7 @@ import * as icons from "~/lib/icons";
 import { assigneeOf, newWorkgroups, OWNER, SECRETARY, type Rec, routinesQuery, valueOf } from "~/lib/records";
 import { useOwner } from "~/lib/owner";
 import { workgroup } from "~/lib/workgroup";
-import { Button, Callout, Dialog, DialogActions, Field, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
+import { Button, Callout, createPress, Dialog, DialogActions, Field, Form, Icon, Segmented, Select, Switch, Tag, TextArea, TextField } from "~/components/ui";
 import type { RowParts } from "./Row";
 
 type RunsOf = (id: string) => Routine | undefined;
@@ -59,17 +59,22 @@ function Next(props: { routine: Rec; runs: RunsOf }) {
       </Show>
       <span class="row">
         <Show when={next()}>
-          {(n) => (
-            <button
-              type="button"
-              class="tag"
-              aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
-              onClick={() => void skip(props.routine.id, n())}
-            >
-              <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
-              {n().skipped ? "戻す" : "次を飛ばす"}
-            </button>
-          )}
+          {(n) => {
+            const press = createPress({ onClick: () => skip(props.routine.id, n()) });
+            return (
+              <button
+                type="button"
+                class="tag"
+                aria-label={`${props.routine.title}の次の回を${n().skipped ? "飛ばさない" : "飛ばす"}`}
+                disabled={press.disabled()}
+                aria-busy={press.busy()}
+                onClick={press.onClick}
+              >
+                <Icon svg={n().skipped ? icons.arrowBackUp : icons.playerSkipForward} size={11} />
+                {n().skipped ? "戻す" : "次を飛ばす"}
+              </button>
+            );
+          }}
         </Show>
         <Tag tone={aides() ? "aide" : undefined}>{assigneeOf(props.routine, owner.aide())}</Tag>
       </span>
@@ -122,7 +127,7 @@ export function Runs(props: { routine: Rec }) {
                   <Tag>飛ばす</Tag>
                 </Show>
                 <span class="grow" />
-                <Button small onClick={() => void skip(props.routine.id, r)}>
+                <Button small onClick={() => skip(props.routine.id, r)}>
                   {r.skipped ? "戻す" : "この回を飛ばす"}
                 </Button>
               </div>
@@ -183,7 +188,7 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
   };
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} title="定期タスクを足す">
-      <form class="dialog-form" onSubmit={add}>
+      <Form class="dialog-form" onSubmit={add}>
         <Field label="何をするか">
           <TextField name="title" required autofocus />
         </Field>
@@ -231,7 +236,7 @@ export function AddRoutine(props: { open: boolean; onOpenChange: (open: boolean)
           <TextArea name="notes" placeholder="Markdown で書ける" />
         </Field>
         <DialogActions submit="足す" />
-      </form>
+      </Form>
     </Dialog>
   );
 }

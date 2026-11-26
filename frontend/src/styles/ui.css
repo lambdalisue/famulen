@@ -11,8 +11,13 @@
 .btn.small { min-height: var(--ctl-sm); padding: 0 10px; font-size: var(--t-sm); }
 .btn.icon-btn { width: var(--ctl-sm); min-height: var(--ctl-sm); padding: 0; }
 .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+:is(.btn, .icon-plain, .rec-check, button.tag)[aria-busy=true] { cursor: progress; background-image: linear-gradient(90deg, transparent, var(--veil), transparent); background-size: 200% 100%; animation: sending 1.2s linear infinite; }
+@keyframes sending { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { :is(.btn, .icon-plain, .rec-check, button.tag)[aria-busy=true] { animation: none; } }
 .icon-plain { flex: none; width: 28px; height: 28px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .icon-plain:hover { background: var(--hover); color: var(--ink); }
+.icon-plain:disabled { opacity: .5; cursor: not-allowed; }
+.rec-check:disabled, button.tag:disabled { opacity: .5; cursor: not-allowed; }
 .icon-plain.danger:hover { background: var(--danger-soft); color: var(--danger); }
 
 /* Text, numbers, choices. */

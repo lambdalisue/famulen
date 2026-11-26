@@ -70,7 +70,7 @@ export function DialogActions(props: {
   cancel?: string;
   before?: JSX.Element;
   variant?: ButtonVariant;
-  onSubmit?: () => void;
+  onSubmit?: () => unknown;
 }) {
   return (
     <div class="dialog-actions">

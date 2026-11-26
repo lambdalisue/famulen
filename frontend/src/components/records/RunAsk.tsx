@@ -1,6 +1,6 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 import { SessionAsk } from "~/components/ApprovalCard";
-import { Button } from "~/components/ui";
+import { Button, SendTogether } from "~/components/ui";
 import type { ApprovalAnswer } from "~/gen/famulen/v1/console_pb";
 import type { RunQuestion } from "~/gen/famulen/v1/workers_pb";
 import { act } from "~/lib/act";
@@ -8,41 +8,35 @@ import { api } from "~/lib/api";
 import type { WorkerRun } from "~/lib/workers";
 
 function Ask(props: { run: bigint; question: RunQuestion; ticket: bigint }) {
-  const [busy, setBusy] = createSignal(false);
-  const once = async (run: () => Promise<unknown>, done: string) => {
-    if (busy()) return;
-    setBusy(true);
-    await act(run, done);
-    setBusy(false);
-  };
   const about = () => ({ run: props.run, question: props.question.id });
   const answer = (given: ApprovalAnswer, replies: string[] = []) =>
-    void once(() => api.workers.answerRun({ ...about(), answer: given, replies }), "答えを届けた");
+    act(() => api.workers.answerRun({ ...about(), answer: given, replies }), "答えを届けた");
   return (
-    <div class="approval asked-in" role="group" aria-label="セッションの問い">
-      <div class="row">
-        <b class="asked-does grow">{props.question.approval?.deed}</b>
-        <Show when={!props.question.truncated}>
-          <Button
-            small
-            disabled={busy()}
-            title="会話と Slack に、同じ問いを確認として出し直す"
-            onClick={() => void once(() => api.workers.askRunAgain(about()), "もう一度尋ねた")}
-          >
-            再度聞く
-          </Button>
+    <SendTogether>
+      <div class="approval asked-in" role="group" aria-label="セッションの問い">
+        <div class="row">
+          <b class="asked-does grow">{props.question.approval?.deed}</b>
+          <Show when={!props.question.truncated}>
+            <Button
+              small
+              title="会話と Slack に、同じ問いを確認として出し直す"
+              onClick={() => act(() => api.workers.askRunAgain(about()), "もう一度尋ねた")}
+            >
+              再度聞く
+            </Button>
+          </Show>
+        </div>
+        <Show when={props.ticket > 0n}>
+          <span class="sub">確認 #{props.ticket.toString()} でも尋ねている。どちらで答えても、答えは一度だけ届く。</span>
+        </Show>
+        <Show
+          when={!props.question.truncated && props.question.approval}
+          fallback={<p class="sub">ここでは読み切れない。Adroit で答える。</p>}
+        >
+          {(approval) => <SessionAsk approval={approval()} onAnswer={answer} />}
         </Show>
       </div>
-      <Show when={props.ticket > 0n}>
-        <span class="sub">確認 #{props.ticket.toString()} でも尋ねている。どちらで答えても、答えは一度だけ届く。</span>
-      </Show>
-      <Show
-        when={!props.question.truncated && props.question.approval}
-        fallback={<p class="sub">ここでは読み切れない。Adroit で答える。</p>}
-      >
-        {(approval) => <SessionAsk approval={approval()} disabled={busy()} onAnswer={answer} />}
-      </Show>
-    </div>
+    </SendTogether>
   );
 }
 

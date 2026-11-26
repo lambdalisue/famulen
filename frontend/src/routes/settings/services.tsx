@@ -38,6 +38,7 @@ import {
   Disclosure,
   EmptyState,
   Field,
+  Form,
   Keyed,
   List,
   ListRow,
@@ -229,7 +230,7 @@ function DefinitionChanges() {
     for (const c of changes() ?? []) groups.set(c.definition, [...(groups.get(c.definition) ?? []), c]);
     return [...groups.entries()];
   };
-  const revert = (id: string) => void act(() => api.connections.revertDefinition({ id }), "一つ前に戻した");
+  const revert = (id: string) => act(() => api.connections.revertDefinition({ id }), "一つ前に戻した");
   return (
     <Show when={byDefinition().length > 0}>
       <section class="stack">
@@ -346,7 +347,7 @@ function AccountValues(props: { detail: ConnectionDetail; id: string }) {
                 if (done && v.secret) setText("");
               };
               return (
-                <form class="item" onSubmit={save}>
+                <Form class="item" onSubmit={save}>
                   <label class="grow" for={`av-${v.name}`}>
                     {v.label}
                     <Show when={v.secret}>
@@ -364,7 +365,7 @@ function AccountValues(props: { detail: ConnectionDetail; id: string }) {
                   <Button small type="submit">
                     {v.secret && v.set ? "入れ直す" : "保存"}
                   </Button>
-                </form>
+                </Form>
               );
             }}
           </For>
@@ -622,7 +623,7 @@ function ServiceDetail(props: { id: string }) {
                     variant="danger"
                     icon={icons.trash}
                     onClick={() =>
-                      void whenConfirmed(
+                      whenConfirmed(
                         `「${conn().name}」を外す`,
                         "外す",
                         async () => {
@@ -638,7 +639,7 @@ function ServiceDetail(props: { id: string }) {
                   </Button>
                 </div>
                 <Show when={!managed() && conn().transportKind === TransportKind.API}>
-                  <form class="row" onSubmit={setSecret}>
+                  <Form class="row" onSubmit={setSecret}>
                     <TextField
                       placeholder="Authorization"
                       aria-label="鍵を入れるヘッダー"
@@ -656,7 +657,7 @@ function ServiceDetail(props: { id: string }) {
                     <Button small type="submit">
                       鍵を入れる
                     </Button>
-                  </form>
+                  </Form>
                 </Show>
                 <Show when={detail()}>
                   {(d) => (

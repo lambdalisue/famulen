@@ -9,7 +9,7 @@ import { modelLimitsQuery, modelsQuery, isMetered, kindLabel, limitView } from "
 import { useOwner } from "~/lib/owner";
 import * as icons from "~/lib/icons";
 import { setView } from "~/lib/view";
-import { Button, EmptyState, IconButton, List, PageHeader, Tag, TextField, whenConfirmed } from "~/components/ui";
+import { Button, EmptyState, Form, IconButton, List, PageHeader, Tag, TextField, whenConfirmed } from "~/components/ui";
 
 /** The settings page where each role's model is chosen. */
 const ROLE_PAGES: Record<Role, string> = {
@@ -85,7 +85,7 @@ export default function Models() {
       <section class="model-groups">
         <div class="model-groups-head">
           <h2>一覧</h2>
-          <Button small icon={icons.refresh} disabled={finding()} onClick={() => void find()}>
+          <Button small icon={icons.refresh} disabled={finding()} onClick={() => find()}>
             {finding() ? "探している" : "探し直す"}
           </Button>
         </div>
@@ -196,7 +196,7 @@ function ModelRow(props: { model: Model; roles: RoleSetting[] }) {
         disabled={users().length > 0}
         title={users().length > 0 ? "使っているエージェントがあるので外せない" : "外す"}
         onClick={() =>
-          void whenConfirmed(
+          whenConfirmed(
             `モデル「${m().name}」を外す`,
             "外す",
             () => act(() => api.models.unregisterModel({ id: m().id }), "外した"),
@@ -205,7 +205,7 @@ function ModelRow(props: { model: Model; roles: RoleSetting[] }) {
         }
       />
       <Show when={replacing()}>
-        <form class="row item-more" onSubmit={replace}>
+        <Form class="row item-more" onSubmit={replace}>
           <TextField class="grow" name="api_key" type="password" autocomplete="new-password" required aria-label="新しい API キー" />
           <Button small onClick={() => setReplacing(false)}>
             やめる
@@ -213,7 +213,7 @@ function ModelRow(props: { model: Model; roles: RoleSetting[] }) {
           <Button variant="primary" small type="submit">
             入れ替える
           </Button>
-        </form>
+        </Form>
       </Show>
     </div>
   );

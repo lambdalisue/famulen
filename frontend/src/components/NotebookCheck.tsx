@@ -52,7 +52,7 @@ export default function NotebookCheck() {
           </For>
         </List>
         <div>
-          <Button onClick={() => void act(() => api.notebook.fixNotebook({}), "直した")}>決まりどおりに直す</Button>
+          <Button onClick={() => act(() => api.notebook.fixNotebook({}), "直した")}>決まりどおりに直す</Button>
         </div>
       </Show>
     </Section>

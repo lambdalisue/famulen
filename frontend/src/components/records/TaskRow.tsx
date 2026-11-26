@@ -1,5 +1,5 @@
 import { Show } from "solid-js";
-import { Icon, ListRow, Tag } from "~/components/ui";
+import { createPress, Icon, ListRow, Tag } from "~/components/ui";
 import { act } from "~/lib/act";
 import { api } from "~/lib/api";
 import { dateText, daysLeft, nearness } from "~/lib/dates";
@@ -19,12 +19,15 @@ export function finish(t: Rec) {
 /** The box that finishes a task. */
 function Check(props: { task: Rec }) {
   const over = () => isOver(props.task);
+  const press = createPress({ onClick: () => finish(props.task) });
   return (
     <button
       type="button"
       class={`rec-check${over() ? " on" : ""}`}
       aria-label={`${props.task.title}${over() ? "を戻す" : "を済にする"}`}
-      onClick={() => void finish(props.task)}
+      disabled={press.disabled()}
+      aria-busy={press.busy()}
+      onClick={press.onClick}
     >
       <Icon svg={icons.check} size={13} />
     </button>
@@ -51,6 +54,9 @@ function Assignee(props: { task: Rec }) {
   const owner = useOwner();
   const t = () => props.task;
   const aides = () => valueOf(t(), "Assignee") === SECRETARY;
+  const press = createPress({
+    onClick: () => put(t(), "Assignee", aides() ? OWNER : SECRETARY, aides() ? "自分でやる" : `${owner.aide()}に任せた`),
+  });
   return (
     <Show when={valueOf(t(), "Assignee") !== WORKER} fallback={<Tag>{assigneeOf(t(), owner.aide())}</Tag>}>
       <button
@@ -58,7 +64,9 @@ function Assignee(props: { task: Rec }) {
         class={`tag${aides() ? " aide" : ""}`}
         aria-label={aides() ? "自分でやる" : "任せる"}
         title={aides() ? "自分でやる" : `${owner.aide()}に任せる`}
-        onClick={() => void put(t(), "Assignee", aides() ? OWNER : SECRETARY, aides() ? "自分でやる" : `${owner.aide()}に任せた`)}
+        disabled={press.disabled()}
+        aria-busy={press.busy()}
+        onClick={press.onClick}
       >
         {assigneeOf(t(), owner.aide())}
       </button>

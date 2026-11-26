@@ -1,9 +1,11 @@
 import { createSignal, For, Show } from "solid-js";
 import type { ApprovalQuestion } from "~/gen/famulen/v1/console_pb";
-import { Button, TextField } from "~/components/ui";
+import { Button, createPress, TextField, useSending } from "~/components/ui";
 
 /** Questions the owner answers by choosing or in their own words. */
-export default function Questions(props: { questions: ApprovalQuestion[]; onAnswer: (replies: string[]) => void }) {
+export default function Questions(props: { questions: ApprovalQuestion[]; onAnswer: (replies: string[]) => unknown }) {
+  const group = useSending();
+  const send = (answer: () => unknown) => group.sending.run(answer, group.hold);
   const [chosen, setChosen] = createSignal<string[][]>([]);
   const [words, setWords] = createSignal<string[]>([]);
   const quick = () => props.questions.length === 1 && !props.questions[0]?.several;
@@ -15,10 +17,7 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
   const reply = (i: number) => words()[i]?.trim() || (chosen()[i] ?? []).join(", ");
   const replies = () => props.questions.map((_, i) => reply(i));
   const choose = (i: number, q: ApprovalQuestion, label: string) => {
-    if (quick()) {
-      props.onAnswer([label]);
-      return;
-    }
+    if (quick()) return props.onAnswer([label]);
     const now = chosen()[i] ?? [];
     const next = !q.several ? [label] : now.includes(label) ? now.filter((l) => l !== label) : [...now, label];
     setChosen((all) => put(all, i, next));
@@ -28,7 +27,7 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
       class="questions"
       onSubmit={(e) => {
         e.preventDefault();
-        if (replies().every((r) => r)) props.onAnswer(replies());
+        if (replies().every((r) => r)) send(() => props.onAnswer(replies()));
       }}
     >
       <For each={props.questions}>
@@ -37,22 +36,27 @@ export default function Questions(props: { questions: ApprovalQuestion[]; onAnsw
             <b>{q.question}</b>
             <div class="question-choices">
               <For each={q.choices}>
-                {(c) => (
-                  <button
-                    type="button"
-                    class="question-choice"
-                    classList={{ on: (chosen()[i()] ?? []).includes(c.label) }}
-                    aria-label={c.label}
-                    aria-description={c.description || undefined}
-                    aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)}
-                    onClick={() => choose(i(), q, c.label)}
-                  >
-                    <b>{c.label}</b>
-                    <Show when={c.description}>
-                      <span>{c.description}</span>
-                    </Show>
-                  </button>
-                )}
+                {(c) => {
+                  const press = createPress({ onClick: () => choose(i(), q, c.label) });
+                  return (
+                    <button
+                      type="button"
+                      class="question-choice"
+                      classList={{ on: (chosen()[i()] ?? []).includes(c.label) }}
+                      aria-label={c.label}
+                      aria-description={c.description || undefined}
+                      aria-pressed={quick() ? undefined : (chosen()[i()] ?? []).includes(c.label)}
+                      disabled={press.disabled()}
+                      aria-busy={press.busy()}
+                      onClick={press.onClick}
+                    >
+                      <b>{c.label}</b>
+                      <Show when={c.description}>
+                        <span>{c.description}</span>
+                      </Show>
+                    </button>
+                  );
+                }}
               </For>
             </div>
             <TextField

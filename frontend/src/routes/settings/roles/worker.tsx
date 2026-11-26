@@ -18,6 +18,7 @@ import {
   DialogActions,
   EmptyState,
   Field,
+  Form,
   IconButton,
   LinkButton,
   List,
@@ -117,7 +118,7 @@ function FinishDialog(props: {
   };
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange} title={props.was ? "仕上げを直す" : "仕上げを足す"} size="wide">
-      <form class="stack" onSubmit={submit}>
+      <Form class="stack" onSubmit={submit}>
         <Field label="リポジトリ" hint="クローンした場所によらず、このリポジトリの仕事に使う。空なら、ほかのどの仕事にも使う。">
           <TextField
             class="mono"
@@ -131,7 +132,7 @@ function FinishDialog(props: {
           <TextArea rows="10" required value={steps()} placeholder={EXAMPLE} onInput={(e) => setSteps(e.currentTarget.value)} />
         </Field>
         <DialogActions submit="保存" disabled={!steps().trim()} />
-      </form>
+      </Form>
     </Dialog>
   );
 }
@@ -200,7 +201,7 @@ function Finishes(props: { settings: WorkerSettings }) {
                       plain
                       icon={f().bundled ? icons.refresh : icons.trash}
                       label={`「${nameOf(f())}」の仕上げを${f().bundled ? "既定に戻す" : "消す"}`}
-                      onClick={() => void remove(f())}
+                      onClick={() => remove(f())}
                     />
                   </Show>
                   <IconButton
@@ -252,7 +253,7 @@ function Tidying() {
       label="作業場所の片づけ"
       note="終わった仕事の作業場所と、仕事の名が付いた使い捨ての VM は、セッションを閉じたあと、何も失わないと確かめられたものからひとりでに片づく。ここでは、何が片づくかを見て、いま片づけられる。"
       action={
-        <Button small icon={icons.refresh} disabled={busy()} onClick={() => void preview()}>
+        <Button small icon={icons.refresh} disabled={busy()} onClick={() => preview()}>
           {busy() ? "確かめている" : "何が片づくか見る"}
         </Button>
       }
@@ -284,7 +285,7 @@ function Tidying() {
               </For>
             </List>
             <Show when={removable().length}>
-              <Button icon={icons.trash} disabled={busy()} onClick={() => void tidy()}>
+              <Button icon={icons.trash} disabled={busy()} onClick={() => tidy()}>
                 いま片づける
               </Button>
             </Show>

@@ -170,7 +170,7 @@ export default function MemoryDetail(props: { detail: Detail; history?: boolean;
             </Show>
             <Show when={d().layer === "forgotten" && attrs().was === "pending.md"}>
               <div>
-                <Button small icon={icons.arrowBackUp} onClick={() => void restore()}>
+                <Button small icon={icons.arrowBackUp} onClick={() => restore()}>
                   保留に戻す
                 </Button>
               </div>

@@ -6,7 +6,7 @@ import { type Approval, ApprovalAnswer, type ApprovalGiven } from "~/gen/famulen
 import { chatMarkdown } from "~/lib/chat";
 import { approvalId } from "~/lib/inbox";
 import * as icons from "~/lib/icons";
-import { Button, Disclosure, Icon } from "~/components/ui";
+import { Button, Disclosure, Icon, SendTogether } from "~/components/ui";
 
 /** How the gateway names a held change to a service definition. */
 const CHANGE_DEFINITION = "definitions.change_definition";
@@ -106,7 +106,7 @@ function Given(props: { approval: Approval }) {
 }
 
 /** What a session waits for, answered where it is read. */
-export function SessionAsk(props: { approval: Approval; disabled: boolean; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
+export function SessionAsk(props: { approval: Approval; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => unknown }) {
   return (
     <Show
       when={props.approval.questions.length > 0}
@@ -114,17 +114,17 @@ export function SessionAsk(props: { approval: Approval; disabled: boolean; onAns
         <>
           <Given approval={props.approval} />
           <div class="row">
-            <Button variant="primary" small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
+            <Button variant="primary" small onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
               承認
             </Button>
-            <Button small disabled={props.disabled} onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
+            <Button small onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
               却下
             </Button>
           </div>
         </>
       }
     >
-      <fieldset class="asked-fields" disabled={props.disabled}>
+      <fieldset class="asked-fields">
         <Questions questions={props.approval.questions} onAnswer={(replies) => props.onAnswer(ApprovalAnswer.ALLOW, replies)} />
       </fieldset>
     </Show>
@@ -132,7 +132,7 @@ export function SessionAsk(props: { approval: Approval; disabled: boolean; onAns
 }
 
 /** A call that waits for the owner's answer. */
-export default function ApprovalCard(props: { approval: Approval; hidden?: boolean; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => void }) {
+export default function ApprovalCard(props: { approval: Approval; hidden?: boolean; onAnswer: (answer: ApprovalAnswer, replies?: string[]) => unknown }) {
   const r = () => props.approval;
   const change = () => (r().tool === CHANGE_DEFINITION ? proposal(r().input) : undefined);
   const asks = () => r().questions.length > 0;
@@ -144,49 +144,51 @@ export default function ApprovalCard(props: { approval: Approval; hidden?: boole
           <b>確認 #{r().id.toString()}</b> · {change()?.definition || r().place}
         </span>
       </header>
-      <div class="asked-in">
-        <b class="asked-does">{r().deed}</b>
-        <Show when={change()?.why || r().summary}>
-          {(why) => (
-            <div class="asked">
-              <Markdown text={chatMarkdown(why())} plain={why()} />
-            </div>
-          )}
-        </Show>
-        <Show
-          when={change()}
-          fallback={
-            <Show
-              when={asks()}
-              fallback={<Given approval={r()} />}
-            >
-              <Questions questions={r().questions} onAnswer={(replies) => props.onAnswer(ApprovalAnswer.ALLOW, replies)} />
+      <SendTogether hold>
+        <div class="asked-in">
+          <b class="asked-does">{r().deed}</b>
+          <Show when={change()?.why || r().summary}>
+            {(why) => (
+              <div class="asked">
+                <Markdown text={chatMarkdown(why())} plain={why()} />
+              </div>
+            )}
+          </Show>
+          <Show
+            when={change()}
+            fallback={
+              <Show
+                when={asks()}
+                fallback={<Given approval={r()} />}
+              >
+                <Questions questions={r().questions} onAnswer={(replies) => props.onAnswer(ApprovalAnswer.ALLOW, replies)} />
+              </Show>
+            }
+          >
+            {(p) => (
+              <>
+                <DefinitionDiff before={p().before} after={p().toml} />
+                <p class="sub">許すと定義に書き込み、つないでいるサービスの道具がこのとおりになる。足された書き込みの道具は、確かめてから使う。</p>
+              </>
+            )}
+          </Show>
+          <div class="row">
+            <Show when={!asks()}>
+              <Button variant="primary" small onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
+                {change() ? "許す" : "承認"}
+              </Button>
             </Show>
-          }
-        >
-          {(p) => (
-            <>
-              <DefinitionDiff before={p().before} after={p().toml} />
-              <p class="sub">許すと定義に書き込み、つないでいるサービスの道具がこのとおりになる。足された書き込みの道具は、確かめてから使う。</p>
-            </>
-          )}
-        </Show>
-        <div class="row">
-          <Show when={!asks()}>
-            <Button variant="primary" small onClick={() => props.onAnswer(ApprovalAnswer.ALLOW)}>
-              {change() ? "許す" : "承認"}
+            <Button small onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
+              {change() ? "断る" : asks() ? "ここでは答えない" : "却下"}
             </Button>
-          </Show>
-          <Button small onClick={() => props.onAnswer(ApprovalAnswer.DENY)}>
-            {change() ? "断る" : asks() ? "ここでは答えない" : "却下"}
-          </Button>
-          <Show when={!r().once && !change()}>
-            <Button small onClick={() => props.onAnswer(ApprovalAnswer.ALWAYS)}>
-              今後は常に許可
-            </Button>
-          </Show>
+            <Show when={!r().once && !change()}>
+              <Button small onClick={() => props.onAnswer(ApprovalAnswer.ALWAYS)}>
+                今後は常に許可
+              </Button>
+            </Show>
+          </div>
         </div>
-      </div>
+      </SendTogether>
     </div>
   );
 }

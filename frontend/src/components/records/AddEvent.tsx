@@ -5,7 +5,7 @@ import { api } from "~/lib/api";
 import { calendarsQuery } from "~/lib/calendar";
 import { linkTo, newWorkgroups } from "~/lib/records";
 import { workgroup } from "~/lib/workgroup";
-import { Checkbox, Dialog, DialogActions, Field, Segmented, Select, TextArea, TextField } from "~/components/ui";
+import { Checkbox, Dialog, DialogActions, Field, Form, Segmented, Select, TextArea, TextField } from "~/components/ui";
 
 /** Add an event of the notebook, or hold a time. */
 export default function AddEvent(props: { day: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -47,7 +47,7 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
       title="予定を足す"
       description="手帳に置く予定。Google のカレンダーに入れるときは、会話で頼む。"
     >
-      <form class="dialog-form" onSubmit={add}>
+      <Form class="dialog-form" onSubmit={add}>
         <Segmented
           label="予定の種類"
           items={[
@@ -97,7 +97,7 @@ export default function AddEvent(props: { day: string; open: boolean; onOpenChan
           <TextArea name="notes" placeholder="Markdown で書ける" />
         </Field>
         <DialogActions submit="足す" />
-      </form>
+      </Form>
     </Dialog>
   );
 }

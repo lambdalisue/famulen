@@ -70,7 +70,7 @@
 .question-choice:hover { border-color: var(--control); }
 .question-choice.on { border-color: var(--accent); background: var(--accent-soft); }
 .question-choice > span { font-size: var(--t-xs); color: var(--ink2); }
-.asked-fields:disabled .question-choice { opacity: .5; cursor: default; }
+.question-choice:disabled { opacity: .5; cursor: default; }
 .composer { flex: none; margin: 0 var(--s4) var(--s4); background: var(--card); border: 1px solid var(--control); border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: 8px 8px 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-2); }
 .composer .view { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--muted); min-width: 0; }

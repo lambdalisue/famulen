@@ -17,6 +17,7 @@ import {
   DialogActions,
   DialogTrigger,
   Field,
+  Form,
   Icon,
   List,
   ListRow,
@@ -55,15 +56,15 @@ const workgroupQuery = query((id: string) => api.workgroups.getWorkgroup({ id })
 const sameColor = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** The name and colour of a workgroup, as the add and edit dialogs ask them. */
-function WorkgroupForm(props: { name: string; color: string; submit: string; onSubmit: (name: string, color: string) => void }) {
+function WorkgroupForm(props: { name: string; color: string; submit: string; onSubmit: (name: string, color: string) => unknown }) {
   const [name, setName] = createSignal(props.name);
   const [color, setColor] = createSignal(props.color);
   return (
-    <form
+    <Form
       class="dialog-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (name().trim()) props.onSubmit(name().trim(), color());
+        if (name().trim()) return props.onSubmit(name().trim(), color());
       }}
     >
       <Field label="名前">
@@ -88,7 +89,7 @@ function WorkgroupForm(props: { name: string; color: string; submit: string; onS
         </div>
       </RadioGroup.Root>
       <DialogActions submit={props.submit} />
-    </form>
+    </Form>
   );
 }
 
@@ -262,7 +263,7 @@ export default function Workgroups() {
                       variant="danger"
                       icon={icons.trash}
                       onClick={() =>
-                        void whenConfirmed(
+                        whenConfirmed(
                           `「${workgroup()?.name}」を消す`,
                           "消す",
                           async () => {

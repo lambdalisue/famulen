@@ -12,6 +12,7 @@ import {
   Loading,
   PageHeader,
   Section,
+  SendTogether,
   Tag,
   whenConfirmed,
 } from "~/components/ui";
@@ -123,17 +124,17 @@ function QueueRow(props: { of: DelegatedTask; href: string; current: boolean; pl
         </>
       }
       end={
-        <>
+        <SendTogether>
           <Show when={isSeen(t())}>
             <Watch run={t().run!} title={t().title} />
           </Show>
           <Show when={t().state === "still"}>
-            <Button small onClick={() => void retry(t().task)}>
+            <Button small onClick={() => retry(t().task)}>
               並びに戻す
             </Button>
           </Show>
-          <IconButton plain icon={icons.x} label={`「${t().title}」の委託をやめる`} onClick={() => void cancel(t().task, t().title)} />
-        </>
+          <IconButton plain icon={icons.x} label={`「${t().title}」の委託をやめる`} onClick={() => cancel(t().task, t().title)} />
+        </SendTogether>
       }
     />
   );
@@ -317,9 +318,9 @@ export function Delegation(props: { task: Rec }) {
         title="委託"
         level={3}
         action={
-          <>
+          <SendTogether>
             <Show when={now()?.state === "still" || (isOver(props.task) && ended())}>
-              <Button small onClick={() => void retry(props.task.id)}>
+              <Button small onClick={() => retry(props.task.id)}>
                 並びに戻す
               </Button>
             </Show>
@@ -327,11 +328,11 @@ export function Delegation(props: { task: Rec }) {
               <Watch run={run()!} title={props.task.title} />
             </Show>
             <Show when={!!now()}>
-              <Button small onClick={() => void cancel(props.task.id, props.task.title)}>
+              <Button small onClick={() => cancel(props.task.id, props.task.title)}>
                 委託をやめる
               </Button>
             </Show>
-          </>
+          </SendTogether>
         }
       >
         <Show when={!!now()}>

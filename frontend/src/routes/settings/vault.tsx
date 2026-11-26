@@ -17,6 +17,7 @@ import {
   Disclosure,
   EmptyState,
   Field,
+  Form,
   Icon,
   IconButton,
   List,
@@ -82,7 +83,7 @@ function Description(props: { s: Secret }) {
         </button>
       }
     >
-      <form class="row vault-desc-form" onSubmit={save}>
+      <Form class="row vault-desc-form" onSubmit={save}>
         <TextField
           class="grow"
           name="description"
@@ -103,7 +104,7 @@ function Description(props: { s: Secret }) {
         <Button variant="primary" small type="submit">
           直す
         </Button>
-      </form>
+      </Form>
     </Show>
   );
 }
@@ -138,7 +139,7 @@ function Row(props: { s: Secret; tz: string }) {
               label={`${props.s.name}を消す`}
               variant="danger"
               onClick={() =>
-                void whenConfirmed(
+                whenConfirmed(
                   `「${props.s.name}」を消す`,
                   "消す",
                   () => act(() => api.vault.deleteSecret({ id: props.s.name }), "消した"),
@@ -150,7 +151,7 @@ function Row(props: { s: Secret; tz: string }) {
         </div>
       </Show>
       <Show when={mode() === "replace"}>
-        <form class="row vault-wide" onSubmit={replace}>
+        <Form class="row vault-wide" onSubmit={replace}>
           <TextField
             class="grow"
             name="value"
@@ -165,7 +166,7 @@ function Row(props: { s: Secret; tz: string }) {
           <Button variant="primary" small type="submit">
             置き換える
           </Button>
-        </form>
+        </Form>
       </Show>
     </div>
   );
@@ -244,7 +245,7 @@ export default function Vault() {
               <EmptyState>まだない</EmptyState>
             </Show>
           </List>
-          <form class="card vault-add" onSubmit={add}>
+          <Form class="card vault-add" onSubmit={add}>
             <Field label="名前">
               <TextField class="mono" name="name" required placeholder="bank-password" />
             </Field>
@@ -257,7 +258,7 @@ export default function Vault() {
             <Button variant="primary" icon={icons.plus} type="submit">
               入れる
             </Button>
-          </form>
+          </Form>
         </section>
         <Show when={automatic().length > 0}>
           <Disclosure

@@ -1,5 +1,5 @@
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
-import { call, detail, expectView, letOn, record, row, sayImage, visit, whollyOnScreen } from "./support";
+import { call, detail, expectView, holdBack, letOn, record, row, sayImage, visit, whollyOnScreen } from "./support";
 
 function tabbar(page: Page) {
   return page.locator("#m-tabbar");
@@ -977,4 +977,22 @@ test("a run is read on a phone, its output and its plan one at a time", async ({
   await expect(output).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("phone-plan.png") });
   letOn("written");
+});
+
+test("an answer tapped again and again while it is sent goes once", async ({ page, request }) => {
+  await call(request, "ConsoleService", "Send", { text: "指で二度押す話 e2e-bash", workgroup: "all" });
+  await visit(page, "/", /^ホーム/);
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  const card = page.getByTestId("approval");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  const sent = await holdBack(page, "AnswerApproval");
+  const deny = card.getByRole("button", { name: "却下" });
+  await deny.tap();
+  await expect(deny).toBeDisabled();
+  await expect(card.getByRole("button", { name: "承認", exact: true })).toBeDisabled();
+  await deny.tap({ force: true });
+  await sent.arrived(1);
+  sent.letGo();
+  await expect(card).toHaveCount(0);
+  expect(sent.calls).toBe(1);
 });
