@@ -30,8 +30,10 @@ pub struct Choice {
     pub description: String,
 }
 
-/// How much of what a program prints is kept.
+/// How much of what a program prints is kept, and how much for a caller that
+/// reads it whole.
 const KEPT: usize = 64 * 1024;
+const WHOLE: usize = 16 * 1024 * 1024;
 
 /// The arguments `tool` runs its program with, filled from `ctx`.
 fn arguments(
@@ -68,8 +70,9 @@ fn arguments(
     Ok(out)
 }
 
-fn kept(bytes: &[u8]) -> String {
-    let cut = &bytes[..bytes.len().min(KEPT)];
+fn kept(bytes: &[u8], whole: bool) -> String {
+    let most = if whole { WHOLE } else { KEPT };
+    let cut = &bytes[..bytes.len().min(most)];
     String::from_utf8_lossy(cut).trim().to_owned()
 }
 
@@ -131,7 +134,7 @@ impl Gateway {
             return Ok(None);
         };
         let read = self
-            .call_command(&c, &def, &each.reads, args.clone())
+            .call_command(&c, &def, &each.reads, args.clone(), false)
             .await?;
         anyhow::ensure!(!read.is_error, "{}", read.text);
         let answer: Value = serde_json::from_str(&read.text)?;
@@ -182,7 +185,9 @@ impl Gateway {
         if rejected && each.on_reject.is_none() {
             return Ok(());
         }
-        let result = self.run_command(&c, &def, tool, args, rejected).await?;
+        let result = self
+            .run_command(&c, &def, tool, args, rejected, false)
+            .await?;
         anyhow::ensure!(!result.is_error, "{}", result.text);
         Ok(())
     }
@@ -224,8 +229,10 @@ impl Gateway {
         def: &Definition,
         tool: &str,
         args: Value,
+        whole: bool,
     ) -> anyhow::Result<ToolResult> {
-        self.run_command(connection, def, tool, args, false).await
+        self.run_command(connection, def, tool, args, false, whole)
+            .await
     }
 
     /// Run a command tool, or with `rejected` what it runs when the owner
@@ -237,6 +244,7 @@ impl Gateway {
         tool: &str,
         args: Value,
         rejected: bool,
+        whole: bool,
     ) -> anyhow::Result<ToolResult> {
         let transport = def
             .transport
@@ -291,10 +299,15 @@ impl Gateway {
             .await
             .map_err(|_| anyhow::anyhow!("{program} did not end within {} s", limit.as_secs()))?
             .map_err(|error| anyhow::anyhow!("cannot run {program}: {error}"))?;
+        // Cut, what is read as data would not read as what it is.
+        anyhow::ensure!(
+            !whole || output.stdout.len() <= WHOLE,
+            "{program} printed more than the {WHOLE} bytes that are kept"
+        );
         let failed = !output.status.success();
-        let mut text = kept(&output.stdout);
+        let mut text = kept(&output.stdout, whole);
         if failed || text.is_empty() {
-            let said = kept(&output.stderr);
+            let said = kept(&output.stderr, whole);
             if !said.is_empty() {
                 text = [text, said].join("\n").trim().to_owned();
             }
@@ -307,6 +320,7 @@ impl Gateway {
 mod tests {
     use super::*;
     use crate::connections::Connections;
+    use crate::gateway::{Call, OWNER, Outcome};
     use crate::permissions::{AutoCourse, auto_course};
     use crate::store::Store;
 
@@ -336,6 +350,11 @@ name = "copy"
 description = "Say what is read back."
 args = ["-pe", "1"]
 stdin = "{args.text}"
+
+[[commands]]
+name = "flood"
+description = "Print more than is ever kept."
+args = ["-e", "print 'x' x (17 * 1024 * 1024)"]
 
 [[commands]]
 name = "hang"
@@ -400,6 +419,29 @@ args = ["-e", "sleep 30"]
         let result = g.call_as_owner(&c, "copy", json!({ "text": text })).await;
 
         assert!(result.unwrap().text.starts_with("a line of what it reads"));
+    }
+
+    #[tokio::test]
+    async fn what_a_command_prints_is_cut_unless_its_caller_reads_it_whole() {
+        let (g, c) = gateway();
+        let text = "x".repeat(KEPT * 2);
+        let call = |whole| Call {
+            whole,
+            ..Call::new(OWNER, &c.id, "copy", json!({ "text": text }))
+        };
+        let read = async |call| match g.call(&call).await.unwrap() {
+            Outcome::Done(result) => result.text.len(),
+            Outcome::Held(_) => panic!("held"),
+        };
+
+        assert_eq!(read(call(false)).await, KEPT);
+        assert_eq!(read(call(true)).await, text.len());
+        let flood = Call {
+            whole: true,
+            ..Call::new(OWNER, &c.id, "flood", json!({}))
+        };
+        let error = g.call(&flood).await.unwrap_err();
+        assert!(error.to_string().contains("more than"), "{error}");
     }
 
     #[tokio::test]

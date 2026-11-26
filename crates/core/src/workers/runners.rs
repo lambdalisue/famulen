@@ -33,8 +33,12 @@ pub enum Looked {
     Working,
     /// It waits for the owner.
     Waiting,
+    /// Its turn ended with tasks of its plan unfinished.
+    Idle,
     Done(String),
     Failed(String),
+    /// It was closed before its plan was finished, saying this.
+    Unsure(String),
     /// A passing fault of the model's service cut its turn off.
     Stumbled(String),
     /// It is gone with the process that held it.

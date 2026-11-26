@@ -1,6 +1,8 @@
 #!/usr/bin/env perl
 # Stands in for Adroit: a session waits on the owner as soon as it is started,
-# for a permission when its prompt says so, and is done once it is answered.
+# for a permission when its prompt says so, and is done once it is answered:
+# its turn ends with every task of its plan completed, or, when its prompt
+# says so, it is closed with its plan unfinished.
 use strict;
 use warnings;
 
@@ -20,6 +22,7 @@ if ($command eq 'start') {
     my $input = $args[-1] =~ /e2e-permission/
         ? '"kind":"permission","tool":"Bash","input":{"command":"rm -rf build"}'
         : '"kind":"question","tool":"AskUserQuestion","input":{"questions":[{"question":"このセッションを閉じますか？","options":[{"label":"閉じる"},{"label":"残す"}]}]}';
+    put("$id.early", '') if $args[-1] =~ /e2e-closed-early/;
     put($id, qq({"id":"$id","state":"waiting","question":{"id":"q-$id","truncated":false,$input},"turns":[],"undelivered":0}));
     print qq({"id":"$id"});
 } elsif ($command eq 'show') {
@@ -28,7 +31,8 @@ if ($command eq 'start') {
 } elsif ($command eq 'answer') {
     my $id = shift @args;
     my $said = join ' ', grep { !/^--(question|json)$/ && $_ ne "q-$id" } @args;
-    put($id, qq({"id":"$id","state":"done","turns":[{"turn":1,"prompt":"p","reply":"答え: $said"}],"undelivered":0}));
+    my ($state, $status) = -e "$dir/$id.early" ? ('ended', 'pending') : ('done', 'completed');
+    put($id, qq({"id":"$id","state":"$state","turns":[{"turn":1,"prompt":"p","reply":"答え: $said"}],"timeline":[{"id":"g","parent":null,"title":"答える","status":"$status"}],"undelivered":0}));
     print '{}';
 } elsif ($command eq 'watch') {
     sleep 3600;

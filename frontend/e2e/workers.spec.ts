@@ -358,6 +358,16 @@ test.describe("a session that waits on the owner", () => {
     await detail(page).getByRole("button", { name: "残したもの" }).click();
     await left(page, "答え: --allow");
   });
+
+  test("closed before its plan is finished, is neither done nor failed but left to be checked", async ({ page, request }) => {
+    test.setTimeout(150_000);
+    const { ask, task } = await waiting(page, request, "やりかけの仕事", "e2e-closed-early");
+    await ask.getByRole("button", { name: "閉じる", exact: true }).click();
+    await left(page, "済んだか分からない");
+    await expect(detail(page).locator(".rec-log")).toContainText("済んだかは分からない");
+    const got = await call<{ fields?: { name: string; value: string }[] }>(request, "RecordService", "GetRecord", { kind: "tasks", id: task });
+    expect(got.fields?.find((f) => f.name === "Status")?.value).toBe("waiting");
+  });
 });
 
 test("a worker's run is followed as it writes, each tool in its own part, and its plan as a tree and over time", async ({ page, request }) => {

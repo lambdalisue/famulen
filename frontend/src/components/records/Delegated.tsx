@@ -53,7 +53,7 @@ const cancel = (id: string, title: string) =>
   );
 
 /** Whether a task has a run under way that can be watched. */
-const isSeen = (t: DelegatedTask) => !!t.run && ["running", "waiting", "unreachable"].includes(t.state);
+const isSeen = (t: DelegatedTask) => !!t.run && ["running", "waiting", "idle", "unreachable"].includes(t.state);
 
 function Watch(props: { run: WorkerRun; title: string }) {
   return (

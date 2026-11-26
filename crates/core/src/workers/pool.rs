@@ -288,7 +288,10 @@ impl Pool {
                 run.state == State::Ended
                     && run.order.runner == Runner::Adroit
                     && !run.session.is_empty()
-                    && matches!(run.outcome, Some(Outcome::Done | Outcome::Failed))
+                    && matches!(
+                        run.outcome,
+                        Some(Outcome::Done | Outcome::Failed | Outcome::Unsure)
+                    )
                     && tasks
                         .get(&run.task)
                         .is_some_and(|t| is_delegated(t) && can_resume(t))
@@ -567,10 +570,13 @@ impl Pool {
             }
             Ok(Looked::Working) if run.state == State::Running => return Ok(false),
             Ok(Looked::Waiting) if run.state == State::Waiting => return Ok(false),
+            Ok(Looked::Idle) if run.state == State::Idle => return Ok(false),
             Ok(Looked::Working) => self.app.workers.runs.stand(run.id, State::Running)?,
             Ok(Looked::Waiting) => self.app.workers.runs.stand(run.id, State::Waiting)?,
+            Ok(Looked::Idle) => self.app.workers.runs.stand(run.id, State::Idle)?,
             Ok(Looked::Done(result)) => self.end(run, Outcome::Done, &result)?,
             Ok(Looked::Failed(why)) => self.end(run, Outcome::Failed, &why)?,
+            Ok(Looked::Unsure(why)) => self.end(run, Outcome::Unsure, &why)?,
             Ok(Looked::Lost) if run.attempt < MOST_ATTEMPTS => {
                 self.end(run, Outcome::Interrupted, "It was cut off by a restart.")?;
             }
@@ -736,6 +742,11 @@ fn note(run: &Run, outcome: Outcome, again: u32) -> TaskNote {
             Some("waiting"),
             Some("うまくいかなかった委託をどうするか"),
         ),
+        Outcome::Unsure => (
+            format!("委託 #{id} のセッションが閉じた。仕事が済んだかは分からない{session}"),
+            Some("waiting"),
+            Some("済んだか確かめる委託"),
+        ),
         Outcome::Refused => (
             format!("委託 #{id} は、始めることが承認されなかった"),
             Some("waiting"),
@@ -779,6 +790,9 @@ fn told(
         }
         Outcome::Failed => {
             "failed, and its Status is waiting. Tell the owner, or put right what stood in its way and call retry_delegated, which starts it anew. Where an Adroit session is named, you may ask that session to go on instead: the run is then under way again."
+        }
+        Outcome::Unsure => {
+            "ended, but it cannot be told whether its work was done: its session was closed before every task of its plan was completed, or it kept no plan. Its Status is waiting. Check what was done against the request (what it left below, its session, the repository) and tell the owner what you found. If work remains, add it to its notes and call retry_delegated, which starts it anew."
         }
         Outcome::Refused => {
             "was not started: the owner did not approve it. Its Status is waiting. Do not delegate it again unless the owner says so."

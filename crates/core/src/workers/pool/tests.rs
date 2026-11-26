@@ -303,6 +303,76 @@ async fn a_delegated_task_is_run_marked_done_and_told_to_the_secretary_once() {
 }
 
 #[tokio::test]
+async fn a_turn_that_ends_with_its_plan_unfinished_neither_ends_the_task_nor_holds_a_slot() {
+    let b = bench("pool-idle", Fake::default());
+    b.slots(1);
+    let id = b.adroit("直す");
+    b.adroit("次");
+    b.pool.tick().await.unwrap();
+    assert_eq!(b.fake.begun(), ["直す"]);
+
+    b.turn_ends("s1", "直す", Looked::Idle).await;
+    assert_eq!(b.runs()[0].state, State::Idle);
+    assert_eq!(b.status(&id), "in_progress");
+    assert!(b.told().is_empty());
+    assert_eq!(
+        b.fake.begun(),
+        ["直す", "次"],
+        "it waits on someone, as one asking does"
+    );
+
+    b.turn_ends("s1", "直す", Looked::Working).await;
+    assert_eq!(b.runs()[0].state, State::Running);
+    b.turn_ends("s1", "直す", Looked::Done("済んだ".into()))
+        .await;
+    assert_eq!(b.status(&id), "done");
+    let statuses: Vec<String> = b.log(&id);
+    assert_eq!(
+        statuses.iter().filter(|l| l.contains("委託 #1")).count(),
+        2,
+        "begun and done, nothing in between: {statuses:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_session_closed_before_its_plan_was_finished_is_left_for_someone_to_check() {
+    let b = bench("pool-unsure", Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    b.turn_ends(
+        "s1",
+        "直す",
+        Looked::Unsure("closed early\n---\nまず調べます。".into()),
+    )
+    .await;
+
+    let run = &b.runs()[0];
+    assert_eq!(run.outcome, Some(Outcome::Unsure));
+    assert_eq!(b.status(&id), "waiting");
+    assert_eq!(
+        b.task(&id).body.value("Waiting for").as_deref(),
+        Some("済んだか確かめる委託")
+    );
+    assert!(
+        b.log(&id)
+            .iter()
+            .any(|l| l.contains("済んだかは分からない")),
+        "{:?}",
+        b.log(&id)
+    );
+    let told = b.told();
+    assert_eq!(told.len(), 1);
+    assert!(told[0].text.contains("cannot be told"), "{}", told[0].text);
+    assert!(told[0].text.contains("まず調べます。"), "{}", told[0].text);
+    b.pool.tick().await.unwrap();
+    assert_eq!(b.fake.begun(), ["直す"], "not started again by itself");
+
+    b.go_on(&["直す"]).await;
+    assert_eq!(b.runs()[0].state, State::Running, "its session went on");
+    assert_eq!(b.status(&id), "in_progress");
+}
+
+#[tokio::test]
 async fn tasks_not_delegated_and_tasks_that_do_not_say_how_are_left_alone() {
     let b = bench("pool-left", Fake::default());
     for assignee in ["owner", "secretary"] {
@@ -1164,7 +1234,8 @@ async fn a_start_in_adroit_is_judged_and_held_for_the_owner_with_what_it_would_d
         (WORKER, "start_session")
     );
     assert_eq!(held[0].shown["dir"], at("/src/api"));
-    assert_eq!(held[0].shown["prompt"], "Do it.");
+    let prompt = held[0].shown["prompt"].as_str().unwrap();
+    assert!(prompt.starts_with("Do it.\n"), "{prompt}");
     let code = app.records.code(TASKS, &task.id).unwrap();
     let name = held[0].shown["name"].as_str().unwrap();
     assert!(name.contains(&code) && name.contains("直す"), "{name}");
@@ -2001,6 +2072,7 @@ async fn a_session_in_adroit_is_asked_to_go_on_unless_forbidden_and_seen_going_o
             "id": "s1", "state": state, "message": "API Error: 529 overloaded_error",
             "last_active_ms": began * 1000,
             "turns": [{ "turn": 1, "prompt": "p", "reply": "ok", "began_ms": began * 1000 }],
+            "timeline": [{ "id": "g", "parent": null, "status": "completed" }],
             "undelivered": 0,
         });
         std::fs::write(&shows, session.to_string()).unwrap();
@@ -2095,6 +2167,53 @@ async fn a_session_in_adroit_is_asked_to_go_on_unless_forbidden_and_seen_going_o
     let told = app.store.recent_inputs(0, 50).unwrap().len();
     anew.tick().await.unwrap();
     assert_eq!(app.store.recent_inputs(0, 50).unwrap().len(), told);
+}
+
+/// Adroit that lists more ended sessions than a command's output is cut to,
+/// with the one a run started last.
+const LONG_LISTED_ADROIT: &str = r#"
+format = 1
+id = "adroit"
+name = "Adroit"
+
+[transport.command]
+program = "perl"
+
+[[commands]]
+name = "list_sessions"
+description = "List them."
+args = ["-e", 'print "[", join(",", (map {{ qq({{"id":"old$_","name":"task-y-run$_ 前の仕事","state":"ended"}}) }} 1 .. 2000), q({{"id":"s9","name":"task-x-run1 直す","state":"ended"}})), "]"']
+read_only = true
+
+[permissions]
+list_sessions = "allow"
+"#;
+
+#[tokio::test]
+async fn a_session_whose_start_was_not_told_is_found_however_many_sessions_ended_before() {
+    let dir = TempDir::new("pool-real-finds");
+    let services = dir.path().join("gateway/services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(services.join("adroit.toml"), LONG_LISTED_ADROIT).unwrap();
+    let app = crate::runtime::testing::app(dir.path());
+    app.gateway
+        .add_defined("adroit", Default::default(), None)
+        .unwrap();
+    app.gateway.read_tools("adroit").await.unwrap();
+    let directory = at("/src/api");
+    let order = [("Runner", "adroit"), ("Directory", directory.as_str())];
+    let task = app
+        .records
+        .add(Writer::Secretary, TASKS, delegated("直す", &order))
+        .unwrap()
+        .id;
+    let order = Order::of(&app.records.need(TASKS, &task).unwrap(), "task-x").unwrap();
+    let run = app.workers.runs.begin(&task, &order).unwrap();
+    app.workers.runs.through(run.id, "adroit").unwrap();
+    let run = app.workers.runs.get(run.id).unwrap().unwrap();
+
+    let found = crate::workers::adroit::find(&app, &run).await.unwrap();
+    assert_eq!(found, Some(Began::Running("s9".into())));
 }
 
 #[cfg(unix)]

@@ -79,9 +79,11 @@ message WorkerRun {
   // adroit or agent.
   string runner = 5;
   // starting, asking (for the owner's approval), running, waiting (the
-  // session waits for the owner), unreachable, ending or ended.
+  // session waits for the owner), idle (the session ended its turn with its
+  // plan unfinished), unreachable, ending or ended.
   string state = 6;
-  // Once it ended: done, failed, refused, stopped or interrupted.
+  // Once it ended: done, failed, unsure (its session was closed before its
+  // plan was finished), refused, stopped or interrupted.
   string outcome = 7;
   int32 attempt = 8;
   // The Adroit session's id.
@@ -306,8 +308,8 @@ message DelegatedTask {
   // start has not come), blocked, unfit (it cannot be run as it is written),
   // asking (for the owner's approval), approved (and no slot is free), retrying (its start failed
   // and is tried again), unreachable (Adroit cannot be asked of it), running, waiting (its session
-  // waits for the owner) or still (it is not asked to run: its Status is not
-  // pending).
+  // waits for the owner), idle (its session ended its turn with its plan
+  // unfinished) or still (it is not asked to run: its Status is not pending).
   string state = 5;
   // Why it is unfit.
   string why = 6;

@@ -17,8 +17,8 @@ const NEAR = 60;
 const TICK_MS = 1000;
 
 function tone(r: WorkerRun) {
-  if (r.state === "ended") return isBadOutcome(r.outcome) ? "danger" : "ok";
-  if (r.state === "asking" || r.state === "waiting") return "warn";
+  if (r.state === "ended") return isBadOutcome(r.outcome) ? "danger" : r.outcome === "unsure" ? "warn" : "ok";
+  if (["asking", "waiting", "idle"].includes(r.state)) return "warn";
   return r.state === "unreachable" ? "danger" : "aide";
 }
 

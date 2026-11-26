@@ -71,6 +71,7 @@ fn standing(placed: Placed) -> (&'static str, String) {
         Standing::Approved => "approved",
         Standing::Running => "running",
         Standing::Waiting => "waiting",
+        Standing::Idle => "idle",
         Standing::Retrying => "retrying",
         Standing::Unreachable => "unreachable",
         Standing::Still => "still",
