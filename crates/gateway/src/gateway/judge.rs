@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 
 use crate::log::{Log, LogEntry};
 use crate::permissions::{AutoCourse, Marks, Permission, Permissions, auto_course};
+use crate::store::now;
 
 use super::Gateway;
 
@@ -192,13 +193,53 @@ impl Gateway {
         Ok(())
     }
 
-    /// Take back all that was granted to `actor`.
-    pub fn revoke(&self, actor: impl AsRef<str>) -> anyhow::Result<()> {
+    /// Let what was granted to `actor` hold only before `until`, in seconds
+    /// since the epoch.
+    pub fn expire(&self, actor: impl AsRef<str>, until: i64) -> anyhow::Result<()> {
         self.store.conn().execute(
-            "DELETE FROM actor_grants WHERE actor = ?1",
-            params![actor.as_ref()],
+            "INSERT INTO actor_deadlines (actor, until) VALUES (?1, ?2)
+             ON CONFLICT (actor) DO UPDATE SET until = excluded.until",
+            params![actor.as_ref(), until],
         )?;
         Ok(())
+    }
+
+    /// `actor` is done with: take back all that was granted to it, what it
+    /// still waits for the owner on, and the approvals it has not used. The
+    /// ids of the tickets that waited.
+    pub fn revoke(&self, actor: impl AsRef<str>) -> anyhow::Result<Vec<i64>> {
+        let actor = actor.as_ref();
+        self.store
+            .conn()
+            .execute("DELETE FROM actor_grants WHERE actor = ?1", params![actor])?;
+        self.store.conn().execute(
+            "DELETE FROM actor_deadlines WHERE actor = ?1",
+            params![actor],
+        )?;
+        let mut withdrawn = Vec::new();
+        for ticket in self.tickets_of(actor)? {
+            self.drop_pass(ticket.id)?;
+            if self.withdraw_ticket(ticket.id)? {
+                withdrawn.push(ticket.id);
+            }
+        }
+        Ok(withdrawn)
+    }
+
+    /// Whether anything is granted to `actor` now.
+    pub fn holds_any(&self, actor: impl AsRef<str>) -> anyhow::Result<bool> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT 1 FROM actor_grants WHERE actor = ?1
+                   AND NOT EXISTS (SELECT 1 FROM actor_deadlines
+                                   WHERE actor = ?1 AND until <= ?2)",
+                params![actor.as_ref(), now()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     fn granted(&self, call: &Call) -> anyhow::Result<bool> {
@@ -210,8 +251,10 @@ impl Gateway {
             .conn()
             .query_row(
                 "SELECT 1 FROM actor_grants WHERE actor = ?1
-                   AND connection IN (?2, '*') AND tool IN (?3, '*')",
-                params![call.actor, call.connection, call.tool],
+                   AND connection IN (?2, '*') AND tool IN (?3, '*')
+                   AND NOT EXISTS (SELECT 1 FROM actor_deadlines
+                                   WHERE actor = ?1 AND until <= ?4)",
+                params![call.actor, call.connection, call.tool, now()],
                 |_| Ok(()),
             )
             .optional()?

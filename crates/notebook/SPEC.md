@@ -284,9 +284,12 @@ sections:
 | `Agent`・`Agent model` | セッションのエージェントとモデル。Claude Code でモデルを書かなければ手代のモデルで動くので、重い仕事にだけ `opus` などを書く |
 | `Permissions` | `default` か `read_only` |
 | `Tools` | `agent` に渡す道具の名前の並び |
-| `Files` | `agent` に読ませる手帳のファイルの並び。手帳の根からのパスか wiki リンク |
+| `Files` | `agent` と `direct` に読ませる手帳のファイルの並び。手帳の根からのパスか wiki リンク |
+| `Wait` | `yes` なら、`agent` と `direct` は確認の要る呼び出しで持ち主の答えを待つ。書かなければ待たない |
+| `Notebook` | `agent` と `direct` が手帳を読む範囲。`none`・`excerpt`（頼みに書き添えた抜き書きだけ）・`named`（`Files` のファイル。書かなければこれ）・`search`（`Search` の記録も）・`propose`（書き込みの案も）。後のものは前のものを含む |
+| `Search` | 検索させる記録の種類の並び。`Notebook` が `search` か `propose` のときに書き、`search` では要る |
 
-`Directory`・`Tools`・`Files` は `agent` に、`Connection`・`Directory`・`Worktree`・`Base`・`Agent`・`Agent model`・`Permissions` は `adroit` に効く。`direct` には `Directory`・`Base`（jj の revset。書かなければ本流）・`Tools` が効き、`Agent` は書かないか `claude`。
+`Directory`・`Tools`・`Files`・`Wait`・`Notebook`・`Search` は `agent` に、`Connection`・`Directory`・`Worktree`・`Base`・`Agent`・`Agent model`・`Permissions` は `adroit` に効く。`direct` には `Directory`・`Base`（jj の revset。書かなければ本流）・`Tools`・`Files`・`Wait`・`Notebook`・`Search` が効き、`Agent` は書かないか `claude`。`adroit` には `Wait`・`Notebook`・`Search` を書けない。`Files` は `Notebook` が `named` 以上のときに書く。
 
 ```markdown
 # ログインの失敗を直す

@@ -514,6 +514,12 @@ pub(super) fn tickets_key(run: i64) -> String {
     format!("worker.tickets.{run}")
 }
 
+/// The requests of the gateway a run waited on between turns, by the record
+/// of the turn that ended to wait.
+pub(super) fn waits_key(run: i64) -> String {
+    format!("worker.waits.{run}")
+}
+
 /// What is kept of a run under `key`, one value by each name.
 pub(super) fn kept(store: &Store, key: &str) -> serde_json::Map<String, Value> {
     store
@@ -561,8 +567,27 @@ pub(super) fn forget_asked(app: &App, run: i64) -> anyhow::Result<()> {
             app.gateway.drop_pass(ticket)?;
         }
     }
+    // Its connections' requests too: no turn of a next process waits on them.
+    let mut before = Vec::new();
+    for ticket in app.gateway.tickets_of(crate::permissions::job_actor(run))? {
+        if ticket.connection.is_empty() {
+            continue;
+        }
+        before.push(ticket.id);
+        if app.gateway.withdraw_ticket(ticket.id)? {
+            over.push(ticket.id);
+        } else {
+            app.gateway.drop_pass(ticket.id)?;
+        }
+    }
     if !over.is_empty() {
         crate::approvals::withdraw_apart(app, over);
+    }
+    if before.is_empty() {
+        app.store.clear_state(waits_key(run))?;
+    } else {
+        // Under no record's number, so that no turn takes them for its own.
+        keep(&app.store, &waits_key(run), "before", Some(json!(before)))?;
     }
     app.store.clear_state(tickets_key(run))?;
     app.store.clear_state(replies_key(run))?;

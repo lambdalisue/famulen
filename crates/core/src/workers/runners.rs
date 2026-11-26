@@ -9,7 +9,7 @@ use futures_util::future::BoxFuture;
 use tokio::task::AbortHandle;
 
 use super::adroit;
-use super::agent::{self, Finish, Job};
+use super::agent::{self, Finish, Job, ask_start};
 use super::order::Runner;
 use super::runs::{Run, State};
 use crate::app::App;
@@ -234,6 +234,9 @@ impl Runners for Real {
             match run.order.runner {
                 Runner::Adroit => adroit::begin(&self.app, run).await,
                 Runner::Agent | Runner::Direct => {
+                    if let Some(ticket) = ask_start(&self.app, run).await? {
+                        return Ok(Began::Asking(ticket));
+                    }
                     let job = Job::begin(&self.app, run).await?;
                     let attended = self
                         .agents()
@@ -294,6 +297,8 @@ impl Runners for Real {
         if let Some(working) = working {
             working.abort.abort();
         }
+        // Taken back here, not when it is cleared: ending it may take a while.
+        agent::revoke(&self.app, run.id);
         if run.order.runner == Runner::Direct {
             let (app, run) = (self.app.clone(), run.id);
             tokio::spawn(async move {

@@ -301,6 +301,7 @@ mod tests {
         for tool in [
             "Bash",
             "Task",
+            "SandboxNetworkAccess",
             "mcp__mail__send",
             "mcp__famulen__save_record",
             "KillShell",

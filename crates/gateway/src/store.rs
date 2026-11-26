@@ -113,6 +113,14 @@ CREATE TABLE IF NOT EXISTS actor_grants (
     tool       TEXT NOT NULL,
     PRIMARY KEY (actor, connection, tool)
 );
+CREATE TABLE IF NOT EXISTS carried_out (
+    ticket INTEGER PRIMARY KEY,
+    ok     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS actor_deadlines (
+    actor TEXT PRIMARY KEY,
+    until INTEGER NOT NULL
+);
 ";
 
 /// Seconds since the Unix epoch.

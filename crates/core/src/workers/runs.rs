@@ -495,6 +495,9 @@ pub(super) mod tests {
             permissions: String::new(),
             tools: Vec::new(),
             files: Vec::new(),
+            wait: false,
+            notebook: Default::default(),
+            search: Vec::new(),
             finish: String::new(),
         }
     }

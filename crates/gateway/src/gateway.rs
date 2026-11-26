@@ -330,11 +330,18 @@ impl Gateway {
                     Ok(Outcome::Held(ticket)) => json!({
                         "content": [{ "type": "text", "text": held_message(ticket.id) }],
                         "isError": true,
+                        "_meta": { NOT_MADE: true },
                     }),
-                    Err(error) => json!({
-                        "content": [{ "type": "text", "text": error.to_string() }],
-                        "isError": true,
-                    }),
+                    Err(error) => {
+                        let mut value = json!({
+                            "content": [{ "type": "text", "text": error.to_string() }],
+                            "isError": true,
+                        });
+                        if error.is::<Refused>() {
+                            value["_meta"] = json!({ NOT_MADE: true });
+                        }
+                        value
+                    }
                 })
             }
             _ => Err(json!({ "code": -32601, "message": format!("method not found: {method}") })),
@@ -407,7 +414,7 @@ impl Gateway {
         let reason = match self.judge_assessed(call).await? {
             Verdict::Allow { reason } => reason,
             Verdict::Hold(ticket) => return Ok(Outcome::Held(ticket)),
-            Verdict::Deny { reason } => anyhow::bail!("{reason}"),
+            Verdict::Deny { reason } => return Err(Refused(reason).into()),
         };
         let started = std::time::Instant::now();
         let result = self
@@ -641,6 +648,27 @@ fn text_result(text: String, is_error: bool) -> ToolResult {
 }
 
 /// A tool result as `tools/call` answers it.
+const NOT_MADE: &str = "famulenNotMade";
+
+/// A call the judge refused, so nothing was sent.
+#[derive(Debug)]
+struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// Whether the gateway answered `response` to a call without sending it: it
+/// is held, or it needed an approval its caller cannot ask for. What a tool
+/// answers cannot say so.
+pub fn not_made(response: &Value) -> bool {
+    response["result"]["_meta"][NOT_MADE] == true
+}
+
 fn result_value(result: &ToolResult) -> Value {
     let mut value = json!({
         "content": if result.content.is_empty() {
@@ -711,6 +739,9 @@ mod tests {
 
         assert_eq!(ok["result"]["content"][0]["text"], "a secret body");
         assert_eq!(refused["result"]["isError"], true);
+        assert!(!not_made(&ok));
+        assert!(not_made(&refused), "{refused}");
+        assert!(not_made(&held), "{held}");
         assert!(
             refused["result"]["content"][0]["text"]
                 .as_str()

@@ -20,7 +20,7 @@ message DelegateTaskRequest {
   // adroit: a session in the owner's Adroit, for code and for anything the
   // owner may want to watch or steer. Its start is asked of the owner.
   // agent: a session of its own that uses only the tools and files handed to
-  // it and cannot ask the owner anything.
+  // it, and asks the owner nothing unless it is told to wait.
   // direct: on trial, and only when the owner asks for it: Claude Code that
   // Famulen starts itself to work on code, in a jj workspace it makes in the
   // one repository the owner set; it asks the owner what needs their answer
@@ -50,13 +50,25 @@ message DelegateTaskRequest {
   string permissions = 14;
   // For adroit: the connection, when several Adroits are connected.
   string connection = 15;
-  // For agent: the tools it may use, named as you call them: Read, Grep, Glob,
+  // For agent and direct: the tools it may use, named as you call them: Read, Grep, Glob,
   // WebSearch, WebFetch, mcp__<connection>__<tool>. Those that would be asked
   // of the owner are refused to it, and Famulen's own are never handed over.
   repeated string tools = 16;
-  // For agent: the files of the notebook it may read, as paths in the
-  // notebook or wiki links. Hand over only what the work needs.
+  // For agent and direct: the files of the notebook it may read, as paths in
+  // the notebook or wiki links, with a Notebook of named or more. Hand over only what the work needs.
   repeated string files = 17;
+  // For agent and direct: whether a connection's tool that needs the owner's
+  // approval is held until they answer, instead of being refused.
+  bool wait = 18;
+  // For agent and direct: how much of the notebook it reads: none, excerpt
+  // (only what the request quotes), named (the files above; the default),
+  // search (also the records of the kinds in search) or propose (also
+  // proposing what you may write). Use search or propose only when the owner
+  // asks for it: their start is asked of them. It never writes the notebook.
+  string notebook = 19;
+  // For search and propose: the kinds of record it may search, such as tasks
+  // or memos, kept to the task's workgroups.
+  repeated string search = 20;
 }
 
 // One step of the plan a worker keeps.

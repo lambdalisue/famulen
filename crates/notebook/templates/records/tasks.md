@@ -11,7 +11,7 @@ fields:
   Parent: link:tasks
   Blocked by: links:tasks
 sections:
-  Delegation: {Runner: [adroit, agent, direct], Connection: text, Directory: text, Worktree: flag, Base: text, Agent: text, Agent model: text, Permissions: [default, read_only], Tools: list, Files: list}
+  Delegation: {Runner: [adroit, agent, direct], Connection: text, Directory: text, Worktree: flag, Base: text, Agent: text, Agent model: text, Permissions: [default, read_only], Tools: list, Files: list, Wait: flag, Notebook: [none, excerpt, named, search, propose], Search: list}
 ---
 
 # タスク

@@ -9,6 +9,7 @@ mod direct;
 mod dispatch;
 mod finish;
 mod ledger;
+mod notebook;
 mod order;
 mod pool;
 mod queue;
