@@ -496,6 +496,24 @@ async fn the_owner_answers_what_a_session_asks_where_the_run_is_shown() {
 }
 
 #[tokio::test]
+async fn two_answers_that_arrive_together_reach_the_session_once() {
+    let w = Waiting::on(&question()).await;
+    w.shown().await;
+    let answer = |reply: &str| {
+        try_call(
+            &w.api,
+            "WorkerService/AnswerRun",
+            json!({ "run": w.run, "question": "q1", "answer": "APPROVAL_ANSWER_ALLOW", "replies": [reply] }),
+        )
+    };
+    let ((a, _), (b, _)) = tokio::join!(answer("閉じる"), answer("残す"));
+    let mut statuses = [a.as_u16(), b.as_u16()];
+    statuses.sort_unstable();
+    assert_eq!(statuses, [200, 400], "one answered, the other refused");
+    assert_eq!(w.answered().lines().count(), 1, "{}", w.answered());
+}
+
+#[tokio::test]
 async fn the_owner_allows_or_denies_what_a_session_may_do_where_the_run_is_shown() {
     for (answer, expected) in [("ALLOW", "allow q1\n"), ("DENY", "deny q1\n")] {
         let w = Waiting::on(

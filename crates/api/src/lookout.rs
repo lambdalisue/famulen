@@ -631,33 +631,34 @@ impl LookoutService for Api {
         request: ServiceRequest<'_, GiveFeedbackRequest>,
     ) -> ServiceResult<Empty> {
         let (id, wanted) = (request.id, request.wanted);
-        let decision = self
-            .app
+        let _hold = self.app.notebook.hold().or_fail()?;
+        // The owner's answer is something for the dream to learn from.
+        let note = |decision: &famulen_core::lookout::Decision| {
+            let note = format!(
+                "見張りの判断「{}」（{}）はあなたにとって{}",
+                decision.title,
+                decision.outcome.label(),
+                if wanted {
+                    "拾ってほしかった"
+                } else {
+                    "要らなかった"
+                }
+            );
+            famulen_core::memory::append_episode(
+                &self.app.memory_dir,
+                chrono::Utc::now()
+                    .with_timezone(&self.app.tz())
+                    .naive_local(),
+                &note,
+                famulen_core::memory::EpisodeState::Waiting,
+            )
+            .map(drop)
+        };
+        self.app
             .lookout
-            .feedback(id, wanted)
+            .feedback(id, wanted, note)
             .or_fail()?
             .ok_or_else(|| fail(format!("no decision {id}")))?;
-        // The owner's answer is something for the dream to learn from.
-        let note = format!(
-            "見張りの判断「{}」（{}）はあなたにとって{}",
-            decision.title,
-            decision.outcome.label(),
-            if wanted {
-                "拾ってほしかった"
-            } else {
-                "要らなかった"
-            }
-        );
-        let _hold = self.app.notebook.hold().or_fail()?;
-        famulen_core::memory::append_episode(
-            &self.app.memory_dir,
-            chrono::Utc::now()
-                .with_timezone(&self.app.tz())
-                .naive_local(),
-            &note,
-            famulen_core::memory::EpisodeState::Waiting,
-        )
-        .or_fail()?;
         Response::ok(Empty::default())
     }
 }

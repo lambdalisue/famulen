@@ -408,6 +408,20 @@ impl Store {
         )?;
         Ok(())
     }
+
+    /// Set `key` unless it is set already, in one step: whether it was this
+    /// call that set it.
+    pub fn claim_state(
+        &self,
+        key: impl AsRef<str>,
+        value: impl AsRef<str>,
+    ) -> anyhow::Result<bool> {
+        let set = self.conn().execute(
+            "INSERT INTO state (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO NOTHING",
+            params![key.as_ref(), value.as_ref()],
+        )?;
+        Ok(set == 1)
+    }
 }
 
 const SCHEMA: &str = "
@@ -1119,6 +1133,16 @@ mod tests {
         store.set_state("session_id", "a").unwrap();
         store.set_state("session_id", "b").unwrap();
         assert_eq!(store.state("session_id").unwrap().as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn state_is_claimed_by_the_first_only() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(store.claim_state("dream", "a").unwrap());
+        assert!(!store.claim_state("dream", "b").unwrap());
+        assert_eq!(store.state("dream").unwrap().as_deref(), Some("a"));
+        store.clear_state("dream").unwrap();
+        assert!(store.claim_state("dream", "c").unwrap());
     }
 
     #[test]

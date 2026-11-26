@@ -249,18 +249,43 @@ impl Lookout {
         ])
     }
 
-    /// The owner's 要らなかった / 拾ってほしかった on a decision.
-    pub fn feedback(&self, id: i64, wanted: bool) -> anyhow::Result<Option<Decision>> {
-        Ok(self
+    /// The owner's 要らなかった / 拾ってほしかった on a decision, and the
+    /// decision as it then stands. What it changes is given to `noted` first,
+    /// and kept only once that is done: the same given again, as when one
+    /// press arrives twice, is neither noted nor kept again; one noted but
+    /// then not kept is noted again when it is given again. Callers that may
+    /// give it at once hold one lock around it, as the look and the keeping
+    /// are apart.
+    pub fn feedback(
+        &self,
+        id: i64,
+        wanted: bool,
+        noted: impl FnOnce(&Decision) -> anyhow::Result<()>,
+    ) -> anyhow::Result<Option<Decision>> {
+        let feedback = if wanted { "wanted" } else { "unwanted" };
+        let Some(mut now) = self
             .store
             .conn()
             .query_row(
-                "UPDATE lookout_items SET feedback = ?2 WHERE id = ?1 AND outcome != 'pending'
-                 RETURNING id, source, at, title, outcome, reason, feedback",
-                params![id, if wanted { "wanted" } else { "unwanted" }],
+                "SELECT id, source, at, title, outcome, reason, feedback FROM lookout_items
+                 WHERE id = ?1 AND outcome != 'pending'",
+                [id],
                 decision,
             )
-            .optional()?)
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        if now.feedback.as_deref() == Some(feedback) {
+            return Ok(Some(now));
+        }
+        now.feedback = Some(feedback.to_owned());
+        noted(&now)?;
+        let kept = self.store.conn().execute(
+            "UPDATE lookout_items SET feedback = ?2 WHERE id = ?1",
+            params![id, feedback],
+        )?;
+        Ok((kept == 1).then_some(now))
     }
 }
 
@@ -373,7 +398,11 @@ mod tests {
         assert_eq!(w.funnel(0).unwrap(), [3, 2, 1]);
         let id = w.before(0, 1).unwrap()[0].id;
         assert_eq!(
-            w.feedback(id, false).unwrap().unwrap().feedback.as_deref(),
+            w.feedback(id, false, |_| Ok(()))
+                .unwrap()
+                .unwrap()
+                .feedback
+                .as_deref(),
             Some("unwanted")
         );
     }
@@ -388,9 +417,54 @@ mod tests {
                 .unwrap();
         }
 
-        let decision = w.feedback(1, true).unwrap().unwrap();
+        let given = w.feedback(1, true, |_| Ok(())).unwrap().unwrap();
 
-        assert_eq!(decision.title, "0-0");
-        assert_eq!(decision.feedback.as_deref(), Some("wanted"));
+        assert_eq!(given.title, "0-0");
+        assert_eq!(given.feedback.as_deref(), Some("wanted"));
+    }
+
+    #[tokio::test]
+    async fn feedback_is_noted_once_however_often_it_is_given() {
+        let w = lookout();
+        w.screen("x", vec![item("a")], each_alone(Outcome::Logged))
+            .await
+            .unwrap();
+        let notes = std::cell::RefCell::new(Vec::new());
+        let give = |wanted| {
+            w.feedback(1, wanted, |d| {
+                notes.borrow_mut().push(d.title.clone());
+                Ok(())
+            })
+            .unwrap()
+            .unwrap()
+        };
+
+        give(false);
+        give(false);
+        assert_eq!(notes.borrow().len(), 1, "the same again is noted no more");
+        give(true);
+        assert_eq!(notes.borrow().len(), 2, "changed");
+        assert!(w.feedback(99, true, |_| Ok(())).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn feedback_that_could_not_be_noted_is_not_kept() {
+        let w = lookout();
+        w.screen("x", vec![item("a")], each_alone(Outcome::Logged))
+            .await
+            .unwrap();
+
+        assert!(
+            w.feedback(1, false, |_| anyhow::bail!("disk full"))
+                .is_err()
+        );
+        assert_eq!(w.recent(1).unwrap()[0].feedback, None);
+        let mut noted = false;
+        w.feedback(1, false, |_| {
+            noted = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(noted, "given again, it is noted");
     }
 }
