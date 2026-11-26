@@ -261,6 +261,7 @@ const CHOICES: { [value: string]: string } = {
   worker: "委託",
   adroit: "Adroit",
   agent: "手代",
+  direct: "直接",
   default: "ふつう",
   read_only: "読むだけ",
   yes: "はい",

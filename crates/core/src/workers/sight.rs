@@ -225,6 +225,20 @@ impl Sights {
         self.put(run, "asked", at, Item::Asked { text: text.into() });
     }
 
+    /// What a run Famulen runs itself waits on the owner for, or that it
+    /// waits on them no more.
+    pub(super) fn owe(&self, run: i64, question: Option<Value>) {
+        let mut all = self.lock();
+        if question.is_none() && !all.runs.contains_key(&run) {
+            return;
+        }
+        let kept = all.kept(run);
+        if kept.question != question {
+            kept.question = question;
+            all.changed = true;
+        }
+    }
+
     /// A run's process is gone, and why.
     pub(super) fn ended(&self, run: i64, start: i64, at: i64, reason: String) {
         self.put(run, &format!("exit:{start}"), at, Item::Ended { reason });

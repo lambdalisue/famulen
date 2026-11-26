@@ -82,6 +82,18 @@ fn the_owner_is_not_asked() {
 }
 
 #[test]
+fn what_was_granted_to_a_caller_is_taken_back_whole_and_from_it_alone() {
+    let g = gateway();
+    let mut lookout = call("search_threads");
+    lookout.actor = "lookout".into();
+    g.grant("lookout", "mail", ANY).unwrap();
+    g.grant("lookout", ANY, "x").unwrap();
+    g.revoke("lookout").unwrap();
+    assert!(matches!(g.judge(&lookout).unwrap(), Verdict::Deny { .. }));
+    assert!(is_allow(&g.judge(&call("search_threads")).unwrap()));
+}
+
+#[test]
 fn a_caller_without_grants_calls_nothing() {
     let g = gateway();
     let mut lookout = call("search_threads");

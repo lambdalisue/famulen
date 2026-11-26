@@ -21,6 +21,11 @@ message DelegateTaskRequest {
   // owner may want to watch or steer. Its start is asked of the owner.
   // agent: a session of its own that uses only the tools and files handed to
   // it and cannot ask the owner anything.
+  // direct: on trial, and only when the owner asks for it: Claude Code that
+  // Famulen starts itself to work on code, in a jj workspace it makes in the
+  // one repository the owner set; it asks the owner what needs their answer
+  // and waits. It needs a Directory in that repository, and is refused
+  // elsewhere.
   string runner = 3;
   // high, normal or low. What is high runs first, then what is due sooner,
   // then the oldest.
@@ -76,7 +81,7 @@ message WorkerRun {
   string task = 2;
   string code = 3;
   string title = 4;
-  // adroit or agent.
+  // adroit, agent or direct.
   string runner = 5;
   // starting, asking (for the owner's approval), running, waiting (the
   // session waits for the owner), idle (the session ended its turn with its
@@ -103,7 +108,8 @@ message WorkerRun {
   int32 percent = 16;
   // What it does now, in the worker's words.
   string doing = 17;
-  // What its session asks the owner, when it can be told.
+  // What its session, or work run directly, asks the owner, when it can be
+  // told.
   RunQuestion question = 18;
   // Where its plan came from: timeline (written with Famulen's tool),
   // adroit (the session's timeline) or notes (read from the agent's own

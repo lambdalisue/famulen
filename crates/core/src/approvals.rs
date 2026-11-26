@@ -420,7 +420,7 @@ impl<S: Slack> Approvals<S> {
         let questions = questions(&self.permissions, tool, input);
         if questions.is_empty() {
             let asked = Asked::of(&self.permissions, tool);
-            let once = once(&self.permissions, tool) || discloses(ticket);
+            let once = once(&self.permissions, tool) || answered_once(ticket);
             let summary = summary(ticket);
             return request_message(id, &asked, input, summary, None, once);
         }
@@ -483,7 +483,7 @@ impl<S: Slack> Approvals<S> {
         }
         let before = self.permissions.gateway().ticket(id)?;
         let answer = match answer {
-            Answer::AlwaysAllow if before.as_ref().is_some_and(discloses) => Answer::Approve,
+            Answer::AlwaysAllow if before.as_ref().is_some_and(answered_once) => Answer::Approve,
             answer => answer,
         };
         let Some(answered) = self
@@ -581,7 +581,7 @@ impl<S: Slack> Approvals<S> {
             }
         }
         // A worker's call is made by the pool, which sees the answer itself.
-        if answered.ticket.actor == crate::permissions::WORKER {
+        if crate::permissions::is_worker(&answered.ticket.actor) {
             return Ok(None);
         }
         if let Some(words) = asked::held_answer(&self.store, &answered.ticket)? {
@@ -772,6 +772,13 @@ pub fn may_show_secret(ticket: &Ticket) -> bool {
 /// each time.
 pub fn discloses(ticket: &Ticket) -> bool {
     disclosure::reason_of(&ticket.reason).is_some()
+}
+
+/// Whether a request is answered for its one call alone, however the owner
+/// answers: it tells something more widely, or a run of work run directly
+/// asks it, whose approval would let every caller use the tool.
+pub fn answered_once(ticket: &Ticket) -> bool {
+    discloses(ticket) || crate::permissions::is_direct_actor(&ticket.actor)
 }
 
 /// Whether the owner answers questions in a request instead of approving it.

@@ -5,6 +5,7 @@
 pub mod adroit;
 mod agent;
 mod bounds;
+mod direct;
 mod dispatch;
 mod finish;
 mod ledger;
@@ -19,6 +20,7 @@ mod tidy;
 mod timeline;
 
 pub(crate) use agent::executor_program;
+pub use direct::*;
 pub use dispatch::*;
 pub use finish::*;
 pub use ledger::*;
@@ -109,6 +111,8 @@ pub struct Workers {
     /// The processes agents run under, each named by its run.
     pub(crate) executors: Executors,
     pub(crate) kept: Kept,
+    /// Where work may run directly, when the owner set it.
+    pub(crate) direct: Option<Direct>,
     poke: Arc<Notify>,
     /// Adroit sessions something was told of, to be looked at at once.
     heard: Arc<Mutex<HashSet<String>>>,
@@ -128,12 +132,18 @@ impl Workers {
             dir,
             executors,
             kept,
+            direct: None,
             poke: Arc::default(),
             heard: Arc::default(),
             closed: Arc::default(),
             tidying: Arc::default(),
             answering: Arc::default(),
         }
+    }
+
+    /// Let work run directly where `direct` says.
+    pub fn with_direct(self, direct: Option<Direct>) -> Self {
+        Self { direct, ..self }
     }
 
     /// Have the pool look at its tasks now.

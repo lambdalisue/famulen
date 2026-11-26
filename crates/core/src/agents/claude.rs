@@ -97,6 +97,14 @@ impl Adapter for Claude {
         })
     }
 
+    fn find(&self, conversation: &str) -> bool {
+        let dir = crate::claude::skills::claude_dir(|name| match name {
+            "HOME" => Some(crate::sealed::home()?.display().to_string()),
+            _ => std::env::var(name).ok(),
+        });
+        dir.is_some_and(|dir| conversation_in(&dir, conversation))
+    }
+
     fn answer(&self, question: &Question, answer: &Answer) -> anyhow::Result<String> {
         let id = &question.id;
         let line = match (&question.ask, answer) {
@@ -129,6 +137,18 @@ impl Adapter for Claude {
     fn codec(&self) -> Box<dyn Codec> {
         Box::<Lines>::default()
     }
+}
+
+/// Whether Claude Code keeps the conversation `id` in its directory `dir`:
+/// a file of it in the directory of one of its projects.
+fn conversation_in(dir: &std::path::Path, id: &str) -> bool {
+    let named = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    named
+        && std::fs::read_dir(dir.join("projects"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|project| project.path().join(format!("{id}.jsonl")).is_file())
 }
 
 fn supported(version: &str) -> bool {
@@ -170,8 +190,16 @@ fn args(work: &Work, resume: Option<&str>) -> Vec<String> {
     let mut put = |flag: &str, value: String| args.extend([flag.to_owned(), value]);
     put("--mcp-config", json!({ "mcpServers": servers }).to_string());
     put("--tools", work.tools.join(","));
-    let mut settings = sandbox_settings(&work.fence.sealed, &[]);
+    let mut settings = sandbox_settings(&work.fence.sealed, &work.fence.writable);
     let files = &mut settings["sandbox"]["filesystem"];
+    if let Some(denied) = files["denyWrite"].as_array_mut() {
+        denied.extend(
+            work.fence
+                .unwritable
+                .iter()
+                .map(|p| p.display().to_string().into()),
+        );
+    }
     if let Some(denied) = files["denyRead"].as_array_mut() {
         denied.extend(
             work.fence
@@ -198,6 +226,8 @@ fn args(work: &Work, resume: Option<&str>) -> Vec<String> {
     }
     if let Some(conversation) = resume {
         put("--resume", conversation.to_owned());
+    } else if let Some(conversation) = &work.conversation {
+        put("--session-id", conversation.clone());
     }
     args
 }

@@ -81,7 +81,7 @@ export function lastedText(r: WorkerRun, now: number): string {
   return minutes < 60 ? `${minutes} 分` : `${Math.floor(minutes / 60)} 時間 ${minutes % 60} 分`;
 }
 
-export const runnerText = (runner: string) => ({ adroit: "Adroit", agent: "手代" })[runner] ?? "委託先なし";
+export const runnerText = (runner: string) => ({ adroit: "Adroit", agent: "手代", direct: "直接" })[runner] ?? "委託先なし";
 
 const FATES: { [fate: string]: string } = { removed: "片づけた", removable: "片づけられる", in_use: "使っている", kept: "残す" };
 

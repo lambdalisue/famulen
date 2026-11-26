@@ -101,6 +101,8 @@ pub struct Work {
     pub workdir: PathBuf,
     pub fence: Fence,
     pub needs: Capabilities,
+    /// The id a new conversation is to have, chosen before it is started.
+    pub conversation: Option<String>,
     /// Whether to tell of what is written while it is being written.
     pub parts: bool,
 }
@@ -113,6 +115,10 @@ pub struct Fence {
     /// Not read, but for what is `readable`.
     pub unread: Vec<PathBuf>,
     pub readable: Vec<PathBuf>,
+    /// Written, beside the directory it works in.
+    pub writable: Vec<PathBuf>,
+    /// Not written, though they are inside what is `writable`.
+    pub unwritable: Vec<PathBuf>,
     /// Not connected to, whatever else is allowed; nor is a socket that is a
     /// file.
     pub hosts: Vec<String>,
@@ -161,6 +167,9 @@ pub trait Adapter: Send + Sync {
     /// How `work` is started, or a conversation gone on with. It fails when
     /// the agent cannot do what the work needs.
     fn launch(&self, work: &Work, resume: Option<&str>) -> anyhow::Result<Launch>;
+    /// Whether a conversation it was started on is kept where it can be gone
+    /// on with.
+    fn find(&self, conversation: &str) -> bool;
     /// The line that answers a question, and nothing else: it may be written
     /// by another process than read the question. `Err` when the answer is
     /// none to what was asked.

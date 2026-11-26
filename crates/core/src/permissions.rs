@@ -26,6 +26,30 @@ pub const SECRETARY: &str = "secretary";
 /// Who starts and runs delegated tasks, to the gateway.
 pub const WORKER: &str = "worker";
 
+/// Who a run of work run directly is to the gateway: one of the workers,
+/// but none other, so that the owner's approval of its call is its alone.
+pub fn direct_actor(run: i64) -> String {
+    format!("{WORKER}:run-{run}")
+}
+
+/// Whether a caller is a run of work run directly.
+pub fn is_direct_actor(actor: impl AsRef<str>) -> bool {
+    actor
+        .as_ref()
+        .strip_prefix(WORKER)
+        .and_then(|rest| rest.strip_prefix(":run-"))
+        .is_some_and(|id| id.parse::<i64>().is_ok())
+}
+
+/// Whether a caller is the pool or one of its runs.
+pub fn is_worker(actor: impl AsRef<str>) -> bool {
+    let actor = actor.as_ref();
+    actor == WORKER
+        || actor
+            .strip_prefix(WORKER)
+            .is_some_and(|rest| rest.starts_with(':'))
+}
+
 /// Built-in tools that start other agents. No model uses them: work is
 /// delegated through tasks, which the worker pool picks up.
 pub const LAUNCHERS: &[&str] = &["Task", "Agent", "Workflow", "TeamCreate"];
@@ -49,6 +73,20 @@ pub struct Bound {
     pub ask: Option<String>,
     /// The owner said yes to it before, so only a forbid stops it.
     pub waive: bool,
+}
+
+/// What came of using the owner's approval of a call run directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pass {
+    Taken,
+    /// There was none left to use.
+    Gone,
+    /// It was used, and the call needed the owner again all the same; with
+    /// the request it was held as for a moment, to be taken back wherever it
+    /// is shown.
+    HeldAgain(Option<i64>),
+    /// The call is refused now whatever was approved.
+    Refused(String),
 }
 
 /// What to answer Claude Code for one call.
@@ -299,6 +337,71 @@ impl Permissions {
             Verdict::Allow { .. } => Decision::Allow,
             Verdict::Hold(_) => Decision::Forbid(famulen_gateway::NEEDS_OWNER.to_owned()),
             Verdict::Deny { reason } => Decision::Forbid(format!("{tool_name}: {reason}")),
+        })
+    }
+
+    /// Decide one built-in call of a model run directly, refused when `refuse`
+    /// says why. Judged as a worker's is; what would be asked of the owner
+    /// is held for their answer, which the run waits for.
+    pub async fn decide_direct(
+        &self,
+        run: i64,
+        tool_name: &str,
+        input: &Value,
+        refuse: Option<String>,
+    ) -> anyhow::Result<Decision> {
+        let call = Call {
+            marks: Some(builtin_marks(tool_name)),
+            refuse: refuse.or_else(|| {
+                split_tool(tool_name).map(|_| format!("{tool_name} was not handed to you."))
+            }),
+            ..Call::new(direct_actor(run), "", tool_name, input.clone())
+        };
+        Ok(match self.gateway.judge_assessed(&call).await? {
+            Verdict::Allow { .. } => Decision::Allow,
+            Verdict::Hold(ticket) => Decision::Held(ticket.id),
+            Verdict::Deny { reason } => Decision::Forbid(format!("{tool_name}: {reason}")),
+        })
+    }
+
+    /// Let a run of work run directly call its built-in tools, as every
+    /// worker may; what was handed to it is judged before. Until it ends.
+    pub fn grant_direct(&self, run: i64) -> anyhow::Result<()> {
+        self.gateway
+            .grant(direct_actor(run), "", famulen_gateway::ANY)
+    }
+
+    /// A run of work run directly is over: it calls nothing any more.
+    pub fn revoke_direct(&self, run: i64) -> anyhow::Result<()> {
+        self.gateway.revoke(direct_actor(run))
+    }
+
+    /// Use the one pass the owner's approval of `ticket` left for a built-in
+    /// call of a run of work run directly: that ticket's alone, whichever
+    /// other approval matches the same call. The call is still refused where
+    /// the owner forbids it now; nothing else is asked.
+    pub fn take_direct_pass(
+        &self,
+        run: i64,
+        ticket: i64,
+        tool_name: &str,
+        input: &Value,
+    ) -> anyhow::Result<Pass> {
+        if !self.gateway.take_pass_of(ticket)? {
+            return Ok(Pass::Gone);
+        }
+        let call = Call {
+            marks: Some(builtin_marks(tool_name)),
+            waive: true,
+            ..Call::new(direct_actor(run), "", tool_name, input.clone())
+        };
+        Ok(match self.gateway.judge(&call)? {
+            Verdict::Allow { .. } => Pass::Taken,
+            Verdict::Hold(held) => {
+                let withdrawn = self.gateway.withdraw_ticket(held.id)?;
+                Pass::HeldAgain(withdrawn.then_some(held.id))
+            }
+            Verdict::Deny { reason } => Pass::Refused(format!("{tool_name}: {reason}")),
         })
     }
 
@@ -612,6 +715,69 @@ mod tests {
 
     fn held(d: &Decision) -> bool {
         matches!(d, Decision::Held(_))
+    }
+
+    #[tokio::test]
+    async fn the_owners_approval_of_a_call_run_directly_is_used_once_and_by_that_run_alone() {
+        let p = permissions();
+        let call = json!({ "command": "rm -rf build" });
+        for run in [1, 2] {
+            p.grant_direct(run).unwrap();
+        }
+        let ask = |run| p.decide_direct(run, "Bash", &call, None);
+        let (Decision::Held(first), Decision::Held(second)) =
+            (ask(1).await.unwrap(), ask(2).await.unwrap())
+        else {
+            panic!("both are asked of the owner");
+        };
+        assert_ne!(first, second);
+        let ticket = p.gateway.ticket(first).unwrap().unwrap();
+        assert_eq!(ticket.actor, direct_actor(1));
+        assert!(is_worker(&ticket.actor) && !is_worker("workers") && is_worker(WORKER));
+        assert!(is_direct_actor(&ticket.actor) && !is_direct_actor(WORKER));
+        p.gateway
+            .answer_ticket(first, famulen_gateway::Answer::Approve)
+            .await
+            .unwrap();
+
+        assert!(held(&ask(2).await.unwrap()), "another run is still asked");
+        assert!(matches!(
+            p.take_direct_pass(2, second, "Bash", &call).unwrap(),
+            Pass::Gone
+        ));
+        assert_eq!(
+            p.take_direct_pass(1, first, "Bash", &call).unwrap(),
+            Pass::Taken
+        );
+        assert!(
+            matches!(
+                p.take_direct_pass(1, first, "Bash", &call).unwrap(),
+                Pass::Gone
+            ),
+            "once"
+        );
+        assert!(held(&ask(1).await.unwrap()), "and asked again after");
+        // An approval used while the tool was allowed anyway is spent all the same.
+        let Decision::Held(third) = ask(1).await.unwrap() else {
+            panic!()
+        };
+        p.gateway
+            .answer_ticket(third, famulen_gateway::Answer::Approve)
+            .await
+            .unwrap();
+        p.set_scoped("owner", "", "Bash", Some(Permission::Allow))
+            .unwrap();
+        assert_eq!(
+            p.take_direct_pass(1, third, "Bash", &call).unwrap(),
+            Pass::Taken
+        );
+        p.set_scoped("owner", "", "Bash", None).unwrap();
+        assert!(held(&ask(1).await.unwrap()), "no pass is left behind");
+        p.revoke_direct(1).unwrap();
+        assert!(
+            matches!(ask(1).await.unwrap(), Decision::Forbid(_)),
+            "nothing once over"
+        );
     }
 
     #[tokio::test]

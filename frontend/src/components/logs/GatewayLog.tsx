@@ -40,7 +40,9 @@ const DECIDED: Record<string, [string, Tone | undefined]> = {
 };
 
 function Entry(props: { e: GatewayLogEntry; tz: string; names: Map<string, string> }) {
-  const actor = () => ACTORS.find(([k]) => k === props.e.actor)?.[1] ?? props.e.actor;
+  // A run of work run directly calls as `worker:run-<id>`.
+  const direct = () => /^worker:run-(\d+)$/.exec(props.e.actor)?.[1];
+  const actor = () => ACTORS.find(([k]) => k === props.e.actor)?.[1] ?? (direct() ? `直接の委託 #${direct()}` : props.e.actor);
   const decided = () => DECIDED[props.e.decision] ?? [props.e.decision, undefined];
   const where = () => props.names.get(props.e.connection) ?? props.e.connection;
   return (
