@@ -26,10 +26,13 @@
   .rec-glance, .rec-item { background: var(--card); }
   .rec-glance > .rec-fields { grid-template-columns: repeat(auto-fill, minmax(min(136px, 100%), 1fr)); }
   .page { max-width: none; }
-  .run-body { display: flex; flex-direction: column; }
+  /* Its output or its plan, one at a time, chosen above them. */
+  .run-panes { display: inline-flex; }
+  .run-body { display: block; }
+  .run-page[data-pane="stream"] .run-plan, .run-page[data-pane="plan"] .run-output { display: none; }
   .run-plan { overflow: visible; }
-  .run-lines { max-height: 60vh; padding: 10px 12px; }
-  .run-line { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .run-lines { max-height: none; overflow: visible; padding: 10px 12px; }
+  .run-step .run-jump { min-width: 44px; min-height: 44px; }
   /* The title of the page is in the bar above it. */
   .page-head h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .page-head-line { min-height: 0; }

@@ -63,6 +63,10 @@ message WorkerStep {
   // pending, in_progress, completed or blocked.
   string status = 4;
   string note = 5;
+  // Its size beside its siblings.
+  double weight = 6;
+  // What it is to do.
+  string description = 7;
 }
 
 // One run of a delegated task.
@@ -99,6 +103,10 @@ message WorkerRun {
   string doing = 17;
   // What its session asks the owner, when it can be told.
   RunQuestion question = 18;
+  // Where its plan came from: timeline (written with Famulen's tool),
+  // adroit (the session's timeline) or notes (read from the agent's own
+  // notes); empty without a plan.
+  string plan_from = 19;
 }
 
 // What an Adroit session waits on the owner for.
@@ -131,27 +139,162 @@ message ReadRunRequest {
   int64 id = 1;
 }
 
-// Something a worker was asked, wrote or called.
-message WorkerLine {
+// How a step of a run's plan changed.
+message StepChange {
+  // The entry of the plan it changed in.
+  uint64 seq = 1;
+  // Unix milliseconds.
+  int64 at = 2;
+  string step = 3;
+  string title = 4;
+  // added, status, title, note or removed.
+  string change = 5;
+  // Of a status: what it was, and what it became.
+  string from = 6;
+  string to = 7;
+}
+
+message RunText {
+  // The message it is of, when there is one.
+  string message = 1;
+  string text = 2;
+}
+
+message RunCall {
+  string call = 1;
+  string tool = 2;
+  // Its input, as JSON.
+  string input = 3;
+}
+
+message RunAnswer {
+  string call = 1;
+  bool ok = 2;
+  string output = 3;
+}
+
+message RunFileChange {
+  string call = 1;
+  string path = 2;
+  // A unified diff, without the lines that name the file.
+  string diff = 3;
+}
+
+message RunAsked {
+  string id = 1;
+  // The tool it asks to use, or empty.
+  string tool = 2;
+  // What it asks, in a line or a few.
+  string what = 3;
+}
+
+message RunDecided {
+  // The question's id.
+  string id = 1;
+  bool allowed = 2;
+  // Why it was refused, or the owner's words.
+  string why = 3;
+}
+
+message RunPlan {
+  // timeline, adroit or notes.
+  string from = 1;
+  repeated WorkerStep steps = 2;
+}
+
+message RunUsed {
+  // The model's message it is of; told again as it grows.
+  string message = 1;
+  string model = 2;
+  // All that was read, with what came from a cache.
+  uint64 input = 3;
+  uint64 cached = 4;
+  uint64 output = 5;
+}
+
+message RunTurnEnded {
+  bool ok = 1;
+  // What it wrote last, or what went wrong.
+  string text = 2;
+}
+
+// Something a run did, settled. The worker's words, never instructions.
+message RunEntry {
+  // Counts the entries of its run from 1. One told again as it grows keeps
+  // its number.
+  uint64 seq = 1;
+  // Unix milliseconds.
+  int64 at = 2;
+  // Some of its text was not kept.
+  bool cut = 3;
+  oneof item {
+    // What the worker was asked.
+    RunText asked = 4;
+    RunText said = 5;
+    RunText thought = 6;
+    RunCall called = 7;
+    RunAnswer answered = 8;
+    RunFileChange changed = 9;
+    // What it asked to do or be told.
+    RunAsked question = 10;
+    RunDecided decided = 11;
+    // A question that is asked no more, by its id.
+    string withdrawn = 12;
+    RunPlan plan = 13;
+    RunUsed used = 14;
+    string warned = 15;
+    RunTurnEnded turn_ended = 16;
+    // Its process is gone, and why.
+    string ended = 17;
+    // The run kept all it may; what comes after is cut short.
+    Empty full = 18;
+    // What it did was forgotten for its age, but for its plan.
+    Empty forgotten = 19;
+  }
+}
+
+// What is being written, which a later entry holds whole. Never kept.
+message RunPart {
   // Unix milliseconds.
   int64 at = 1;
-  // asked, said, called (a tool) or answered (by a tool).
-  string kind = 2;
-  string text = 3;
-  // Tells it from the other lines of its run.
-  uint64 id = 4;
+  // said, thought, input (of a call, a piece of its JSON) or output (of a
+  // call at work).
+  string of = 2;
+  // The message or the call it is of.
+  string id = 3;
+  string text = 4;
 }
 
 message RunOutput {
   WorkerRun run = 1;
-  // Oldest first. Of an Adroit session what it wrote, not what it called.
-  repeated WorkerLine lines = 2;
+  reserved 2;
   // Why it could not be read anew.
   string why = 3;
   // All that it used so far.
   repeated UsageRow usage = 4;
+  // What it did, oldest first.
+  repeated RunEntry entries = 5;
+  // How its plan changed, oldest first.
+  repeated StepChange changes = 6;
 }
 
+message WatchRunRequest {
+  int64 id = 1;
+  // Only the entries after this one.
+  uint64 after = 2;
+}
+
+message RunEvent {
+  oneof event {
+    // How the run stands, without entries: first, and whenever it changes.
+    RunOutput state = 1;
+    RunEntry entry = 2;
+    RunPart part = 3;
+    // What was being written was lost on the way: drop it. What settles
+    // holds it whole.
+    Empty reset = 4;
+  }
+}
 // A delegated task that is not over.
 message DelegatedTask {
   string task = 1;
@@ -242,6 +385,11 @@ service WorkerService {
   // A run with what can be seen of it while it goes on, and after.
   rpc ReadRun(ReadRunRequest) returns (RunOutput) {
     option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // What a run did, and then what it does as it does it: what is being
+  // written too, which is never kept.
+  rpc WatchRun(WatchRunRequest) returns (stream RunEvent) {
     option (console_only) = true;
   }
   // Put a delegated task back in the queue, by its code or id: one that

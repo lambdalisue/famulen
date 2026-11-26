@@ -650,6 +650,7 @@ pub async fn answer(
     replies: Vec<String>,
 ) -> anyhow::Result<()> {
     let (run, question) = asked(app, run, id)?;
+    let (allowed, words) = (answer == Answer::Approve, replies.join("\n"));
     anyhow::ensure!(
         answer != Answer::AlwaysAllow,
         "the owner is asked of every one"
@@ -683,7 +684,7 @@ pub async fn answer(
         return Err(error);
     }
     // It is answered, whatever becomes of the rest: the next look sees it.
-    app.workers.sights.answered(run.id, id);
+    app.workers.sights.answered(run.id, id, allowed, &words);
     let seen = app
         .workers
         .runs

@@ -138,3 +138,47 @@ async fn request(
         .unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
 }
+
+/// The first `n` messages the owner's call of a streaming `<Service>/<Method>`
+/// answers, waiting no longer than a few seconds for each.
+pub async fn watch(api: &Api, method: &str, body: Value, n: usize) -> Vec<Value> {
+    use futures::StreamExt as _;
+    use tower::ServiceExt;
+    let mut framed = vec![0];
+    let json = serde_json::to_vec(&body).unwrap();
+    framed.extend((json.len() as u32).to_be_bytes());
+    framed.extend(json);
+    let request = http::Request::post(format!("/famulen.v1.{method}"))
+        .header("content-type", "application/connect+json")
+        .header("connect-protocol-version", "1")
+        .body(axum::body::Body::from(framed))
+        .unwrap();
+    let response = api.clone().axum().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body().into_data_stream();
+    let mut buffer = Vec::new();
+    let mut messages = Vec::new();
+    while messages.len() < n {
+        if buffer.len() >= 5 {
+            let len = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
+            if buffer.len() >= 5 + len {
+                let frame: Vec<u8> = buffer.drain(..5 + len).collect();
+                assert_eq!(
+                    frame[0] & 2,
+                    0,
+                    "the stream ended: {:?}",
+                    String::from_utf8_lossy(&frame[5..])
+                );
+                messages.push(serde_json::from_slice(&frame[5..]).unwrap());
+                continue;
+            }
+        }
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(10), body.next())
+            .await
+            .expect("a message comes")
+            .expect("the stream goes on")
+            .unwrap();
+        buffer.extend_from_slice(&chunk);
+    }
+    messages
+}

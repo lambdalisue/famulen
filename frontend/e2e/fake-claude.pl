@@ -4,8 +4,10 @@
 # message holding `e2e-bash` first asks to run Bash, one holding `e2e-asks`
 # asks so and waits for the answer, one holding
 # `e2e-work` searches the web as the test lets it, one holding
-# `e2e-long-bash` to run many lines of it, and one holding `e2e-plan`
-# tells of a plan and writes until the test lets it end, and one holding `e2e-hold` goes
+# `e2e-long-bash` to run many lines of it, one holding `e2e-plan`
+# tells of a plan and writes until the test lets it end, one holding
+# `e2e-rich` writes as it goes, keeps a timeline, runs tests and changes a
+# file, waiting where the test lets it on, and one holding `e2e-hold` goes
 # on until it is stopped.
 #
 # Asked once for a dream plan (--json-schema with the dream's prompt), it
@@ -88,6 +90,29 @@ while (my $line = <STDIN>) {
         gate("end");
     }
     sleep 600 if $line =~ /e2e-hold/;
+    if ($line =~ /e2e-rich/) {
+        my $delta = sub { qq({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"$_[0]"}}}\n) };
+        my $timeline = sub {
+            my ($n, $ops) = @_;
+            print qq({"type":"control_request","request_id":"e2e-t$n","request":{"subtype":"mcp_message","server_name":"famulen","message":{"jsonrpc":"2.0","id":$n,"method":"tools/call","params":{"name":"timeline_tasks","arguments":{"ops":$ops}}}}}\n);
+            <STDIN>;
+        };
+        $timeline->(1, '[{"op":"add","id":"g","title":"ログインを直す","status":"in_progress"},{"op":"add","id":"t","parent":"g","title":"テストを流す","weight":2,"status":"in_progress","description":"cargo test で今の様子を見る"},{"op":"add","id":"e","parent":"g","title":"直す"}]');
+        gate("open");
+        print qq({"type":"stream_event","event":{"type":"message_start","message":{"id":"r1"}}}\n), $delta->("テストを"), $delta->("流して");
+        gate("half");
+        print $delta->("確かめる。"), qq({"type":"assistant","message":{"id":"r1","content":[{"type":"text","text":"テストを流して確かめる。"}],"usage":{"input_tokens":1200,"cache_read_input_tokens":800,"output_tokens":40}}}\n);
+        print qq({"type":"assistant","message":{"id":"r2","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cargo test -p login"}}]}}\n);
+        print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"test login::again ... FAILED\\ntest result: FAILED. 11 passed; 1 failed"}]}}\n);
+        $timeline->(2, '[{"op":"update","id":"t","status":"completed","note":"1 つ落ちる"},{"op":"update","id":"e","status":"in_progress"}]');
+        print qq({"type":"assistant","message":{"id":"r3","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/login.rs","old_string":"retry(1)","new_string":"retry(2)"}}]}}\n);
+        print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"e1","content":"ok"}]},"tool_use_result":{"filePath":"/src/login.rs","structuredPatch":[{"oldStart":10,"oldLines":3,"newStart":10,"newLines":3,"lines":[" fn login() {","-    retry(1)","+    retry(2)"," }"]}]}}\n);
+        print qq({"type":"assistant","message":{"id":"r4","content":[{"type":"tool_use","id":"b2","name":"Bash","input":{"command":"cargo test -p login"}}]}}\n);
+        print qq({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b2","content":"test result: ok. 12 passed; 0 failed"}]}}\n);
+        $timeline->(3, '[{"op":"update","id":"e","status":"completed"},{"op":"update","id":"g","status":"completed"}]');
+        gate("rich");
+        print qq({"type":"assistant","message":{"id":"r5","content":[{"type":"text","text":"直した。12 のテストが通る。"}],"usage":{"input_tokens":2400,"output_tokens":30}}}\n);
+    }
     if ($line =~ /e2e-plan/) {
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"text","text":"まず読む"}]}}\n);
         print qq({"type":"assistant","message":{"id":"p","content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"読む","status":"completed"},{"content":"書く","status":"in_progress"}]}}]}}\n);

@@ -25,6 +25,7 @@ mod permissions;
 mod pictures;
 mod records;
 mod routines;
+mod runs;
 mod settings;
 mod sharing;
 pub mod tools;

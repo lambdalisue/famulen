@@ -953,3 +953,28 @@ test("the page read again with a conversation open shows it open, and back still
   await page.goBack();
   await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
 });
+
+test("a run is read on a phone, its output and its plan one at a time", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await call(request, "WorkerService", "SetWorkerSettings", { slots: 2, paused: false });
+  const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title: "電話で見る", request: "e2e-plan", runner: "agent" });
+  let run = "";
+  await expect
+    .poll(async () => {
+      const listed = await call<{ queue?: { task: string; run?: { id: string } }[] }>(request, "WorkerService", "ListDelegated", {});
+      run = listed.queue?.find((q) => q.task === t.id)?.run?.id ?? "";
+      return run;
+    }, { timeout: 30_000 })
+    .not.toBe("");
+  await page.goto(`/runs/${run}`);
+  const output = page.getByRole("region", { name: "出力" });
+  await expect(output).toContainText("まず読む");
+  await expect(page.getByRole("list", { name: "予定" })).toBeHidden();
+  await page.screenshot({ path: test.info().outputPath("phone-stream.png") });
+  await page.getByRole("radiogroup", { name: "見るもの" }).getByText("段取り").click();
+  await expect(page.getByRole("list", { name: "予定" })).toContainText("書く");
+  await expect(page.locator(".run-plan")).toContainText("覚え書きから自動で読んだ段取り");
+  await expect(output).toBeHidden();
+  await page.screenshot({ path: test.info().outputPath("phone-plan.png") });
+  letOn("written");
+});

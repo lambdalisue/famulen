@@ -451,6 +451,19 @@ CREATE TABLE IF NOT EXISTS worker_runs (
     started_at INTEGER,
     ended_at   INTEGER
 );
+-- what each run did, settled; `key` names what is told again as it grows
+CREATE TABLE IF NOT EXISTS run_events (
+    run   INTEGER NOT NULL,
+    seq   INTEGER NOT NULL,
+    key   TEXT NOT NULL,
+    at    INTEGER NOT NULL,
+    kind  TEXT NOT NULL,
+    cut   INTEGER NOT NULL DEFAULT 0,
+    body  TEXT NOT NULL,
+    PRIMARY KEY (run, seq),
+    UNIQUE (run, key)
+);
+CREATE INDEX IF NOT EXISTS run_events_kind ON run_events (run, kind, seq);
 -- What became of a run after a turn of its session ended.
 CREATE TABLE IF NOT EXISTS worker_again (
     run          INTEGER PRIMARY KEY,
