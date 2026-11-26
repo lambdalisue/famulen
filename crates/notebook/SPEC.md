@@ -281,7 +281,7 @@ sections:
 | `Connection` | Adroit のつなぎ先。一つしかなければ書かなくてよい |
 | `Directory` | 働くディレクトリの絶対パス。`adroit` には要る |
 | `Worktree`・`Base` | 新しいワークツリーで働くか、その元の版 |
-| `Agent`・`Agent model` | セッションのエージェントとモデル |
+| `Agent`・`Agent model` | セッションのエージェントとモデル。Claude Code でモデルを書かなければ手代のモデルで動くので、重い仕事にだけ `opus` などを書く |
 | `Permissions` | `default` か `read_only` |
 | `Tools` | `agent` に渡す道具の名前の並び |
 | `Files` | `agent` に読ませる手帳のファイルの並び。手帳の根からのパスか wiki リンク |

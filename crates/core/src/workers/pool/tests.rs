@@ -1254,6 +1254,56 @@ async fn a_start_in_adroit_is_judged_and_held_for_the_owner_with_what_it_would_d
 }
 
 #[tokio::test]
+async fn a_session_without_a_model_runs_on_the_workers_unless_another_agent_is_named() {
+    let dir = TempDir::new("pool-real-model");
+    let app = crate::runtime::testing::app(dir.path());
+    app.gateway
+        .add_defined("adroit", Default::default(), None)
+        .unwrap();
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    let src = at("/src/api");
+    for (title, fields) in [
+        ("書かない", vec![]),
+        ("claude", vec![("Agent", "claude")]),
+        ("選ぶ", vec![("Agent model", "opus")]),
+        ("codex", vec![("Agent", "codex")]),
+    ] {
+        let mut fields = fields;
+        fields.extend([("Runner", "adroit"), ("Directory", src.as_str())]);
+        app.records
+            .add(Writer::Secretary, TASKS, delegated(title, &fields))
+            .unwrap();
+    }
+    pool.tick().await.unwrap();
+
+    let held = app.gateway.held_tickets().unwrap();
+    let model_of = |title: &str| {
+        let shown = &held
+            .iter()
+            .find(|t| t.shown["name"].as_str().unwrap().ends_with(title))
+            .unwrap_or_else(|| panic!("{title} was not started"))
+            .shown;
+        (shown["agent"].clone(), shown["model"].clone())
+    };
+    assert_eq!(model_of("書かない"), (json!("claude"), json!("sonnet")));
+    assert_eq!(model_of("claude"), (json!("claude"), json!("sonnet")));
+    assert_eq!(model_of("選ぶ"), (serde_json::Value::Null, json!("opus")));
+    assert_eq!(model_of("codex"), (json!("codex"), serde_json::Value::Null));
+
+    // A start held for approval is made again as it was asked.
+    let worker = crate::models::Role::Worker;
+    app.models
+        .assign(worker, "claude-opus", None, None)
+        .unwrap();
+    let kept = app.workers.runs.open().unwrap();
+    let kept = kept
+        .iter()
+        .find(|r| r.order.title.ends_with("書かない"))
+        .unwrap();
+    assert_eq!(kept.order.model, "sonnet");
+}
+
+#[tokio::test]
 async fn a_start_through_a_connection_outside_the_tasks_workgroup_is_asked_even_when_allowed() {
     let dir = TempDir::new("pool-real-workgroup");
     let app = crate::runtime::testing::app(dir.path());
