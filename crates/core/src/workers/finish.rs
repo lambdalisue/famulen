@@ -261,6 +261,17 @@ mod tests {
         assert_eq!(steps_of(&own, Some(famulen)), "own");
     }
 
+    #[test]
+    fn famulen_is_reviewed_by_codex_a_bounded_number_of_times_and_waited_on_in_one_call() {
+        let steps = &bundled_finishes()[0].steps;
+        assert!(steps.contains("`code-review-codex`"), "{steps}");
+        assert!(steps.contains("2 回まで"), "{steps}");
+        assert!(
+            steps.contains("`gh pr checks --watch --fail-fast`"),
+            "{steps}"
+        );
+    }
+
     #[tokio::test]
     async fn the_repository_is_told_from_anywhere_inside_a_clone() {
         let tmp = TempDir::new("finish-clone");
