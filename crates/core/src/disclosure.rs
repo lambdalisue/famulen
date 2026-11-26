@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
+use chrono_tz::Tz;
 use futures_util::future::BoxFuture;
 use serde_json::Value;
 
@@ -18,11 +19,15 @@ use crate::slack::clients::SlackClients;
 use crate::slack::web::{Room, Slack};
 use crate::store::Store;
 
+mod carried;
+mod notebook;
 mod reader;
 mod sources;
 mod taint;
 mod web;
 
+pub(crate) use carried::*;
+pub(crate) use notebook::settle_notebook;
 pub use reader::ModelReader;
 pub use sources::PLAIN;
 pub(crate) use sources::{
@@ -56,6 +61,11 @@ pub struct Saying {
     pub here: bool,
     /// What the owner themselves said in the turn; empty when nothing.
     pub owner: String,
+    /// What was written in confidence among what every session is handed of
+    /// memory.
+    pub confided: Vec<String>,
+    /// Only what tells those lines is of concern.
+    pub confided_only: bool,
 }
 
 /// What the reader made of it.
@@ -75,9 +85,6 @@ pub trait Reader: Send + Sync {
 /// The shortest quotation that can allow anything.
 const QUOTED_CHARS: usize = 4;
 
-/// The shortest id of a record or memory that is looked for in what is read.
-const SHORTEST_ID: usize = 8;
-
 impl Reading {
     /// The owner's words that allow it, when they are really the owner's.
     fn allowed(&self, saying: &Saying) -> Option<&str> {
@@ -95,6 +102,8 @@ pub(crate) struct Gate<'a, S> {
     pub permissions: &'a Permissions,
     pub approvals: &'a Approvals<S>,
     pub reader: Option<&'a Arc<dyn Reader>>,
+    /// The owner's, by whose date memory is handed to the secretary.
+    pub tz: Tz,
 }
 
 /// Why the owner is asked, and what is kept for when they answer.
@@ -168,6 +177,8 @@ impl<S: Slack> Gate<'_, S> {
 
     /// Why the owner is asked before a connection's tool does what reaches
     /// other people. What was read through that connection may go back by it.
+    /// A turn that read nothing is asked of when what it sends tells memory
+    /// written in confidence, which its session may have been handed.
     pub(crate) async fn asks_outside(&self, server: &str, input: &Value) -> Option<Asking> {
         let asking = |taints: BTreeSet<Taint>, read: String| Asking {
             why: format!("{MARK}ほかの人に届く。{read}。"),
@@ -175,29 +186,86 @@ impl<S: Slack> Gate<'_, S> {
             channel: String::new(),
             taints,
         };
+        let unsure = |error: anyhow::Error| {
+            tracing::warn!(%error, "could not tell what the turn read; asking");
+            Some(asking(
+                BTreeSet::new(),
+                "このターンで読んだものを確かめられなかった".into(),
+            ))
+        };
         match self.read_before(server, input).await {
-            Ok((taints, _)) if taints.is_empty() => None,
             // It is asked of, so that the pass the owner's answer gave is used up.
-            Ok((taints, true)) => Some(asking(taints, "承認された呼び出し".into())),
-            Ok((taints, false)) => {
+            Ok((taints, covered)) if covered.exact => {
+                Some(asking(taints, "承認された呼び出し".into()))
+            }
+            Ok((taints, covered)) if taints.is_empty() => {
+                match self.tells_handed(server, input).await {
+                    Ok(None) => None,
+                    Ok(Some(why)) => {
+                        let earlier = BTreeSet::from([Taint::earlier()]);
+                        (!earlier.is_subset(&covered.taints)).then(|| asking(earlier, why))
+                    }
+                    Err(error) => unsure(error),
+                }
+            }
+            Ok((taints, _)) => {
                 let read = labels(&taints).join("、");
                 Some(asking(taints, format!("{read}を読んだ")))
             }
-            Err(error) => {
-                tracing::warn!(%error, "could not tell what the turn read; asking");
-                Some(asking(
-                    BTreeSet::new(),
-                    "このターンで読んだものを確かめられなかった".into(),
-                ))
-            }
+            Err(error) => unsure(error),
         }
+    }
+
+    /// What of the memory written in confidence a connection's call tells.
+    async fn tells_handed(&self, server: &str, input: &Value) -> anyhow::Result<Option<String>> {
+        let Some(row) = self.store.running_input()? else {
+            anyhow::bail!("no turn is running");
+        };
+        let repository = sources::repository_of(input);
+        let confided = carried::confided(self.store, self.memory_dir, self.tz, row.id, |taint| {
+            !taint.came_by(server) && !taint.of_repository(server, repository.as_deref())
+        })?;
+        if confided.is_empty() {
+            return Ok(None);
+        }
+        let name = self.name_of(server);
+        let saying = Saying {
+            text: input.to_string(),
+            room: format!("接続先「{name}」を通じてほかの人に届くところ"),
+            read: Vec::new(),
+            here: false,
+            owner: owners_words(&row.input),
+            confided,
+            confided_only: true,
+        };
+        let reading = match self.read(&saying).await {
+            Ok(reading) => reading,
+            Err(error) => {
+                return Ok(Some(format!(
+                    "見極めが送る内容を確かめられなかった（{error:#}）"
+                )));
+            }
+        };
+        if let Some(words) = reading.allowed(&saying)
+            && reading.discloses.is_some()
+        {
+            Journal::new(self.store.clone()).record(
+                JOURNAL,
+                format!(
+                    "{} への送信を確認なしで通した：主人の言葉「{words}」",
+                    saying.room
+                ),
+            );
+            return Ok(None);
+        }
+        Ok(reading.discloses)
     }
 
     async fn read_before(
         &self,
         server: &str,
         input: &Value,
-    ) -> anyhow::Result<(BTreeSet<Taint>, bool)> {
+    ) -> anyhow::Result<(BTreeSet<Taint>, Covered)> {
         let Some(row) = self.store.running_input()? else {
             anyhow::bail!("no turn is running");
         };
@@ -205,7 +273,7 @@ impl<S: Slack> Gate<'_, S> {
         let repository = sources::repository_of(input);
         taints.retain(|t| !t.came_by(server) && !t.of_repository(server, repository.as_deref()));
         let covered = self.covered(row.id, &row.input, server, "", input)?;
-        Ok((taints, covered.exact))
+        Ok((taints, covered))
     }
 
     /// What the worker of a run was handed and read.
@@ -286,6 +354,8 @@ impl<S: Slack> Gate<'_, S> {
             read: labels(&taints),
             here: answers || !here.is_empty(),
             owner: owners_words(&row.input),
+            confided: carried::confided(self.store, self.memory_dir, self.tz, row.id, |_| true)?,
+            confided_only: false,
         };
         // Nothing of such a turn goes out unasked, whatever is in it.
         let reading = if inward || (!taints.is_empty() && saying.owner.is_empty()) {
@@ -432,12 +502,7 @@ impl<S: Slack> Gate<'_, S> {
     /// as an answer, a path or a file tells them. Too short an id could be
     /// anything, so it names nothing.
     pub(crate) fn of_marked_in(&self, text: &str) -> anyhow::Result<Vec<Taint>> {
-        let found: BTreeSet<Taint> = taint::marked_records(self.store)?
-            .into_iter()
-            .filter(|(id, _)| id.len() >= SHORTEST_ID && text.contains(id.as_str()))
-            .map(|(_, taint)| taint)
-            .collect();
-        Ok(found.into_iter().collect())
+        Ok(carried::marked_in(self.store, text)?.into_iter().collect())
     }
 
     /// What was written into any record or memory of the notebook.
@@ -580,6 +645,13 @@ pub(crate) fn carry(store: &Store, from: &[i64], inputs: &[i64], to: i64) -> any
     for holder in holders {
         let taints: Vec<Taint> = taint::held_by(store, &holder)?.into_iter().collect();
         taint::mark(store, &Holder::Conversation(to), &taints)?;
+    }
+    let mut sources = from.to_vec();
+    for input in inputs {
+        sources.extend(taint::conversation_of(store, *input)?);
+    }
+    for source in sources {
+        carry_handed(store, source, to)?;
     }
     Ok(())
 }

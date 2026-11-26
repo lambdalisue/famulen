@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
+use chrono::Utc;
+use chrono_tz::Tz;
 use futures_util::FutureExt;
 use rusqlite::params;
 use serde_json::json;
 
+use super::marking;
 use super::sources::{Looks, is_slack};
 use super::*;
 use crate::approvals::Answer;
@@ -33,6 +36,7 @@ struct World {
     approvals: Approvals<&'static FakeSlack>,
     reader: Arc<dyn Reader>,
     memory: std::path::PathBuf,
+    tz: Tz,
     _dir: TempDir,
 }
 
@@ -83,6 +87,7 @@ impl World {
             approvals,
             reader: Arc::new(Told(reading)),
             memory,
+            tz: Tz::UTC,
             _dir: dir,
         };
         world.turn(source, "x");
@@ -133,6 +138,7 @@ impl World {
             permissions: &self.permissions,
             approvals: &self.approvals,
             reader: Some(&self.reader),
+            tz: self.tz,
         }
     }
 
@@ -160,6 +166,11 @@ impl World {
     /// Hold a saying the way the session does.
     async fn held(&self, channel: &str, text: &str) -> i64 {
         let asking = self.asks_of(channel, text).await.unwrap();
+        self.hold(asking, &said(channel, text)).await
+    }
+
+    /// Hold a call that was asked about.
+    async fn hold(&self, asking: Asking, input: &Value) -> i64 {
         let bound = crate::permissions::Bound {
             ask: Some(asking.why.clone()),
             waive: false,
@@ -177,7 +188,7 @@ impl World {
             .decide_bound(
                 crate::permissions::Caller::Secretary,
                 "mcp__famulen__send_slack",
-                &said(channel, text),
+                input,
                 bound,
             )
             .await
@@ -1437,4 +1448,569 @@ async fn a_turn_whose_marks_cannot_be_told_is_marked_as_holding_something() {
         )
         .unwrap();
     assert_eq!(rows, 2, "the fallback mark is kept beside the broken one");
+}
+
+impl World {
+    fn root(&self) -> &std::path::Path {
+        self.memory.parent().unwrap()
+    }
+
+    fn write(&self, path: &str, text: &str) {
+        let path = self.root().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    /// Begin a turn the way the session does, with the notebook watched.
+    async fn watched(&self, message: i64) -> i64 {
+        let id = self.turn(console_at(message), "x");
+        self.gate()
+            .watch_notebook(id, &self.input(id))
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn ends(&self) {
+        settle_notebook(&self.store, &self.memory).unwrap();
+        compare_written(&self.store, Some(&*self.reader))
+            .await
+            .unwrap();
+    }
+
+    fn keeps_history(&self) {
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(self.root())
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    fn marked(&self, text: &str) -> bool {
+        !self.gate().of_marked_in(text).unwrap().is_empty()
+    }
+}
+
+const CORE: &str = "# 心得\n- 前からある {id: mbefore001, uses: 1}\n";
+
+#[tokio::test]
+async fn what_a_turn_leaves_in_the_notebook_is_marked_however_it_was_written() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.write("memory/core.md", CORE);
+    world.write(
+        "memory/long/semantic/old.md",
+        "---\nid: mlongold01\nsummary: 前\nuses: 1\n---\n\n本文\n",
+    );
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 前からある {id: mbefore001, uses: 2}\n- 書き足した {id: madded0001}\n手書きの行\n",
+    );
+    world.write("memory/working/plan.md", "# 計画\n\n## 次\n\n進める\n");
+    world.write(
+        "memory/long/semantic/old.md",
+        "---\nid: mlongold01\nsummary: 前\nuses: 2\n---\n\n本文\n",
+    );
+    world.write(
+        "memory/long/semantic/new.md",
+        "---\nid: mlongnew01\nsummary: 新\n---\n\n本文\n",
+    );
+    world.write("records/memos/01memo0000000000000000000a.md", "# memo\n");
+    world.ends().await;
+
+    for named in [
+        "- x {id: madded0001}",
+        "memory/core.md",
+        "memory/working/plan.md",
+        "memory/long/semantic/new.md",
+        "{id: mlongnew01}",
+        "01memo0000000000000000000a",
+    ] {
+        assert!(world.marked(named), "{named}");
+    }
+    for untouched in [
+        "{id: mbefore001}",
+        "memory/long/semantic/old.md",
+        "{id: mlongold01}",
+    ] {
+        assert!(!world.marked(untouched), "{untouched}");
+    }
+}
+
+#[tokio::test]
+async fn a_routine_written_by_hand_hands_its_mark_to_its_runs() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write("records/routines/01routine00000000000000000.md", "# r\n");
+    world.write("records/tasks/01task000000000000000000001.md", "# t\n");
+    world.ends().await;
+
+    carry_routine(&world.store, "01routine00000000000000000", "T9").unwrap();
+
+    for task in ["T9", "01task000000000000000000001"] {
+        let held = taint::held_by(&world.store, &Holder::Task(task.into())).unwrap();
+        assert!(!held.is_empty(), "{task}");
+    }
+}
+
+#[tokio::test]
+async fn what_is_written_beside_a_memorys_text_is_marked_too() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 理由が付く {id: mreason001}\n- 数えるだけ {id: mcount0001, uses: 1}\n",
+    );
+    world.write(
+        "memory/long/semantic/noted.md",
+        "---\nid: mlongnote1\nsummary: 前\n---\n\n本文\n",
+    );
+    world.write(
+        "memory/long/semantic/counted.md",
+        "---\nid: mlongcnt01\nsummary: 前\nuses: 1\n---\n\n本文\n",
+    );
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 理由が付く {id: mreason001, reason: 内々の事情}\n\
+         - 数えるだけ {id: mcount0001, uses: 2, last: 2026-11-27, ev: 3}\n",
+    );
+    world.write(
+        "memory/long/semantic/noted.md",
+        "---\nid: mlongnote1\nsummary: 前\nnote: 内々の事情\n---\n\n本文\n",
+    );
+    world.write(
+        "memory/long/semantic/counted.md",
+        "---\nid: mlongcnt01\nsummary: 前\nuses: 2\nlast: 2026-11-27\n---\n\n本文\n",
+    );
+    world.ends().await;
+
+    for named in ["{id: mreason001}", "{id: mlongnote1}"] {
+        assert!(world.marked(named), "{named}");
+    }
+    for untouched in ["{id: mcount0001}", "{id: mlongcnt01}"] {
+        assert!(!world.marked(untouched), "{untouched}");
+    }
+}
+
+#[tokio::test]
+async fn a_turn_that_read_nothing_in_confidence_marks_nothing_it_writes() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.watched(40).await;
+    world.write("memory/working/plan.md", "# 計画\n");
+    world.ends().await;
+    assert!(world.gate().of_all_marked().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn what_a_turn_cut_off_wrote_is_marked_before_the_next_one() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write("memory/working/plan.md", "# 計画\n");
+    world.watched(41).await;
+    assert!(world.marked("memory/working/plan.md"));
+}
+
+#[tokio::test]
+async fn a_file_the_own_tool_reads_is_told_by_where_it_is() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write("memory/working/plan.md", "# 計画\n");
+    world.ends().await;
+    for path in ["working/plan.md", "memory/working/plan.md"] {
+        let read = world
+            .gate()
+            .of_marked_read("read_file", &json!({ "path": path }), "# 計画\n")
+            .unwrap();
+        assert!(!read.is_empty(), "{path}");
+    }
+}
+
+/// Keeps what it was given to read, and finds nothing in it.
+#[derive(Default)]
+struct Heard(std::sync::Mutex<Vec<Saying>>);
+
+impl Reader for Heard {
+    fn read<'a>(&'a self, saying: &'a Saying) -> BoxFuture<'a, anyhow::Result<Reading>> {
+        self.0.lock().unwrap().push(saying.clone());
+        async move { Ok(Reading::default()) }.boxed()
+    }
+}
+
+#[tokio::test]
+async fn working_memory_a_tool_names_is_told_by_its_name() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write("memory/working/plan.md", "# 計画\n");
+    world.ends().await;
+    let answer = json!({ "working": [{ "name": "plan" }] }).to_string();
+    for tool in ["get_layer", "set_working"] {
+        let read = world.gate().of_marked_read(tool, &json!({}), &answer);
+        assert!(!read.unwrap().is_empty(), "{tool}");
+    }
+    let other = json!({ "name": "planning" }).to_string();
+    let read = world
+        .gate()
+        .of_marked_read("set_working", &json!({}), &other);
+    assert!(read.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_file_marked_by_its_path_is_told_by_the_items_a_tool_reads_from_it() {
+    let world = World::new(console());
+    marking::mark(&world.store, "memory/core.md");
+    let answer = |file: &str| json!({ "items": [{ "file": file }] }).to_string();
+    let read = |file| {
+        let gate = world.gate();
+        let taints = gate.of_marked_read("get_layer", &json!({}), &answer(file));
+        taints.unwrap()
+    };
+    assert!(!read("core.md").is_empty());
+    assert!(read("pending.md").is_empty());
+}
+
+#[tokio::test]
+async fn the_reader_is_shown_what_was_written_in_confidence_into_what_every_session_is_handed() {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 秘密の話 {id: msecret001, src: inferred}\n- 天気の話 {id: mplain0001, src: inferred}\n",
+    );
+    world.write(
+        "memory/long/semantic/a.md",
+        "---\nid: mlong00001\nsummary: 内々の方針\n---\n\n本文\n",
+    );
+    world.write("memory/working/plan.md", "# 内々の段取り\n");
+    for key in [
+        "msecret001",
+        "memory/long/semantic/a.md",
+        "memory/working/plan.md",
+    ] {
+        marking::mark(&world.store, key);
+    }
+
+    assert_eq!(world.asks(PUBLIC).await, None);
+
+    let heard = heard.0.lock().unwrap();
+    let confided = heard[0].confided.join("\n");
+    for told in ["秘密の話", "内々の方針", "working/plan.md"] {
+        assert!(confided.contains(told), "{told}: {confided}");
+    }
+    assert!(!confided.contains("天気の話"), "{confided}");
+}
+
+#[tokio::test]
+async fn the_reader_is_still_shown_what_a_conversation_was_handed_after_memory_drops_it() {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 秘密の話 {id: msecret001, src: inferred}\n",
+    );
+    marking::mark(&world.store, "msecret001");
+    world.keeps_history();
+    let id = world.turn(console_at(2), "x");
+    link(&world, 1, id);
+    world
+        .gate()
+        .watch_notebook(id, &world.input(id))
+        .await
+        .unwrap();
+    world.write("memory/core.md", "# 心得\n");
+
+    assert_eq!(world.asks(PUBLIC).await, None);
+
+    let heard = heard.0.lock().unwrap();
+    let confided = heard[0].confided.join("\n");
+    assert!(confided.contains("秘密の話"), "{confided}");
+}
+
+const CONFIDED_CORE: &str = "# 心得\n- 秘密の話 {id: msecret001, src: inferred}\n- 天気の話 {id: mplain0001, src: inferred}\n";
+
+/// Core memory with a line written in confidence, read in an earlier turn.
+fn confided_line(world: &World) {
+    world.write("memory/core.md", CONFIDED_CORE);
+    marking::mark(&world.store, "msecret001");
+}
+
+fn telling() -> anyhow::Result<Reading, String> {
+    Ok(Reading {
+        discloses: Some("秘密の話".into()),
+        allowed_by: None,
+    })
+}
+
+#[tokio::test]
+async fn what_a_connection_sends_out_is_asked_about_when_it_tells_marked_memory() {
+    let world = World::reading(console(), telling());
+    let sent = json!({ "body": "秘密の話" });
+    assert_eq!(world.gate().asks_outside("mail", &sent).await, None);
+    confided_line(&world);
+    let asking = world.gate().asks_outside("mail", &sent).await.unwrap();
+    assert!(asking.why.contains("秘密の話"), "{}", asking.why);
+}
+
+#[tokio::test]
+async fn what_a_connection_sends_out_is_read_against_marked_memory_alone() {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    confided_line(&world);
+    let sent = json!({ "body": "ご連絡" });
+
+    assert_eq!(world.gate().asks_outside("mail", &sent).await, None);
+    // What came by a connection may go back by it.
+    assert_eq!(world.gate().asks_outside("gh", &sent).await, None);
+
+    let heard = heard.0.lock().unwrap();
+    assert_eq!(heard.len(), 1);
+    assert!(heard[0].confided_only);
+    assert!(heard[0].text.contains("ご連絡"), "{}", heard[0].text);
+    let confided = heard[0].confided.join("\n");
+    assert!(confided.contains("秘密の話"), "{confided}");
+}
+
+#[tokio::test]
+async fn what_a_connection_sends_out_is_asked_about_when_it_cannot_be_read() {
+    let world = World::reading(console(), Err("down".into()));
+    confided_line(&world);
+    assert!(
+        world
+            .gate()
+            .asks_outside("mail", &Value::Null)
+            .await
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn an_approved_call_that_told_marked_memory_is_asked_once_more_to_use_its_pass() {
+    let world = World::reading(console(), telling());
+    confided_line(&world);
+    let sent = json!({ "body": "秘密の話" });
+    let asking = world.gate().asks_outside("mail", &sent).await.unwrap();
+    let id = world.hold(asking, &sent).await;
+    world
+        .approvals
+        .answer_by_id(id, Answer::Approve)
+        .await
+        .unwrap();
+    world.after(id);
+
+    let again = world.gate().asks_outside("mail", &sent).await.unwrap();
+    assert!(again.why.contains("承認された呼び出し"), "{}", again.why);
+    let other = json!({ "body": "秘密の話の続き" });
+    assert_eq!(world.gate().asks_outside("mail", &other).await, None);
+}
+
+/// What of the memory written in confidence is handed on the date in `tz`,
+/// for a line that holds on that date alone.
+async fn handed_on_the_date_in(tz: Tz) -> String {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    world.tz = tz;
+    let today = Utc::now().with_timezone(&tz).date_naive();
+    let line = format!("# 心得\n- 秘密の話 {{id: msecret001, from: {today}, to: {today}}}\n");
+    world.write("memory/core.md", &line);
+    marking::mark(&world.store, "msecret001");
+
+    world.gate().asks_outside("mail", &Value::Null).await;
+
+    let heard = heard.0.lock().unwrap();
+    heard.iter().flat_map(|s| s.confided.clone()).collect()
+}
+
+#[tokio::test]
+async fn memory_is_handed_by_the_date_in_the_owners_time_zone() {
+    // The two are never on the same date, so the machine's own date cannot
+    // stand for both.
+    for tz in [Tz::Pacific__Kiritimati, Tz::Pacific__Pago_Pago] {
+        let handed = handed_on_the_date_in(tz).await;
+        assert!(handed.contains("秘密の話"), "{tz}: {handed}");
+    }
+}
+
+/// A turn that writes out what core memory, which it was handed, was told in
+/// confidence, and drops the line it took it from.
+async fn copies_what_it_was_handed(world: &World) {
+    world.keeps_history();
+    confided_line(world);
+    world.watched(40).await;
+    world.write("memory/core.md", "# 心得\n");
+    world.write(
+        "records/memos/01memo0000000000000000000a.md",
+        "# 秘密の話\n",
+    );
+    world.write(
+        "records/routines/01routine00000000000000000.md",
+        "# 秘密の話\n",
+    );
+    world.ends().await;
+}
+
+#[tokio::test]
+async fn what_a_turn_copies_out_of_the_memory_it_was_handed_is_marked() {
+    for reading in [telling(), Err("down".into())] {
+        let world = World::reading(console(), reading);
+        copies_what_it_was_handed(&world).await;
+
+        assert!(world.marked("01memo0000000000000000000a"));
+        let routine = Holder::Routine("01routine00000000000000000".into());
+        assert!(!taint::held_by(&world.store, &routine).unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn what_a_turn_writes_that_tells_nothing_it_was_handed_is_not_marked() {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    copies_what_it_was_handed(&world).await;
+
+    assert!(!world.marked("01memo0000000000000000000a"));
+    let heard = heard.0.lock().unwrap();
+    assert!(heard.iter().any(|said| said.text.contains("秘密の話")
+        && said.confided.iter().any(|line| line.contains("msecret001"))));
+}
+
+/// Read what was written once the turn of `message` has marked it again.
+struct MarksMeanwhile(Store);
+
+impl Reader for MarksMeanwhile {
+    fn read<'a>(&'a self, _: &'a Saying) -> BoxFuture<'a, anyhow::Result<Reading>> {
+        let holder = Holder::Record("01memo0000000000000000000a".into());
+        let held = taint::held_by(&self.0, &holder).unwrap();
+        taint::mark(&self.0, &holder, &held.into_iter().collect::<Vec<_>>()).unwrap();
+        async move { Ok(Reading::default()) }.boxed()
+    }
+}
+
+#[tokio::test]
+async fn a_comparison_does_not_take_back_what_was_marked_again_meanwhile() {
+    let mut world = World::new(console());
+    let holder = Holder::Record("01memo0000000000000000000a".into());
+    world.reader = Arc::new(MarksMeanwhile(world.store.clone()));
+    copies_what_it_was_handed(&world).await;
+
+    assert!(!taint::held_by(&world.store, &holder).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn what_two_comparisons_wait_on_stays_marked_until_both_clear_it() {
+    let world = World::new(console());
+    let holder = Holder::Record("01memo0000000000000000000a".into());
+    let taints = BTreeSet::from([Taint::new(Kind::Private, "x")]);
+    let doubt = || {
+        provisionally(
+            &world.store,
+            vec![("a".into(), vec![holder.clone()])],
+            &[],
+            &taints,
+        )
+    };
+    let (first, second) = (doubt().unwrap(), doubt().unwrap());
+    let reader = Some(&*world.reader);
+
+    settle_doubts(&world.store, reader, &first).await.unwrap();
+    settle_doubts(&world.store, reader, &first).await.unwrap();
+    assert_eq!(taint::held_by(&world.store, &holder).unwrap(), taints);
+
+    settle_doubts(&world.store, reader, &second).await.unwrap();
+    assert!(taint::held_by(&world.store, &holder).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_handed_to_a_conversation_goes_with_what_is_said_there() {
+    let mut world = World::new(console());
+    let heard = Arc::new(Heard::default());
+    world.reader = heard.clone();
+    world.keeps_history();
+    confided_line(&world);
+    let said = world.turn(console_at(12), "x");
+    link(&world, 1, said);
+    world
+        .gate()
+        .watch_notebook(said, &world.input(said))
+        .await
+        .unwrap();
+    world.ends().await;
+    world.write("memory/core.md", "# 心得\n");
+
+    let quoted = world.turn(console_at(13), "x");
+    link(&world, 2, quoted);
+    world
+        .gate()
+        .watch_notebook(quoted, &world.input(quoted))
+        .await
+        .unwrap();
+    carry(&world.store, &[1], &[], 2).unwrap();
+    world.write(
+        "records/memos/01memo0000000000000000000a.md",
+        "# 秘密の話\n",
+    );
+    world
+        .gate()
+        .asks_outside("mail", &json!({ "body": "秘密の話" }))
+        .await;
+    world.ends().await;
+
+    let heard = heard.0.lock().unwrap();
+    let compared: Vec<&Saying> = heard
+        .iter()
+        .filter(|s| s.confided.iter().any(|line| line.contains("msecret001")))
+        .collect();
+    for told in ["body", "01memo0000000000000000000a"] {
+        assert!(compared.iter().any(|s| s.text.contains(told)), "{told}");
+    }
+}
+
+#[tokio::test]
+async fn text_written_where_a_count_goes_is_marked() {
+    let world = World::new(console());
+    world.keeps_history();
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 甲 {id: mcounta001, uses: 1}\n- 乙 {id: mcountb001, last: 2026-11-26}\n- 丙 {id: mcountc001, ev: 1}\n",
+    );
+    world.write(
+        "memory/long/semantic/counted.md",
+        "---\nid: mlongcnt01\nsummary: 前\nuses: 1\n---\n\n本文\n",
+    );
+    world.watched(40).await;
+    read_closed_repository(&world);
+    world.write(
+        "memory/core.md",
+        "# 心得\n- 甲 {id: mcounta001, uses: 内々}\n- 乙 {id: mcountb001, last: 内々}\n- 丙 {id: mcountc001, ev: 内々}\n",
+    );
+    world.write(
+        "memory/long/semantic/counted.md",
+        "---\nid: mlongcnt01\nsummary: 前\nuses: 内々の事情\n---\n\n本文\n",
+    );
+    world.ends().await;
+
+    for named in [
+        "{id: mcounta001}",
+        "{id: mcountb001}",
+        "{id: mcountc001}",
+        "{id: mlongcnt01}",
+    ] {
+        assert!(world.marked(named), "{named}");
+    }
 }

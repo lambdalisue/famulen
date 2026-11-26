@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::app::App;
 use crate::console_log::Event;
+use crate::disclosure::{self, ModelReader};
 use crate::dream_settings::DreamSettings;
 use crate::dreaming;
 use crate::input::{Input, Sender, Source};
@@ -87,6 +88,12 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
     .await?;
     if !outcome.applied {
         return Ok((outcome.status, false));
+    }
+    // Before anything reads the memory and carries its marks on.
+    let reader = ModelReader::new(app.models.clone(), app.settings.clone());
+    if let Err(error) = disclosure::settle_doubts(&app.store, Some(&reader), &outcome.doubts).await
+    {
+        tracing::warn!(%error, "what the dream wrote stays marked");
     }
     match ask_about_working(app, today) {
         Ok(None) => {}
@@ -220,9 +227,13 @@ fn ask_about_working(app: &App, today: NaiveDate) -> anyhow::Result<Option<Strin
             list.join("\n")
         ),
     };
-    if !keep(&app.store, &app.inputs, &input)? {
+    let Some(id) = keep(&app.store, &app.inputs, &input)? else {
         return Ok(None);
-    }
+    };
+    let paths = found
+        .iter()
+        .map(|l| format!("memory/working/{}.md", l.name));
+    disclosure::carry_to_input(&app.store, paths, id)?;
     Ok(Some(format!(
         "作業記憶 {} 件を、閉じるか秘書に尋ねた",
         found.len()
@@ -257,9 +268,10 @@ fn ask_about_people(app: &App, today: NaiveDate) -> anyhow::Result<Option<String
         },
         text,
     };
-    if !keep(&app.store, &app.inputs, &input)? {
+    let Some(id) = keep(&app.store, &app.inputs, &input)? else {
         return Ok(None);
-    }
+    };
+    disclosure::carry_to_input(&app.store, notes.iter().map(|(_, note)| note), id)?;
     let _hold = app.notebook.hold()?;
     people::mark_told(&app.memory_dir, today, &notes)?;
     Ok(Some(format!(
@@ -281,6 +293,7 @@ async fn ask(app: &App, system: String, prompt: String, schema: Value) -> anyhow
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::disclosure::marking;
     use crate::memory::{WorkingMemory, ensure, working_memories, write_working};
     use crate::notebook::testing::TempDir;
 
@@ -317,10 +330,15 @@ mod tests {
             .unwrap();
         };
         note("田中");
+        for (_, noted) in people::to_ask(&app.memory_dir, today).unwrap().unwrap().1 {
+            marking::mark(&app.store, &noted);
+        }
 
         let asked = ask_about_people(&app, today).unwrap().unwrap();
 
         assert!(asked.contains("人の気づき 1 件"), "{asked}");
+        let first = app.store.recent_inputs(0, 10).unwrap()[0].0.id;
+        assert!(marking::marked_input(&app.store, first));
         note("佐藤");
         assert_eq!(ask_about_people(&app, today).unwrap(), None);
         ask_about_people(&app, today.succ_opt().unwrap()).unwrap();
@@ -375,6 +393,7 @@ mod tests {
             .unwrap()
             .set_modified(SystemTime::now() - std::time::Duration::from_secs(8 * 86_400))
             .unwrap();
+        marking::mark(&app.store, "memory/working/trip.md");
 
         let asked = ask_about_working(&app, today).unwrap();
 
@@ -384,6 +403,7 @@ mod tests {
         assert_eq!(inputs.len(), 1);
         let input = &inputs[0].0.input;
         assert_eq!(input.sender, Sender::System);
+        assert!(marking::marked_input(&app.store, inputs[0].0.id));
         assert!(input.text.contains("- trip: not written for 8 days"));
         assert!(input.text.contains("close_working"));
         assert_eq!(working_memories(&app.memory_dir).unwrap().len(), 1);

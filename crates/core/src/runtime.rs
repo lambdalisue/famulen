@@ -29,6 +29,7 @@ use tokio::sync::{Notify, mpsc};
 use crate::app::App;
 use crate::claude::session::InFlight;
 use crate::config::{ApiConfig, Config};
+use crate::dreaming;
 use crate::hub::OwnTools;
 use crate::input::Input;
 use crate::notebook_place;
@@ -69,6 +70,9 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     tracing::info!(api = %format!("http://{listen}/"), "serving the API");
     let tools = surface.tools(&app);
     app.permissions.record_own_tools(&tools.list())?;
+    if let Err(error) = dreaming::recover_marks(&app.store, &app.records) {
+        tracing::warn!(%error, "could not give back the marks earlier dreams dropped");
+    }
     tokio::spawn(chores::chores(app.clone()));
     for line in crate::mail_line::Line::ALL {
         tokio::spawn(chores::read_line(app.clone(), line));
@@ -130,11 +134,11 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
 }
 
 /// Keep an input for the session. Returns whether it was new.
-fn keep(store: &Store, arrived: &Notify, input: &Input) -> anyhow::Result<bool> {
+fn keep(store: &Store, arrived: &Notify, input: &Input) -> anyhow::Result<Option<i64>> {
     let Some(id) = store.enqueue(input)? else {
-        return Ok(false);
+        return Ok(None);
     };
     tracing::info!(id, "input kept");
     arrived.notify_one();
-    Ok(true)
+    Ok(Some(id))
 }

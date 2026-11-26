@@ -207,8 +207,19 @@ fn of_hit(memory_dir: &Path, hit: &Value) -> Vec<Taint> {
         .collect()
 }
 
+/// A path as given to the notebook's tools, from the notebook's directory.
+pub(super) fn in_notebook(memory_dir: &Path, path: &str) -> Option<String> {
+    let root = root(memory_dir);
+    let given = crate::paths::plain(PathBuf::from(path));
+    let found = [root.join(&given), memory_dir.join(&given)]
+        .iter()
+        .find_map(|p| p.canonicalize().ok())?;
+    let inside = found.strip_prefix(root.canonicalize().ok()?).ok()?;
+    Some(inside.to_string_lossy().into_owned())
+}
+
 /// The notebook's directory.
-fn root(memory_dir: &Path) -> &Path {
+pub(super) fn root(memory_dir: &Path) -> &Path {
     memory_dir.parent().unwrap_or(memory_dir)
 }
 

@@ -350,6 +350,8 @@ fn merge(store: &Store, held: &Held<'_>, alike: &[Record]) -> anyhow::Result<Cha
         ..Patch::default()
     };
     held.change(Writer::Secretary, HOLDINGS, &kept.id, patch)?;
+    let from = gone.iter().flat_map(|r| [r.id.clone(), r.rel()]);
+    crate::disclosure::carry_record(store, from, &kept.id)?;
     // Moved before the removal, so that stopping midway leaves nothing that a
     // second pass cannot finish.
     for other in gone {
@@ -650,6 +652,18 @@ mod tests {
         assert_eq!(detail(&b.only(), "数量").as_deref(), Some("3"));
         assert_eq!(done.changes.len(), 1);
         assert!(b.tidy().is_none());
+    }
+
+    #[test]
+    fn what_a_record_put_into_another_was_marked_with_stays_on_that_one() {
+        let b = book("same-marked");
+        b.bought(1, thing("タイル"));
+        let other = b.bought(1, thing("タイル"));
+        crate::disclosure::marking::mark(&b.store, &other.id);
+        b.tidy();
+        let kept = b.only();
+        assert_ne!(kept.id, other.id);
+        assert!(crate::disclosure::marking::marked(&b.store, &kept.id));
     }
 
     #[test]

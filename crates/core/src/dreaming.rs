@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use famulen_notebook::index::Index;
 
 use crate::console_log::{ConsoleLog, Who};
+use crate::disclosure;
 use crate::dream_settings::DreamSettings;
 use crate::judging;
 use crate::memory::{self, Basis, DreamDiff, DreamSummary, Entry, EpisodeState, Layer, Snapshot};
@@ -831,12 +832,15 @@ pub struct Outcome {
     pub night: i64,
     pub commit: Option<String>,
     pub summary: DreamSummary,
+    /// What is marked until it is compared with what was read in confidence.
+    pub(crate) doubts: Vec<disclosure::Doubt>,
 }
 
 impl Outcome {
     /// A night that changed nothing, with why.
     fn nothing(status: String) -> Self {
         Self {
+            doubts: Vec::new(),
             status,
             applied: false,
             night: 0,
@@ -856,6 +860,16 @@ pub struct Night {
     /// The memory commit the dream made; none when nothing was applied.
     pub commit: Option<String>,
     pub summary: DreamSummary,
+}
+
+/// Give back, once, the marks that earlier dreams dropped.
+pub(crate) fn recover_marks(store: &Store, records: &Records) -> anyhow::Result<()> {
+    let nights: Vec<Vec<memory::Change>> = dreams_before(store, 0, i32::MAX as usize)?
+        .into_iter()
+        .rev()
+        .map(|night| night.summary.changes)
+        .collect();
+    disclosure::recover(store, records, &nights)
 }
 
 /// The latest dreams, oldest first.
@@ -908,6 +922,9 @@ pub fn dreams_of(store: &Store, item: &str) -> anyhow::Result<Vec<Night>> {
 /// returns its JSON answer. The night is recorded in the `dreams` table.
 /// The memory is applied on its own: what follows a dream reads
 /// [`Outcome::applied`] and the night it was recorded as.
+/// How far back the talk a dream is shown goes.
+const TALK_DAYS: i64 = 1;
+
 pub async fn dream<F, Fut>(
     store: &Store,
     records: &Records,
@@ -929,8 +946,9 @@ where
     };
     prompt.push_str(&rejected(dir, today)?);
     prompt.push_str(&lately_discarded(store)?);
-    prompt.push_str(&talk(store, 1)?);
+    prompt.push_str(&talk(store, TALK_DAYS)?);
     let _ = writeln!(prompt, "\nToday is {today}.");
+    let shown = prompt.clone();
     let mut outcome = match ask(system(core_lines), prompt).await {
         Err(error) => Outcome::nothing(format!("見られなかった（{error}）")),
         Ok(answer) => {
@@ -938,7 +956,11 @@ where
             // dream's: a refused dream must not take it back.
             let _hold = records.notebook().hold()?;
             commit_day(dir)?;
-            let outcome = apply_answer(store, records, dir, &usage, today, &read, answer)?;
+            let shown = Shown {
+                read: &read,
+                prompt: &shown,
+            };
+            let outcome = apply_answer(store, records, dir, &usage, today, shown, answer)?;
             if outcome.applied {
                 return Ok(outcome);
             }
@@ -961,11 +983,14 @@ fn ids_of(notes: &[(NaiveDate, Entry)]) -> BTreeSet<String> {
         .collect()
 }
 
+/// The most messages of the talk a dream is shown.
+pub(crate) const TALK_SHOWN: usize = 200;
+
 /// What was said on the console in the last days, to check against.
 pub(crate) fn talk(store: &Store, days: i64) -> anyhow::Result<String> {
     let since = now() - days * 86_400;
     let talk: Vec<String> = ConsoleLog::new(store.clone())
-        .recent(200)?
+        .recent(TALK_SHOWN)?
         .into_iter()
         .filter(|m| m.at >= since)
         .map(|m| {
@@ -986,6 +1011,12 @@ pub(crate) fn talk(store: &Store, days: i64) -> anyhow::Result<String> {
     })
 }
 
+/// What the model was shown.
+struct Shown<'a> {
+    read: &'a [(NaiveDate, Entry)],
+    prompt: &'a str,
+}
+
 /// Apply the model's answer and commit it, or leave memory as it was when it
 /// breaks a guard.
 fn apply_answer(
@@ -994,9 +1025,10 @@ fn apply_answer(
     dir: &Path,
     usage: &Index,
     today: NaiveDate,
-    read: &[(NaiveDate, Entry)],
+    shown: Shown<'_>,
     answer: Value,
 ) -> anyhow::Result<Outcome> {
+    let read = shown.read;
     let mut plan: Plan = serde_json::from_value(answer)?;
     let before = Snapshot::take(dir)?;
     let proposed = plan.edits.len();
@@ -1043,10 +1075,13 @@ fn apply_answer(
             return Err(error);
         }
     }
-    if let Err(error) = write_all(records, moving) {
-        notebook::revert_to(dir, "HEAD")?;
-        return Err(error);
-    }
+    let moved = match write_all(records, moving) {
+        Ok(moved) => moved,
+        Err(error) => {
+            notebook::revert_to(dir, "HEAD")?;
+            return Err(error);
+        }
+    };
     // An answer does not say which edit files which note, and nothing else
     // holds what the owner said: it is not settled by an edit that may have
     // been the one refused.
@@ -1126,6 +1161,30 @@ fn apply_answer(
             .map(|notes| basis(read, notes))
             .unwrap_or_default();
     }
+    for (item, record) in &moved {
+        disclosure::carry_to_record(store, &before, &rests_on, item, record)?;
+    }
+    let titled: Vec<(String, String)> = moved
+        .iter()
+        .filter_map(|(item, record)| {
+            let edit = plan.edits.iter().find(|e| e.id.as_ref() == Some(item))?;
+            let title = edit.record.as_ref()?.title.clone()?;
+            Some((record.clone(), title))
+        })
+        .collect();
+    let doubts = disclosure::carry_dream(
+        store,
+        &disclosure::Reorganized {
+            before: &before,
+            after: &after,
+            changes: &diff.changes,
+            rests_on: &rests_on,
+            notes_shown: &ids_of(read),
+            shown: shown.prompt,
+            talk_since: now() - TALK_DAYS * 86_400,
+            titled: &titled,
+        },
+    )?;
     diff.changes.extend(thrown);
     let summary = diff.summary();
     let c = &summary.counts;
@@ -1146,6 +1205,7 @@ fn apply_answer(
         let _ = write!(status, "。気づきを {} 件捨てた", summary.counts.discarded);
     }
     let mut outcome = Outcome {
+        doubts,
         status,
         applied: true,
         night: 0,
@@ -1256,6 +1316,8 @@ fn discarded(date: NaiveDate, note: &Entry, reason: Option<String>) -> Option<me
 
 /// A memory on its way to the records.
 struct Moving {
+    /// The id of the memory.
+    item: String,
     kind: &'static str,
     title: String,
     text: String,
@@ -1264,8 +1326,9 @@ struct Moving {
 
 impl Moving {
     /// Add the record, or log it at the open task that already says it, which
-    /// may be one this dream made. The record added, if one was.
-    fn write(self, held: &Held<'_>) -> anyhow::Result<Option<Record>> {
+    /// may be one this dream made. Which record says it, and the one added, if
+    /// one was.
+    fn write(self, held: &Held<'_>) -> anyhow::Result<(String, Option<Record>)> {
         let records = held.records();
         let workgroups = self.patch.workgroups.clone().unwrap_or_default();
         let known = match self.kind {
@@ -1277,29 +1340,37 @@ impl Moving {
                 let line = format!("記憶にもあった：{}", self.text);
                 // Logged already by a dream that did not stand after all.
                 if log_lines(&task).iter().any(|l| l.text == line) {
-                    return Ok(None);
+                    return Ok((task.id.clone(), None));
                 }
                 let patch = Patch {
                     log: vec![line],
                     ..Patch::default()
                 };
                 held.change(Writer::Secretary, TASKS, &task.id, patch)?;
-                Ok(None)
+                Ok((task.id.clone(), None))
             }
-            None => held.add(Writer::Secretary, self.kind, self.patch).map(Some),
+            None => {
+                let added = held.add(Writer::Secretary, self.kind, self.patch)?;
+                Ok((added.id.clone(), Some(added)))
+            }
         }
     }
 }
 
 /// Write every record or none: when one cannot be written, those added before
 /// it are taken away, as their memories come back. Nobody else writes
-/// records meanwhile.
-fn write_all(records: &Records, moving: Vec<Moving>) -> anyhow::Result<()> {
+/// records meanwhile. Which record each memory went into.
+fn write_all(records: &Records, moving: Vec<Moving>) -> anyhow::Result<Vec<(String, String)>> {
     let held = records.hold()?;
     let mut added: Vec<Record> = Vec::new();
+    let mut went = Vec::new();
     for moved in moving {
+        let item = moved.item.clone();
         match moved.write(&held) {
-            Ok(record) => added.extend(record),
+            Ok((into, record)) => {
+                went.push((item, into));
+                added.extend(record);
+            }
             Err(error) => {
                 for record in added.iter().rev() {
                     if let Err(error) = held.remove(Writer::Secretary, &record.kind, &record.id) {
@@ -1310,7 +1381,7 @@ fn write_all(records: &Records, moving: Vec<Moving>) -> anyhow::Result<()> {
             }
         }
     }
-    Ok(())
+    Ok(went)
 }
 
 /// Turn every `to_record` edit into forgetting its item, and give the records
@@ -1415,6 +1486,7 @@ fn to_record(
         };
         records.check_add(Writer::Secretary, kind, patch.clone())?;
         return Ok(Moving {
+            item: id.to_owned(),
             kind,
             title,
             text,
@@ -1441,6 +1513,7 @@ fn to_record(
     };
     records.check_add(Writer::Secretary, kind, patch.clone())?;
     Ok(Moving {
+        item: id.to_owned(),
         kind,
         title,
         text,
@@ -1529,7 +1602,13 @@ pub(crate) fn add_to_night(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversations::Conversations;
+    use crate::disclosure::marking;
+    use crate::disclosure::{Reader, Reading, Saying};
+    use crate::input::{Input, Sender, Source};
     use crate::notebook::testing::TempDir;
+    use futures_util::future::{BoxFuture, FutureExt};
+    use std::sync::Mutex;
 
     /// A notebook's memory directory, with the records beside it.
     struct Memory {
@@ -1556,6 +1635,440 @@ mod tests {
             _tmp: tmp,
         };
         (memory, store)
+    }
+
+    /// Core memory with an item written in confidence among others.
+    fn confided(dir: &Path, store: &Store) {
+        memory::write_file(
+            dir,
+            "core.md",
+            "# 心得\n- 秘密の話 {id: msecret001, src: inferred}\n- 天気の話 {id: mplain0001, src: inferred}\n- 食事の話 {id: mplain0002, src: inferred}\n".as_bytes(),
+        )
+        .unwrap();
+        marking::mark(store, "msecret001");
+    }
+
+    /// Reads that something is told when what is said holds the secret.
+    #[derive(Default)]
+    struct Compares {
+        down: bool,
+        shown: Mutex<Vec<Saying>>,
+    }
+
+    impl Reader for Compares {
+        fn read<'a>(&'a self, saying: &'a Saying) -> BoxFuture<'a, anyhow::Result<Reading>> {
+            self.shown.lock().unwrap().push(saying.clone());
+            async move {
+                anyhow::ensure!(!self.down, "down");
+                Ok(Reading {
+                    discloses: saying.text.contains("秘密").then(|| "秘密の話".to_owned()),
+                    allowed_by: None,
+                })
+            }
+            .boxed()
+        }
+    }
+
+    async fn unsettled(dir: &Memory, store: &Store, answer: Value) -> Outcome {
+        dream(store, &dir.records, dir.path(), day(), |_, _| async move {
+            Ok(answer)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// A dream whose writing was then compared with the confidential lines.
+    async fn dreamt(dir: &Memory, store: &Store, answer: Value) -> Outcome {
+        let outcome = unsettled(dir, store, answer).await;
+        disclosure::settle_doubts(store, Some(&Compares::default()), &outcome.doubts)
+            .await
+            .unwrap();
+        outcome
+    }
+
+    /// Items citing a plain note alone.
+    fn citing_a_plain_note(dir: &Path, texts: &[&str]) -> Value {
+        let plain = note(dir, "会議は午前がいいと言った");
+        let edits: Vec<Value> = texts
+            .iter()
+            .enumerate()
+            .map(|(i, text)| json!({ "op": "add", "file": format!("long/semantic/{i}.md"), "text": text, "attrs": { "src": "said" }, "notes": [plain] }))
+            .collect();
+        json!({ "edits": edits, "settled": [plain] })
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_is_marked_until_it_is_compared_whatever_it_cites() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let answer = citing_a_plain_note(dir.path(), &["会議は午前に入れる"]);
+        let outcome = unsettled(&dir, &store, answer).await;
+        assert!(marking::marked(&store, &id_of(&outcome, "午前")));
+        assert!(marking::marked(&store, "memory/long/semantic/0.md"));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_from_a_marked_line_it_does_not_cite_stays_marked() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let answer = citing_a_plain_note(dir.path(), &["秘密を覚える", "会議は午前に入れる"]);
+        let outcome = unsettled(&dir, &store, answer).await;
+        let reader = Compares::default();
+        disclosure::settle_doubts(&store, Some(&reader), &outcome.doubts)
+            .await
+            .unwrap();
+        assert!(marking::marked(&store, &id_of(&outcome, "秘密を覚える")));
+        assert!(!marking::marked(&store, &id_of(&outcome, "午前")));
+        assert!(marking::marked(&store, "memory/long/semantic/0.md"));
+        assert!(!marking::marked(&store, "memory/long/semantic/1.md"));
+        let shown = reader.shown.lock().unwrap();
+        assert!(shown.iter().all(|s| s.confided_only));
+        let confided = shown[0].confided.join(
+            "
+",
+        );
+        assert!(confided.contains("秘密の話"), "{confided}");
+        assert!(!confided.contains("天気の話"), "{confided}");
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_stays_marked_when_it_cannot_be_compared() {
+        for reader in [
+            None,
+            Some(Compares {
+                down: true,
+                ..Compares::default()
+            }),
+        ] {
+            let (dir, store) = setup();
+            confided(dir.path(), &store);
+            let answer = citing_a_plain_note(dir.path(), &["会議は午前に入れる"]);
+            let outcome = unsettled(&dir, &store, answer).await;
+            let reader = reader.as_ref().map(|r| r as &dyn Reader);
+            disclosure::settle_doubts(&store, reader, &outcome.doubts)
+                .await
+                .unwrap();
+            assert!(marking::marked(&store, &id_of(&outcome, "午前")));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_title_a_dream_gives_a_record_is_compared_too() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let answer = json!({ "edits": [
+            { "op": "to_record", "id": "mplain0001", "record": { "kind": "memos", "title": "秘密の控え" } },
+        ] });
+        let outcome = unsettled(&dir, &store, answer).await;
+        disclosure::settle_doubts(&store, Some(&Compares::default()), &outcome.doubts)
+            .await
+            .unwrap();
+        let memo = &dir.records.list(MEMOS).unwrap()[0];
+        assert!(marking::marked(&store, &memo.id));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_is_compared_with_talk_read_in_confidence() {
+        let (dir, store) = setup();
+        let id = said_on_slack(&store, "1.1");
+        converse(&store, id);
+        marking::mark_input(&store, id);
+        let answer = citing_a_plain_note(dir.path(), &["秘密を覚える"]);
+        let outcome = unsettled(&dir, &store, answer).await;
+        let reader = Compares::default();
+        disclosure::settle_doubts(&store, Some(&reader), &outcome.doubts)
+            .await
+            .unwrap();
+        assert!(marking::marked(&store, &id_of(&outcome, "秘密を覚える")));
+        let confided = reader.shown.lock().unwrap()[0].confided.join(
+            "
+",
+        );
+        assert!(confided.contains("締切の相談"), "{confided}");
+    }
+
+    fn id_of(outcome: &Outcome, text: &str) -> String {
+        let changes = &outcome.summary.changes;
+        let change = changes.iter().find(|c| c.text.contains(text));
+        change.unwrap_or_else(|| panic!("{changes:?}")).id.clone()
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_merges_keeps_what_it_was_marked_with() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "edit", "id": "mplain0001", "text": "天気と秘密の話" },
+                { "op": "forget", "id": "msecret001" },
+            ] }),
+        )
+        .await;
+        assert!(marking::marked(&store, "mplain0001"));
+        assert!(marking::marked(&store, "msecret001"));
+        assert!(!marking::marked(&store, "mplain0002"));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_is_marked_after_the_notes_it_rests_on() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let told = note(dir.path(), "締切の話を聞いた");
+        let plain = note(dir.path(), "会議は午前がいいと言った");
+        marking::mark(&store, &told);
+        let add = |text: &str, note: &str| json!({ "op": "add", "file": "long/semantic/a.md", "text": text, "attrs": { "src": "said" }, "notes": [note] });
+        let mut second = add("会議は午前に入れる", &plain);
+        second["file"] = "long/semantic/b.md".into();
+        let outcome = dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [add("締切を覚える", &told), second], "settled": [told, plain] }),
+        )
+        .await;
+        assert!(marking::marked(&store, &id_of(&outcome, "締切")));
+        assert!(marking::marked(&store, "memory/long/semantic/a.md"));
+        assert!(!marking::marked(&store, &id_of(&outcome, "午前")));
+        assert!(!marking::marked(&store, "memory/long/semantic/b.md"));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_into_attributes_alone_is_marked() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let told = note(dir.path(), "締切の話を聞いた");
+        marking::mark(&store, &told);
+        dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "edit", "id": "mplain0001", "attrs": { "reason": "締切の都合" }, "notes": [told] },
+            ], "settled": [told] }),
+        )
+        .await;
+        assert!(marking::marked(&store, "mplain0001"));
+        assert!(!marking::marked(&store, "mplain0002"));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_from_who_knows_what_is_marked_with_all_it_saw() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let outcome = dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "add", "file": "long/semantic/a.md", "text": "まとめ直した話", "attrs": { "src": "inferred" } },
+            ] }),
+        )
+        .await;
+        assert!(marking::marked(&store, &id_of(&outcome, "まとめ直した")));
+        assert!(!marking::marked(&store, "mplain0001"));
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_is_marked_after_a_file_it_saw_marked_by_its_path() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        marking::mark(&store, "memory/core.md");
+        let outcome = dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "add", "file": "long/semantic/a.md", "text": "まとめ直した話", "attrs": { "src": "inferred" } },
+            ] }),
+        )
+        .await;
+        assert!(marking::marked(&store, &id_of(&outcome, "まとめ直した")));
+    }
+
+    fn said_on_slack(store: &Store, ts: &str) -> i64 {
+        let input = Input {
+            sender: Sender::Owner,
+            source: Source::Slack {
+                workspace: "w".into(),
+                channel: "C1".into(),
+                ts: ts.into(),
+                thread_ts: None,
+                user: "U1".into(),
+                unmentioned: false,
+                others_before: false,
+                attached: Vec::new(),
+            },
+            text: "締切の相談".into(),
+        };
+        let id = store.enqueue(&input).unwrap().unwrap();
+        let meta = json!({ "origin": "Slack w", "input": id });
+        ConsoleLog::new(store.clone())
+            .add(Who::Owner, &input.text, meta)
+            .unwrap();
+        id
+    }
+
+    fn converse(store: &Store, id: i64) {
+        let row = store.get(id).unwrap().unwrap();
+        Conversations::new(store.clone())
+            .settle(&row, |_| None)
+            .unwrap();
+    }
+
+    async fn marked_without_grounds(dir: &Memory, store: &Store) -> bool {
+        let outcome = dreamt(
+            dir,
+            store,
+            json!({ "edits": [
+                { "op": "add", "file": "long/semantic/a.md", "text": "まとめ直した話", "attrs": { "src": "inferred" } },
+            ] }),
+        )
+        .await;
+        marking::marked(store, &id_of(&outcome, "まとめ直した"))
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_after_slack_talk_read_in_confidence_is_marked() {
+        let (dir, store) = setup();
+        let id = said_on_slack(&store, "1.1");
+        converse(&store, id);
+        marking::mark_input(&store, id);
+        assert!(marked_without_grounds(&dir, &store).await);
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_after_talk_of_a_confidential_conversation_is_marked() {
+        let (dir, store) = setup();
+        let id = said_on_slack(&store, "1.1");
+        converse(&store, id);
+        marking::mark_conversation_of(&store, id);
+        assert!(marked_without_grounds(&dir, &store).await);
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_after_slack_talk_no_turn_has_taken_up_is_marked() {
+        let (dir, store) = setup();
+        said_on_slack(&store, "1.1");
+        assert!(marked_without_grounds(&dir, &store).await);
+    }
+
+    #[tokio::test]
+    async fn what_a_dream_writes_after_slack_talk_holding_nothing_confidential_is_not_marked() {
+        let (dir, store) = setup();
+        let id = said_on_slack(&store, "1.1");
+        converse(&store, id);
+        assert!(!marked_without_grounds(&dir, &store).await);
+    }
+
+    #[tokio::test]
+    async fn a_note_no_dream_was_shown_is_no_grounds_for_what_it_writes() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        let plain = note(dir.path(), "会議は午前がいいと言った");
+        let outcome = dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "add", "file": "long/semantic/a.md", "text": "まとめ直した話", "attrs": { "src": "inferred" }, "notes": [plain, "mnosuchnote"] },
+            ], "settled": [plain] }),
+        )
+        .await;
+        assert!(marking::marked(&store, &id_of(&outcome, "まとめ直した")));
+    }
+
+    #[tokio::test]
+    async fn where_a_dream_moves_a_marked_memory_to_is_marked() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        memory::write_file(
+            dir.path(),
+            "long/semantic/a.md",
+            "---\nid: mmoved00001\nsummary: 内々の話\n---\n\n本文\n".as_bytes(),
+        )
+        .unwrap();
+        marking::mark(&store, "mmoved00001");
+        let outcome = dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "move", "id": "mmoved00001", "file": "long/semantic/b.md" },
+            ] }),
+        )
+        .await;
+        assert!(
+            dir.path().join("long/semantic/b.md").exists(),
+            "{}",
+            outcome.status
+        );
+        assert!(marking::marked(&store, "memory/long/semantic/b.md"));
+    }
+
+    #[tokio::test]
+    async fn a_record_a_memory_becomes_keeps_what_it_was_marked_with() {
+        let (dir, store) = setup();
+        confided(dir.path(), &store);
+        dreamt(
+            &dir,
+            &store,
+            json!({ "edits": [
+                { "op": "to_record", "id": "msecret001", "record": { "kind": "memos", "title": "控え" } },
+            ] }),
+        )
+        .await;
+        let memos = dir.records.list(crate::records::MEMOS).unwrap();
+        assert!(marking::marked(&store, &memos[0].id), "{memos:?}");
+    }
+
+    #[test]
+    fn what_earlier_dreams_dropped_is_given_back_once() {
+        let (dir, store) = setup();
+        marking::mark(&store, "msecret001");
+        let change = |op, id: &str, replaces: Option<&str>| memory::Change {
+            op,
+            id: id.into(),
+            file: "core.md".into(),
+            text: String::new(),
+            previous: None,
+            from_file: None,
+            replaces: replaces.map(str::to_owned),
+            reason: None,
+            basis: Vec::new(),
+        };
+        let night = |changes| {
+            record_night(
+                &store,
+                &Outcome {
+                    summary: DreamSummary {
+                        changes,
+                        ..DreamSummary::default()
+                    },
+                    ..Outcome::nothing(String::new())
+                },
+            )
+            .unwrap();
+        };
+        night(vec![change(
+            memory::Op::Replaced,
+            "msecond001",
+            Some("msecret001"),
+        )]);
+        night(vec![change(
+            memory::Op::Replaced,
+            "mthird0001",
+            Some("msecond001"),
+        )]);
+        night(vec![change(memory::Op::Added, "mother0001", None)]);
+        recover_marks(&store, &dir.records).unwrap();
+        assert!(marking::marked(&store, "msecond001"));
+        assert!(marking::marked(&store, "mthird0001"));
+        assert!(!marking::marked(&store, "mother0001"));
+
+        marking::mark(&store, "mother0001");
+        night(vec![change(
+            memory::Op::Replaced,
+            "mfourth001",
+            Some("mother0001"),
+        )]);
+        recover_marks(&store, &dir.records).unwrap();
+        assert!(!marking::marked(&store, "mfourth001"));
     }
 
     /// A long-term memory file holding one item.
