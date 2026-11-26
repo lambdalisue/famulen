@@ -1,12 +1,15 @@
-//! Pages of the public web, read as anyone may read them: with no account,
-//! and never from this machine or the network it is in.
+//! Pages and files of the public web, taken as anyone may take them: with no
+//! account, and never from this machine or the network it is in.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION};
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use url::{Host, Url};
 
 use super::Gateway;
@@ -19,6 +22,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long what a connection asks for may take.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REDIRECTS: usize = 4;
+/// How long a download may say nothing. A large one has no limit as a whole.
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+const DOWNLOAD_AGENT: &str = "Famulen";
 /// Nothing of the owner's is told.
 const AGENT: &str = "Mozilla/5.0 (compatible; Famulen link preview)";
 
@@ -50,6 +56,14 @@ impl PublicPage {
     pub fn media_type(&self) -> String {
         media_type(&self.content_type)
     }
+}
+
+/// What was downloaded.
+#[derive(Debug, Clone)]
+pub struct Downloaded {
+    pub bytes: u64,
+    /// SHA-256 of what was written, in lower-case hex.
+    pub sha256: String,
 }
 
 fn media_type(content_type: &str) -> String {
@@ -233,6 +247,7 @@ impl Resolve for PublicNames {
 pub(super) struct Public {
     http: reqwest::Client,
     guarded: reqwest::Client,
+    download: reqwest::Client,
     reach: Reach,
 }
 
@@ -246,6 +261,7 @@ impl Default for Public {
                 .build()
                 .expect("a plain HTTP client builds"),
             guarded: guarded(Reach::default()),
+            download: downloading(Reach::default()),
             reach: Reach::default(),
         }
     }
@@ -261,7 +277,23 @@ fn on_public_names(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
 
 /// A client that follows where it is sent on only where `reach` lets it.
 fn guarded(reach: Reach) -> reqwest::Client {
-    let policy = reqwest::redirect::Policy::custom(move |to| {
+    on_public_names(reqwest::Client::builder().timeout(CLIENT_TIMEOUT))
+        .redirect(checked_redirects(reach))
+        .build()
+        .expect("a plain HTTP client builds")
+}
+
+/// [`guarded`], for what takes longer than any limit on the whole of it.
+fn downloading(reach: Reach) -> reqwest::Client {
+    on_public_names(reqwest::Client::builder().read_timeout(STALL_TIMEOUT))
+        .redirect(checked_redirects(reach))
+        .user_agent(DOWNLOAD_AGENT)
+        .build()
+        .expect("a plain HTTP client builds")
+}
+
+fn checked_redirects(reach: Reach) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |to| {
         if to.previous().len() > MAX_REDIRECTS {
             return to.error("redirected too often");
         }
@@ -269,11 +301,7 @@ fn guarded(reach: Reach) -> reqwest::Client {
             Ok(()) => to.follow(),
             Err(why) => to.error(why),
         }
-    });
-    on_public_names(reqwest::Client::builder().timeout(CLIENT_TIMEOUT))
-        .redirect(policy)
-        .build()
-        .expect("a plain HTTP client builds")
+    })
 }
 
 /// Why nothing was read.
@@ -367,6 +395,41 @@ impl Public {
     }
 }
 
+impl Public {
+    async fn download(
+        &self,
+        url: &str,
+        to: &Path,
+        most: u64,
+        progress: &(dyn Fn(u64) + Send + Sync),
+    ) -> Result<Downloaded, Unread> {
+        let url = Url::parse(url).map_err(|_| Unread::Refused("not an address"))?;
+        self.reach.check_secure(&url).map_err(Unread::Refused)?;
+        let mut response = self.download.get(url).send().await?;
+        if !response.status().is_success() {
+            return Err(Unread::Failed(response.status().as_u16().to_string()));
+        }
+        let io = |error: std::io::Error| Unread::Failed(format!("writing: {error}"));
+        let mut file = tokio::fs::File::create(to).await.map_err(io)?;
+        let mut hash = Sha256::new();
+        let mut bytes = 0;
+        while let Some(chunk) = response.chunk().await? {
+            bytes += chunk.len() as u64;
+            if bytes > most {
+                return Err(Unread::Failed("too large".into()));
+            }
+            hash.update(&chunk);
+            file.write_all(&chunk).await.map_err(io)?;
+            progress(bytes);
+        }
+        file.flush().await.map_err(io)?;
+        Ok(Downloaded {
+            bytes,
+            sha256: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+        })
+    }
+}
+
 async fn take(mut response: reqwest::Response, wanted: Wanted<'_>) -> Result<Vec<u8>, Unread> {
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {
@@ -422,11 +485,58 @@ impl Gateway {
         })
     }
 
+    /// Write what is at `url`, as anyone on the public internet may take it,
+    /// into the file `to`, `most` bytes at the most. `progress` is told how
+    /// many have arrived. Nothing is left at `to` when it fails.
+    pub async fn download_public(
+        &self,
+        actor: impl AsRef<str>,
+        url: impl AsRef<str>,
+        to: impl AsRef<Path>,
+        most: u64,
+        progress: impl Fn(u64) + Send + Sync,
+    ) -> anyhow::Result<Downloaded> {
+        let started = Instant::now();
+        let to = to.as_ref();
+        let got = self
+            .public
+            .download(url.as_ref(), to, most, &progress)
+            .await;
+        let mut entry = LogEntry {
+            actor: actor.as_ref().to_owned(),
+            connection: WEB.into(),
+            tool: "web.download".into(),
+            decision: "allow".into(),
+            ms: started.elapsed().as_millis() as i64,
+            ..LogEntry::default()
+        };
+        match &got {
+            Ok(got) => {
+                entry.outcome = "200".into();
+                entry.digest = got.sha256.clone();
+            }
+            Err(Unread::Refused(why)) => {
+                entry.decision = "deny".into();
+                entry.reason = (*why).into();
+            }
+            Err(Unread::Failed(why)) => entry.outcome = format!("error: {why}"),
+        }
+        if got.is_err() {
+            std::fs::remove_file(to).ok();
+        }
+        self.log().write(&entry)?;
+        got.map_err(|unread| match unread {
+            Unread::Refused(why) => anyhow::anyhow!(why),
+            Unread::Failed(why) => anyhow::anyhow!(why),
+        })
+    }
+
     /// Read from a server of a test's own, on this machine, too.
     #[cfg(test)]
     pub(super) fn reading_also(mut self, at: impl IntoIterator<Item = SocketAddr>) -> Self {
         self.public.reach.also.extend(at);
         self.public.guarded = guarded(self.public.reach.clone());
+        self.public.download = downloading(self.public.reach.clone());
         self
     }
 }
@@ -460,6 +570,13 @@ mod tests {
         let at = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         at
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("famulen-gateway-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     fn html(body: &'static str) -> Router {
@@ -689,5 +806,74 @@ mod tests {
         assert_eq!((&*entry.connection, &*entry.outcome), ("web", "200"));
         assert!(!serde_json::to_string(entry).unwrap().contains("hush"));
         assert!(!serde_json::to_string(entry).unwrap().contains("127.0.0.1"));
+    }
+
+    #[tokio::test]
+    async fn a_download_is_written_as_it_arrives_and_named_by_its_digest() {
+        let at = serve(html("0123456789")).await;
+        let gateway = gateway().reading_also([at]);
+        let dir = scratch("download");
+        let to = dir.join("file");
+        let seen = Arc::new(AtomicUsize::new(0));
+        let count = seen.clone();
+
+        let got = gateway
+            .download_public("owner", format!("http://{at}/"), &to, 10, move |n| {
+                count.store(n as usize, Ordering::SeqCst)
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&to).unwrap(), b"0123456789");
+        assert_eq!(got.bytes, 10);
+        assert_eq!(
+            got.sha256,
+            "84d89877f0d4041efb6bf91a16f0248f2fd573e6af05c19f96bedb9f882f7882"
+        );
+        assert_eq!(seen.load(Ordering::SeqCst), 10);
+        let last = &gateway.log().recent(1).unwrap()[0];
+        assert_eq!(
+            (&*last.tool, &*last.connection, &*last.decision),
+            ("web.download", "web", "allow")
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_download_that_is_too_large_or_fails_leaves_no_file() {
+        let at = serve(html("0123456789")).await;
+        let gateway = gateway().reading_also([at]);
+        let dir = scratch("too-large");
+        let to = dir.join("file");
+        for path in ["/", "/missing"] {
+            let got = gateway
+                .download_public("owner", format!("http://{at}{path}"), &to, 9, |_| {})
+                .await;
+            assert!(got.is_err(), "{path}");
+            assert!(!to.exists(), "{path}");
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_download_is_taken_only_from_the_public_internet_redirects_included() {
+        let inside = serve(html("inside")).await;
+        let to_inside = format!("http://{inside}/");
+        let outside = serve(Router::new().route(
+            "/",
+            get(move || async move { Redirect::temporary(&to_inside) }),
+        ))
+        .await;
+        let gateway = gateway().reading_also([outside]);
+        let dir = scratch("inside");
+        let to = dir.join("file");
+        for url in [format!("http://{inside}/"), format!("http://{outside}/")] {
+            let got = gateway
+                .download_public("owner", &url, &to, 100, |_| {})
+                .await;
+            assert!(got.is_err(), "{url}");
+            assert!(!to.exists(), "{url}");
+        }
+        std::fs::remove_dir_all(dir).ok();
     }
 }

@@ -14,6 +14,7 @@ use crate::gateway::Gateway;
 use crate::models::{
     self, ModelKind, ModelSpec, Role, Source, Usage, check_assignment, estimate_cost_yen, found_id,
 };
+use crate::speech::{Speech, local_name};
 use crate::store::{Store, now};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +57,8 @@ pub struct Models {
     /// What sends a model's call with its key; without it, calls go out
     /// without one.
     gateway: Option<Gateway>,
+    /// What runs the server of a model brought in onto this machine.
+    speech: Option<Speech>,
 }
 
 pub fn role_id(role: Role) -> &'static str {
@@ -82,6 +85,7 @@ impl Models {
         Self {
             store,
             gateway: None,
+            speech: None,
         }
     }
 
@@ -89,6 +93,14 @@ impl Models {
     pub fn with_gateway(self, gateway: Gateway) -> Self {
         Self {
             gateway: Some(gateway),
+            ..self
+        }
+    }
+
+    /// Hears with models brought in onto this machine through `speech`.
+    pub fn with_speech(self, speech: Speech) -> Self {
+        Self {
+            speech: Some(speech),
             ..self
         }
     }
@@ -367,8 +379,7 @@ impl Models {
         Ok(())
     }
 
-    #[cfg(test)]
-    fn unassign(&self, role: Role) -> anyhow::Result<()> {
+    pub(crate) fn unassign(&self, role: Role) -> anyhow::Result<()> {
         self.store
             .conn()
             .execute("DELETE FROM roles WHERE role = ?1", [role_id(role)])?;
@@ -580,9 +591,19 @@ impl Models {
         language: Option<&str>,
         preview: bool,
     ) -> anyhow::Result<String> {
-        let (spec, _) = self.spec_for(Role::Voice, tz)?;
+        let (mut spec, _) = self.spec_for(Role::Voice, tz)?;
         if preview && !self.room_for_another(Role::Voice, &spec, tz)? {
             return Ok(String::new());
+        }
+        if let (None, Some(name), Some(speech)) =
+            (&spec.endpoint, local_name(&spec.id), &self.speech)
+        {
+            spec.endpoint = Some(match speech.ready(name) {
+                Some(endpoint) => endpoint,
+                // What is said so far is not held up for a model to load.
+                None if preview => return Ok(String::new()),
+                None => speech.endpoint(name).await?,
+            });
         }
         let heard = models::transcribe(&spec, sound, language, self.via(Role::Voice)).await?;
         self.record(Role::Voice, &spec, &heard.usage)?;

@@ -6,6 +6,7 @@ use famulen_core::models::{
     Account, Cli, Limit, ModelKind as Kind, ModelSpec, Price, Role as CoreRole, Severity,
     UsageSpan as CoreSpan,
 };
+use famulen_core::speech::{Held, Server, Step, local_name};
 
 use crate::pb::{self, *};
 use crate::{Api, OWNER, OrFail, fail, given};
@@ -152,7 +153,108 @@ impl Api {
     }
 }
 
+impl Api {
+    fn speech_models(&self) -> anyhow::Result<SpeechModels> {
+        let speech = &self.app.speech;
+        let used = self.app.models.assignment(CoreRole::Voice)?;
+        let used = used.as_ref().and_then(|a| local_name(&a.model));
+        let models = speech
+            .catalog()
+            .models
+            .iter()
+            .map(|m| {
+                let mut model = SpeechModel {
+                    id: m.name.clone(),
+                    speed: m.speed.clone(),
+                    accuracy: m.accuracy.clone(),
+                    bytes: m.file.size as i64,
+                    used: used == Some(&m.name),
+                    ..Default::default()
+                };
+                model.state = match speech.held(&m.name) {
+                    Held::Absent => SpeechModelState::SPEECH_MODEL_STATE_ABSENT,
+                    Held::Downloading(progress) => {
+                        model.step = match progress.step {
+                            Step::Engine => SpeechStep::SPEECH_STEP_ENGINE,
+                            Step::Building => SpeechStep::SPEECH_STEP_BUILDING,
+                            Step::Model => SpeechStep::SPEECH_STEP_MODEL,
+                        }
+                        .into();
+                        model.done = progress.done as i64;
+                        model.total = progress.total as i64;
+                        SpeechModelState::SPEECH_MODEL_STATE_DOWNLOADING
+                    }
+                    Held::Failed(why) => {
+                        model.failure = why;
+                        SpeechModelState::SPEECH_MODEL_STATE_FAILED
+                    }
+                    Held::Downloaded => SpeechModelState::SPEECH_MODEL_STATE_DOWNLOADED,
+                }
+                .into();
+                model
+            })
+            .collect();
+        // Just after a switch the server still hears with the model before.
+        let (server, server_failure) = match speech.server() {
+            Server::Starting { name } if used == Some(&name) => {
+                (SpeechServerState::SPEECH_SERVER_STATE_STARTING, None)
+            }
+            Server::Ready { name, .. } if used == Some(&name) => {
+                (SpeechServerState::SPEECH_SERVER_STATE_READY, None)
+            }
+            Server::Failed { name, why } if used == Some(&name) => {
+                (SpeechServerState::SPEECH_SERVER_STATE_FAILED, Some(why))
+            }
+            _ => (SpeechServerState::SPEECH_SERVER_STATE_STOPPED, None),
+        };
+        Ok(SpeechModels {
+            models,
+            engine_bytes: speech.engine_bytes() as i64,
+            builds: speech.builds(),
+            supported: speech.supported(),
+            server: server.into(),
+            server_failure: server_failure.unwrap_or_default(),
+            ..Default::default()
+        })
+    }
+}
+
 impl ModelService for Api {
+    async fn get_speech_models(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, Empty>,
+    ) -> ServiceResult<SpeechModels> {
+        Response::ok(self.speech_models().or_fail()?)
+    }
+
+    async fn download_speech_model(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<SpeechModels> {
+        self.app.speech.download(request.id).or_fail()?;
+        Response::ok(self.speech_models().or_fail()?)
+    }
+
+    async fn use_speech_model(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<SpeechModels> {
+        self.app.speech.use_model(request.id).or_fail()?;
+        Response::ok(self.speech_models().or_fail()?)
+    }
+
+    async fn delete_speech_model(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, ByName>,
+    ) -> ServiceResult<SpeechModels> {
+        self.app.speech.delete(request.id).await.or_fail()?;
+        Response::ok(self.speech_models().or_fail()?)
+    }
+
     async fn get_models(
         &self,
         _ctx: RequestContext,

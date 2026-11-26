@@ -1,4 +1,5 @@
 import RoleModel from "~/components/RoleModel";
+import SpeechModels from "~/components/SpeechModels";
 import { Role } from "~/gen/famulen/v1/settings_pb";
 import { setView } from "~/lib/view";
 import { PageHeader } from "~/components/ui";
@@ -16,13 +17,14 @@ export default function Voice() {
               Even G2 に話しかけた声を文字にするモデル。文字になったものが、コンソールに書いたのと同じように秘書に届く。声は文字にするあいだだけ使い、残さない。
             </p>
             <p>
-              選べるのは、<a href="/settings/models">登録したモデル</a>
-              のうち文字起こしのもの。手元で動く whisper のサーバーか、文字起こしの API を足す。モデルを選ぶまで、Even G2 では話せず、そう出る。
+              このマシンで聞き取るなら、下の一覧でモデルをダウンロードして「使う」を押す。自分で動かすサーバーや文字起こしの API は、<a href="/settings/models">登録したモデル</a>
+              に足すと選べる。モデルを選ぶまで、Even G2 では話せず、そう出る。
             </p>
           </>
         }
       />
       <div class="prefs">
+        <SpeechModels />
         <RoleModel
           role={Role.VOICE}
           cap="上限に達した日は、Even G2 で話せない。話しているあいだも途中の言葉を何度か聞き取るので、一度話すと数回に数える。途中の聞き取りは、話し終えたときの分が残るうちだけする。1 回ごとの値段のあるモデルは円で、ほかは回数で数える。"
