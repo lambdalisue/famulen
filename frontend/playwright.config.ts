@@ -58,7 +58,7 @@ export default defineConfig({
       command: "pnpm build && node .output/server/index.mjs",
       url: console,
       // Not the browser's locale, as the owner's server and browser need not share one.
-      env: { PORT: "13000", HOST: "127.0.0.1", FAMULEN_API_URL: `http://${api}`, LC_ALL: "en_US.UTF-8" },
+      env: { PORT: "13000", HOST: "127.0.0.1", FAMULEN_API_URL: `http://${api}`, LC_ALL: "en_US.UTF-8", FAMULEN_CONSOLE_HOSTS: "famulen.test" },
       reuseExistingServer: false,
       timeout: 180_000,
     },
