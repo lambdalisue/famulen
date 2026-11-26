@@ -15,7 +15,7 @@ const TEXT_CHARS: usize = 12_000;
 const INSTRUCTION: &str = "An AI secretary is about to say something in a place where people other than its owner read it. \
 You check it for the owner before it goes out. Two questions.\n\
 1. discloses: does the text tell something that should not be told there? That is: an assessment of a person (how the owner or the secretary rates them, their character, \
-performance, strengths, weaknesses, or how they get on with others), what was said in private channels, direct messages or mail, or the owner's private matters (contracts, money, belongings, health, \
+performance, strengths, weaknesses, or how they get on with others), what was said in private channels, direct messages or mail, what only some people can read (a private or internal repository, a company document or wiki, an internal tool), or the owner's private matters (contracts, money, belongings, health, \
 home, passwords). A paraphrase, a summary or a hint counts too. Ordinary answers do not: schedules and whether someone is free, facts about work, general knowledge, \
 links, thanks, what is public, or saying that something cannot be answered. Do not be overcautious. Put what it tells in one short Japanese phrase, or an empty string when it tells nothing of the kind.\n\
 2. allowed_by: do the owner's own words, given below, explicitly allow saying this content to these people (such as 「公開で言ってよい」「みんなに伝えて」 with the content, or dictating the words to post)? \

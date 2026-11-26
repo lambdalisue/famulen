@@ -109,7 +109,13 @@ pub enum Source {
     /// The owner answered an approval request.
     Approval { id: i64, user: String },
     /// A schedule came due. `at` is when, in the owner's time zone.
-    Schedule { name: String, at: String },
+    Schedule {
+        name: String,
+        at: String,
+        /// The id of the routine's record, when a routine came due.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        routine: String,
+    },
     /// A wake-up the agent set for itself came due.
     Wake { id: i64, at: String },
     /// The owner wrote on the console, while looking at `view` in `workgroup`.
@@ -217,7 +223,7 @@ impl Input {
                 ..
             } => format!("slack:{workspace}:{channel}:{ts}"),
             Source::Approval { id, .. } => format!("approval:{id}"),
-            Source::Schedule { name, at } => format!("schedule:{name}:{at}"),
+            Source::Schedule { name, at, .. } => format!("schedule:{name}:{at}"),
             Source::Wake { id, .. } => format!("wake:{id}"),
             Source::Console { message, .. } => format!("console:{message}"),
             Source::Arrival {
@@ -329,7 +335,7 @@ impl Input {
                     self.sender.as_str()
                 )
             }
-            Source::Schedule { name, at } => format!("[schedule] name: {name} at: {at}"),
+            Source::Schedule { name, at, .. } => format!("[schedule] name: {name} at: {at}"),
             Source::Wake { id, at } => format!("[wake] id: {id} at: {at}"),
             Source::Console {
                 message,

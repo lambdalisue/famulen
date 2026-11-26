@@ -194,6 +194,7 @@ fn tell(
         source: Source::Schedule {
             name: "worktrees".into(),
             at: today.clone(),
+            routine: String::new(),
         },
         text: format!(
             "These are left of delegated work that is over, and Famulen did not remove them because it could not tell that nothing would be lost. Tell the owner in one message what is left, where and why, and change nothing yourself.\n{}",

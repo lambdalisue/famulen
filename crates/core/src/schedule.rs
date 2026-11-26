@@ -475,6 +475,7 @@ impl Scheduler {
                 source: Source::Schedule {
                     name,
                     at: run.to_rfc3339(),
+                    routine: record.id.clone(),
                 },
                 text: if notes.is_empty() {
                     record.title()
@@ -499,6 +500,7 @@ impl Scheduler {
                 .with("Start", run.format("%Y-%m-%d %H:%M").to_string())
                 .with("Related", record.link()),
             )?;
+            crate::disclosure::carry_routine(&self.store, &record.id, &task.id)?;
             (None, task.id)
         };
         self.store.conn().execute(

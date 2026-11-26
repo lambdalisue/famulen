@@ -21,12 +21,16 @@ use crate::store::Store;
 mod reader;
 mod sources;
 mod taint;
+mod web;
 
 pub use reader::ModelReader;
 pub use sources::PLAIN;
-pub(crate) use sources::{of_builtin, of_connection, of_files, of_own};
+pub(crate) use sources::{
+    attached_in, of_builtin, of_connection, of_files, of_own, of_room, read_of_notebook,
+};
 use taint::{Disclosure, Holder};
 pub(crate) use taint::{Kind, Taint};
+pub(crate) use web::Anonymous;
 
 /// How the reason of a request that asks about a disclosure begins. It is
 /// what tells such a request from others, as the gateway keeps it.
@@ -70,6 +74,9 @@ pub trait Reader: Send + Sync {
 
 /// The shortest quotation that can allow anything.
 const QUOTED_CHARS: usize = 4;
+
+/// The shortest id of a record or memory that is looked for in what is read.
+const SHORTEST_ID: usize = 8;
 
 impl Reading {
     /// The owner's words that allow it, when they are really the owner's.
@@ -195,19 +202,29 @@ impl<S: Slack> Gate<'_, S> {
             anyhow::bail!("no turn is running");
         };
         let mut taints = self.taints(row.id, &row.input).await?;
-        taints.retain(|t| !t.came_by(server));
+        let repository = sources::repository_of(input);
+        taints.retain(|t| !t.came_by(server) && !t.of_repository(server, repository.as_deref()));
         let covered = self.covered(row.id, &row.input, server, "", input)?;
         Ok((taints, covered.exact))
     }
 
     /// What the worker of a run was handed and read.
     fn of_run(&self, run: i64) -> anyhow::Result<BTreeSet<Taint>> {
-        let mut taints = match taint::task_of(self.store, run)? {
+        // A worker reads files and runs commands that nobody sees, so what it
+        // brings back is never known to be public.
+        let mut taints = BTreeSet::from([
+            Taint::new(Kind::Private, "手代の仕事の結果").told_by(&run.to_string())
+        ]);
+        taints.extend(match taint::task_of(self.store, run)? {
             Some(task) => taint::held_by(self.store, &Holder::Task(task))?,
             None => BTreeSet::new(),
-        };
+        });
         let files = taint::files_of(self.store, run)?;
         taints.extend(of_files(self.memory_dir, files.iter().map(String::as_str)));
+        for file in &files {
+            let text = sources::notebook_text(self.memory_dir, file).unwrap_or_default();
+            taints.extend(self.of_marked_in(&format!("{file}\n{text}"))?);
+        }
         Ok(taints)
     }
 
@@ -243,7 +260,7 @@ impl<S: Slack> Gate<'_, S> {
             .taints(row.id, &row.input)
             .await?
             .into_iter()
-            .partition(|t| t.stays_in(workspace, channel));
+            .partition(|t| t.stays_in(workspace, channel, room));
         let answers = row
             .input
             .place()
@@ -327,6 +344,12 @@ impl<S: Slack> Gate<'_, S> {
     /// Everything a turn read in confidence, and the turns it goes on from.
     pub(crate) async fn taints(&self, id: i64, input: &Input) -> anyhow::Result<BTreeSet<Taint>> {
         let mut taints = BTreeSet::new();
+        if let Some(conversation) = taint::conversation_of(self.store, id)? {
+            taints.extend(taint::held_by(
+                self.store,
+                &Holder::Conversation(conversation),
+            )?);
+        }
         for (id, input) in self.lineage(id, input)? {
             taints.extend(taint::held_by(self.store, &Holder::Input(id))?);
             match &input.source {
@@ -341,15 +364,21 @@ impl<S: Slack> Gate<'_, S> {
                 } => {
                     if !self.approvals.is_owners_dm(workspace, channel).await {
                         let room = self.approvals.room(workspace, channel).await;
-                        taints.extend(
-                            room.private
-                                .ne(&Some(false))
-                                .then(|| Taint::room(workspace, channel, &room)),
-                        );
+                        taints.insert(of_room(workspace, &self.name_of(workspace), channel, &room));
                     }
                 }
                 Source::Arrival { connection, .. } => {
-                    taints.insert(Taint::of_connection(connection, "から届いたもの"));
+                    taints.insert(Taint::named(
+                        connection,
+                        &self.name_of(connection),
+                        "から届いたもの",
+                    ));
+                }
+                Source::Schedule { routine, .. } if !routine.is_empty() => {
+                    taints.extend(taint::held_by(
+                        self.store,
+                        &Holder::Routine(routine.clone()),
+                    )?);
                 }
                 Source::Lookout { .. } => {
                     taints.insert(Taint::new(Kind::Private, "見張りが渡したもの"));
@@ -358,6 +387,66 @@ impl<S: Slack> Gate<'_, S> {
             }
         }
         Ok(taints)
+    }
+
+    /// Mark the conversation of a turn about to begin as [`Self::begun`] does,
+    /// or, when what it is given cannot be told, as holding something private:
+    /// the turn goes on either way.
+    pub(crate) async fn begun_or_held(&self, id: i64, input: &Input) {
+        let Err(error) = self.begun(id, input).await else {
+            return;
+        };
+        tracing::warn!(%error, id, "could not tell what the turn is given; taking it for private");
+        let held = taint::conversation_of(self.store, id).and_then(|c| match c {
+            Some(c) => taint::mark(
+                self.store,
+                &Holder::Conversation(c),
+                &[Taint::new(Kind::Private, "確かめられなかったもの").told_by(&id.to_string())],
+            ),
+            None => Ok(()),
+        });
+        if let Err(error) = held {
+            tracing::warn!(%error, id, "could not mark the turn's conversation");
+        }
+    }
+
+    /// What the owner calls a connection.
+    fn name_of(&self, connection: &str) -> String {
+        self.permissions
+            .connection(connection)
+            .map(|c| c.name)
+            .unwrap_or_default()
+    }
+
+    /// Mark the conversation of a turn about to begin with what the turn is
+    /// given, so that its later turns, whose model still holds it, carry it.
+    pub(crate) async fn begun(&self, id: i64, input: &Input) -> anyhow::Result<()> {
+        let Some(conversation) = taint::conversation_of(self.store, id)? else {
+            return Ok(());
+        };
+        let taints: Vec<Taint> = self.taints(id, input).await?.into_iter().collect();
+        taint::mark(self.store, &Holder::Conversation(conversation), &taints)
+    }
+
+    /// What was written into the records and memories `text` names: their ids,
+    /// as an answer, a path or a file tells them. Too short an id could be
+    /// anything, so it names nothing.
+    pub(crate) fn of_marked_in(&self, text: &str) -> anyhow::Result<Vec<Taint>> {
+        let found: BTreeSet<Taint> = taint::marked_records(self.store)?
+            .into_iter()
+            .filter(|(id, _)| id.len() >= SHORTEST_ID && text.contains(id.as_str()))
+            .map(|(_, taint)| taint)
+            .collect();
+        Ok(found.into_iter().collect())
+    }
+
+    /// What was written into any record or memory of the notebook.
+    pub(crate) fn of_all_marked(&self) -> anyhow::Result<Vec<Taint>> {
+        let all: BTreeSet<Taint> = taint::marked_records(self.store)?
+            .into_iter()
+            .map(|(_, taint)| taint)
+            .collect();
+        Ok(all.into_iter().collect())
     }
 
     /// A turn, and those it goes on from by the owner's answer to a request.
@@ -470,10 +559,38 @@ pub(crate) fn note(store: &Store, taints: Vec<Taint>) -> anyhow::Result<()> {
     if taints.is_empty() {
         return Ok(());
     }
-    match store.running()? {
-        Some(turn) => taint::mark(store, &Holder::Input(turn.input), &taints),
-        None => anyhow::bail!("no turn is running"),
+    let Some(turn) = store.running()? else {
+        anyhow::bail!("no turn is running");
+    };
+    taint::mark(store, &Holder::Input(turn.input), &taints)?;
+    match taint::conversation_of(store, turn.input)? {
+        Some(conversation) => taint::mark(store, &Holder::Conversation(conversation), &taints),
+        None => Ok(()),
     }
+}
+
+/// Have the conversation `to` carry what the conversations `from` and the
+/// turns `inputs` read: what was said in them is handed to it.
+pub(crate) fn carry(store: &Store, from: &[i64], inputs: &[i64], to: i64) -> anyhow::Result<()> {
+    let holders = from
+        .iter()
+        .filter(|c| **c != to)
+        .map(|c| Holder::Conversation(*c))
+        .chain(inputs.iter().map(|i| Holder::Input(*i)));
+    for holder in holders {
+        let taints: Vec<Taint> = taint::held_by(store, &holder)?.into_iter().collect();
+        taint::mark(store, &Holder::Conversation(to), &taints)?;
+    }
+    Ok(())
+}
+
+/// Have the task a routine's run made carry what the routine was made with.
+pub(crate) fn carry_routine(store: &Store, routine: &str, task: &str) -> anyhow::Result<()> {
+    let taints: Vec<Taint> = taint::held_by(store, &Holder::Routine(routine.to_owned()))?
+        .into_iter()
+        .collect();
+    taint::mark(store, &Holder::Task(task.to_owned()), &taints)?;
+    taint::mark(store, &Holder::Record(task.to_owned()), &taints)
 }
 
 /// Mark the task of a worker's run with what the worker read.
@@ -501,9 +618,12 @@ impl<S: Slack> Gate<'_, S> {
             "delegate_task" | "retry_delegated" => {
                 id.as_str().map(|id| Holder::Task(id.to_owned()))
             }
-            "save_record" if answer["kind"] == "tasks" => {
-                id.as_str().map(|id| Holder::Task(id.to_owned()))
-            }
+            "save_record" => id.as_str().map(|id| match answer["kind"].as_str() {
+                Some("tasks") => Holder::Task(id.to_owned()),
+                Some("routines") => Holder::Routine(id.to_owned()),
+                _ => Holder::Record(id.to_owned()),
+            }),
+            "remember" => id.as_str().map(|id| Holder::Record(id.to_owned())),
             _ => None,
         };
         let (Some(holder), Some(row)) = (holder, self.store.running_input()?) else {
@@ -514,7 +634,14 @@ impl<S: Slack> Gate<'_, S> {
         if matches!(holder, Holder::Wake(_)) {
             taint::clear(self.store, &holder)?;
         }
-        taint::mark(self.store, &holder, &taints)
+        taint::mark(self.store, &holder, &taints)?;
+        // What a task or a routine holds is read again with its record.
+        match holder {
+            Holder::Task(id) | Holder::Routine(id) => {
+                taint::mark(self.store, &Holder::Record(id), &taints)
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -526,10 +653,21 @@ pub(crate) async fn of_answer<S: Slack>(
     message: &Value,
     response: &Value,
 ) -> Vec<Taint> {
-    match permissions.connection(server) {
-        Some(connection) => of_connection(clients, &connection, message, response).await,
-        None => Vec::new(),
-    }
+    // One no connection is known for is told of by nothing, so it is private.
+    let connection =
+        permissions
+            .connection(server)
+            .unwrap_or_else(|| crate::connections::Connection {
+                id: server.to_owned(),
+                name: server.to_owned(),
+                kind: String::new(),
+                transport: crate::connections::Transport::McpRemote { url: String::new() },
+                secret: Default::default(),
+                account: String::new(),
+                status: String::new(),
+            });
+    let looks = Anonymous(permissions.gateway());
+    of_connection(clients, &looks, &connection, message, response).await
 }
 
 /// Tools of Slack that say nothing.
@@ -556,18 +694,29 @@ pub(crate) fn says_on_slack(permissions: &Permissions, server: &str, tool: &str)
         && !permissions.only_reads(server, tool).unwrap_or(false)
 }
 
+/// Words a tool's name begins with when it only reads.
+const READING: &[&str] = &[
+    "describe", "download", "fetch", "find", "get", "list", "query", "read", "search", "view",
+];
+
 /// Words in the name of a tool that puts something before others.
 const TELLING: &[&str] = &[
-    "comment", "issue", "post", "publish", "pull", "put", "patch", "reply", "share", "tweet",
+    "comment", "file", "files", "fork", "invite", "issue", "mail", "merge", "message", "patch",
+    "post", "publish", "pull", "push", "put", "reply", "send", "share", "tweet", "upload", "write",
 ];
 
 /// Whether a connection's tool reaches other people, for what was read in
 /// confidence.
 pub(crate) fn reaches_others(permissions: &Permissions, server: &str, tool: &str) -> bool {
+    // Its first word says what it does; the others, what it does it to.
+    let reads = sources::words(tool)
+        .next()
+        .is_some_and(|verb| READING.contains(&verb.as_str()));
     permissions
         .always_asked(&format!("mcp__{server}__{tool}"))
         .unwrap_or(true)
-        || (sources::words(tool).any(|word| TELLING.contains(&word.as_str()))
+        || (!reads
+            && sources::words(tool).any(|word| TELLING.contains(&word.as_str()))
             && !permissions.only_reads(server, tool).unwrap_or(false))
 }
 

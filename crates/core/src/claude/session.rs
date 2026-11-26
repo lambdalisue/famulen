@@ -253,6 +253,12 @@ impl<S: Slack + Clone> Services<S> {
         }
     }
 
+    /// Mark the conversation of a turn about to begin with what the turn is
+    /// given.
+    pub(crate) async fn mark_begun(&self, row: &crate::store::StoredInput) {
+        self.gate().begun_or_held(row.id, &row.input).await
+    }
+
     /// Mark the running turn with what it read. What cannot be marked is not
     /// given to the model either.
     fn mark(&self, taints: Vec<Taint>) -> bool {
@@ -735,17 +741,32 @@ fn read_by_builtins<S: Slack + Clone>(services: &Services<S>, message: &Value) -
         .and_then(Value::as_array)
         .into_iter()
         .flatten();
-    blocks
-        .filter(|block| block["type"] == "tool_use")
-        .flat_map(|block| {
-            disclosure::of_builtin(
-                &services.memory_dir,
-                &services.workdir,
-                block["name"].as_str().unwrap_or_default(),
-                &block["input"],
-            )
-        })
-        .collect()
+    let gate = services.gate();
+    let running = services.store.running_input().ok().flatten();
+    let mut taints = Vec::new();
+    for block in blocks.filter(|block| block["type"] == "tool_use") {
+        let (tool, input) = (block["name"].as_str().unwrap_or_default(), &block["input"]);
+        let (memory, work) = (&services.memory_dir, &services.workdir);
+        let read = disclosure::of_builtin(memory, work, tool, input);
+        taints.extend(match &running {
+            Some(row) => disclosure::attached_in(read, &row.input, work, input),
+            None => read,
+        });
+        // What was written into the notebook in confidence is read with it.
+        let marked = match disclosure::read_of_notebook(memory, work, tool, input) {
+            Some(Some(text)) => gate.of_marked_in(&text),
+            Some(None) => gate.of_all_marked(),
+            None => Ok(Vec::new()),
+        };
+        taints.extend(marked.unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not tell what the notebook was written with");
+            vec![Taint::new(
+                disclosure::Kind::Private,
+                "手帳に書き写したもの",
+            )]
+        }));
+    }
+    taints
 }
 
 /// An own tool's answer, once what it read is marked on the turn and handed on
@@ -765,13 +786,16 @@ async fn marked_own<S: Slack + Clone>(
         .as_str()
         .unwrap_or_default();
     let mut taints = disclosure::of_own(&services.memory_dir, tool, arguments, answer);
-    if tool == "list_delegated" {
-        match services.gate().of_runs(answer) {
-            Ok(read) => taints.extend(read),
-            Err(error) => {
-                tracing::warn!(%error, "could not tell what workers read");
-                return Some(hub::failed(message, UNMARKED));
-            }
+    let gate = services.gate();
+    let read = match tool {
+        "list_delegated" => gate.of_runs(answer),
+        _ => gate.of_marked_in(answer),
+    };
+    match read {
+        Ok(read) => taints.extend(read),
+        Err(error) => {
+            tracing::warn!(%error, %tool, "could not tell what was read before");
+            return Some(hub::failed(message, UNMARKED));
         }
     }
     if !services.mark(taints) {
