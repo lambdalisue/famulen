@@ -104,6 +104,28 @@ pub(crate) fn sandbox_settings(sealed: &[PathBuf], writable: &[PathBuf]) -> Valu
     } })
 }
 
+/// The built-in tools the secretary is offered. Every tool offered is
+/// described to the model on every call, whether it is used or not, so the
+/// ones for an interactive session (plans, worktrees, schedules, questions in
+/// the terminal) are left out; the owner is asked through Famulen instead.
+const BUILTINS: &[&str] = &[
+    "Bash",
+    "PowerShell",
+    "Read",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Skill",
+    "ToolSearch",
+    "TodoWrite",
+    "TaskOutput",
+    "TaskStop",
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
+];
+
 impl Options {
     /// The arguments Claude Code is started with.
     ///
@@ -133,6 +155,7 @@ impl Options {
             "--disallowedTools={}",
             crate::permissions::LAUNCHERS.join(",")
         ));
+        args.push(format!("--tools={}", BUILTINS.join(",")));
         args.push("--mcp-config".into());
         let mut config = hub::mcp_config();
         for id in &self.connections {
@@ -1862,6 +1885,37 @@ mod tests {
             .unwrap();
         assert!(denied.split(',').any(|t| t == "Task"), "{denied}");
         assert!(denied.split(',').any(|t| t == "Agent"), "{denied}");
+    }
+
+    #[test]
+    fn only_the_builtins_the_secretary_uses_are_offered() {
+        let args = options(None).args();
+        let offered: Vec<&str> = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--tools="))
+            .unwrap()
+            .split(',')
+            .collect();
+        for tool in [
+            "Bash",
+            "Read",
+            "Edit",
+            "Write",
+            "WebFetch",
+            "Skill",
+            "ToolSearch",
+        ] {
+            assert!(offered.contains(&tool), "{tool} in {offered:?}");
+        }
+        for tool in [
+            "EnterPlanMode",
+            "AskUserQuestion",
+            "CronCreate",
+            "Monitor",
+            "Agent",
+        ] {
+            assert!(!offered.contains(&tool), "{tool} in {offered:?}");
+        }
     }
 
     #[test]
