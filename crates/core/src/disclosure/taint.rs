@@ -16,8 +16,11 @@ pub(crate) enum Kind {
     People,
     /// The owner's things, contracts and other records of their own.
     Belongings,
-    /// What was said where not everyone can read.
+    /// What was said where not everyone can read, and whatever is not known
+    /// to be public.
     Private,
+    /// What everyone in a workspace can read, and no one outside it.
+    Internal,
     /// What has to do with the vault.
     Vault,
     /// What the conversation still holds from earlier turns.
@@ -66,9 +69,15 @@ impl Taint {
     }
 
     pub(super) fn of_connection(connection: &str, what: &str) -> Self {
+        Self::named(connection, connection, what)
+    }
+
+    /// Read through `connection`, which the owner calls `name`.
+    pub(super) fn named(connection: &str, name: &str, what: &str) -> Self {
+        let name = if name.is_empty() { connection } else { name };
         Self {
             connection: connection.to_owned(),
-            ..Self::new(Kind::Private, format!("「{connection}」{what}"))
+            ..Self::new(Kind::Private, format!("「{name}」{what}"))
         }
     }
 
@@ -85,12 +94,40 @@ impl Taint {
         }
     }
 
-    /// Whether those who hear it in `channel` are those it was said to.
-    pub(super) fn stays_in(&self, workspace: &str, channel: &str) -> bool {
+    /// What was said where everyone in a Slack workspace can read.
+    pub(super) fn internal(workspace: &str, name: &str, what: &str) -> Self {
+        Self {
+            kind: Kind::Internal,
+            ..Self::named(workspace, name, what)
+        }
+    }
+
+    /// Said in `channel`.
+    pub(super) fn in_place(mut self, channel: &str) -> Self {
+        self.place = channel.to_owned();
+        self
+    }
+
+    /// Whether those who hear it in `channel`, which is `room`, are among
+    /// those it was said to.
+    pub(super) fn stays_in(&self, workspace: &str, channel: &str, room: &Room) -> bool {
+        if self.connection != workspace {
+            return false;
+        }
+        match self.kind {
+            Kind::Private => !self.place.is_empty() && self.place == channel,
+            // Those of other organizations may be in a channel shared with them.
+            Kind::Internal => self.place == channel || (room.private.is_some() && !room.shared),
+            _ => false,
+        }
+    }
+
+    /// Whether it was read through `connection` from the repository named
+    /// `repository`, so that it may go back there.
+    pub(crate) fn of_repository(&self, connection: &str, repository: Option<&str>) -> bool {
         self.kind == Kind::Private
-            && !self.place.is_empty()
-            && self.connection == workspace
-            && self.place == channel
+            && self.connection == connection
+            && repository.is_some_and(|r| r == self.place)
     }
 
     /// Whether it was read through `connection`, outside any channel.
@@ -106,6 +143,12 @@ pub(super) enum Holder {
     Wake(i64),
     /// A delegated task, by its id.
     Task(String),
+    /// A conversation: what its model still holds of every turn in it.
+    Conversation(i64),
+    /// A routine, by its record's id: what its runs are told.
+    Routine(String),
+    /// A record or a memory of the notebook, by its id: what was written into it.
+    Record(String),
 }
 
 impl Holder {
@@ -114,8 +157,23 @@ impl Holder {
             Self::Input(id) => format!("input:{id}"),
             Self::Wake(id) => format!("wake:{id}"),
             Self::Task(id) => format!("task:{id}"),
+            Self::Conversation(id) => format!("conversation:{id}"),
+            Self::Routine(id) => format!("routine:{id}"),
+            Self::Record(id) => format!("record:{id}"),
         }
     }
+}
+
+/// The conversation an input is of, when it is of one.
+pub(super) fn conversation_of(store: &Store, input: i64) -> anyhow::Result<Option<i64>> {
+    Ok(store
+        .conn()
+        .query_row(
+            "SELECT conversation FROM conversation_keys WHERE key = ?1",
+            [format!("input:{input}")],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 pub(super) fn mark(store: &Store, holder: &Holder, taints: &[Taint]) -> anyhow::Result<()> {
@@ -209,6 +267,21 @@ pub(super) fn disclosures_of(store: &Store, input: i64) -> anyhow::Result<Vec<Di
             channel,
             taints: serde_json::from_str(&taints)?,
         })
+    })
+    .collect()
+}
+
+/// Every record and memory of the notebook something was written into in
+/// confidence, by its id, with what was written.
+pub(super) fn marked_records(store: &Store) -> anyhow::Result<Vec<(String, Taint)>> {
+    let conn = store.conn();
+    let mut statement =
+        conn.prepare("SELECT holder, taint FROM taints WHERE holder LIKE 'record:%'")?;
+    let rows = statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    rows.map(|row| {
+        let (holder, taint) = row?;
+        let id = holder.trim_start_matches("record:").to_owned();
+        Ok((id, serde_json::from_str(&taint)?))
     })
     .collect()
 }

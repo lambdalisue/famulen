@@ -147,6 +147,27 @@ fn open_place(input: &Input) -> Option<String> {
     }
 }
 
+/// What was said before that a turn is handed, and where it was said.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Said {
+    /// Quoted; empty when there is none.
+    pub text: String,
+    /// The other conversations it was said in.
+    pub conversations: Vec<i64>,
+    /// The turns it was said in that are of no conversation.
+    pub inputs: Vec<i64>,
+}
+
+impl Said {
+    fn from(&mut self, of: Option<i64>, m: &Message, here: i64) {
+        match of {
+            Some(of) if of != here => self.conversations.push(of),
+            Some(_) => {}
+            None => self.inputs.extend(m.input()),
+        }
+    }
+}
+
 /// Clones share one store.
 #[derive(Clone)]
 pub struct Conversations {
@@ -792,17 +813,18 @@ impl Conversations {
     }
 
     /// What was said before that the session of `c` does not know and the
-    /// turn of `row` is handed, quoted; empty when there is none.
+    /// turn of `row` is handed, quoted; empty when there is none. With it, the
+    /// other conversations it was said in, and the turns of none it was said in.
     pub fn said_before(
         &self,
         log: &ConsoleLog,
         c: &Conversation,
         row: &StoredInput,
         workgroup: &str,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Said> {
         // The owner let one question be answered, not their talk be known.
         if row.input.reach() != Reach::Full && row.input.reach() != Reach::Inward {
-            return Ok(String::new());
+            return Ok(Said::default());
         }
         let itself = |m: &Message| {
             m.input() == Some(row.id)
@@ -821,6 +843,10 @@ impl Conversations {
             own.retain(|m| !itself(m) && m.shown_in(workgroup) && self.may_be_told(m));
         }
         let mut elsewhere = Vec::new();
+        let mut said = Said::default();
+        for m in &own {
+            said.from(self.of_message(m)?, m, c.id);
+        }
         // A thread is gone on with for its own sake.
         // Nor is what was said elsewhere put into what is answered where others
         // read along.
@@ -843,14 +869,18 @@ impl Conversations {
                     || !m.shown_in(workgroup)
                     || !self.may_be_told(&m)
                     || own.iter().any(|o| o.id == m.id)
-                    || self.of_message(&m)? == Some(c.id)
                 {
                     continue;
                 }
+                let of = self.of_message(&m)?;
+                if of == Some(c.id) {
+                    continue;
+                }
+                said.from(of, &m, c.id);
                 elsewhere.push(m);
             }
         }
-        let mut text = String::new();
+        let text = &mut said.text;
         for (title, messages, bound) in [
             ("Said in this conversation before", own, ITS_OWN),
             ("Said lately elsewhere", elsewhere, ELSEWHERE),
@@ -862,7 +892,11 @@ impl Conversations {
                 ));
             }
         }
-        Ok(text)
+        said.conversations.sort_unstable();
+        said.conversations.dedup();
+        said.inputs.sort_unstable();
+        said.inputs.dedup();
+        Ok(said)
     }
 
     /// Whether a message may be handed to the owner's conversations: the

@@ -1175,6 +1175,7 @@ mod tests {
                 Source::Schedule {
                     name: "n".into(),
                     at: "1".into(),
+                    routine: String::new(),
                 },
             ),
             (

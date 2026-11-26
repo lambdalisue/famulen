@@ -241,6 +241,7 @@ pub(super) async fn run_session(
                 continue;
             }
             if let Some(resident) = &resident {
+                services.mark_begun(&row).await;
                 give(app, &services, resident, &conversation, &row, tz)?;
             }
         }
@@ -303,12 +304,17 @@ fn give(
     tz: chrono_tz::Tz,
 ) -> anyhow::Result<()> {
     let workgroup = workgroup_of(&app.workgroups, &row.input);
-    let besides = format!(
-        "{}{}",
-        asked_in(app, row)?,
-        app.conversations
-            .said_before(&app.console, conversation, row, &workgroup)?
-    );
+    let said = app
+        .conversations
+        .said_before(&app.console, conversation, row, &workgroup)?;
+    // What it is handed is in its model from now on.
+    crate::disclosure::carry(
+        &app.store,
+        &said.conversations,
+        &said.inputs,
+        conversation.id,
+    )?;
+    let besides = format!("{}{}", asked_in(app, row)?, said.text);
     let now = Utc::now().with_timezone(&tz).to_rfc3339();
     let text = deliverable(&app.workgroups, &row.input, &besides, now);
     let text = if row.interrupted { resent(&text) } else { text };

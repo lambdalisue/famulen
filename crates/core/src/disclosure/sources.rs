@@ -4,10 +4,14 @@
 
 use std::path::{Path, PathBuf};
 
+use futures_util::future::BoxFuture;
 use serde_json::Value;
 
 use super::taint::{Kind, Taint};
+use crate::attachments::DIR as ATTACHMENTS;
+use crate::claude::skills::{PLUGINS_DIR, SKILLS_DIR};
 use crate::connections::{Connection, Transport};
+use crate::input::{Input, Source};
 use crate::slack::clients::SlackClients;
 use crate::slack::web::{Room, Slack};
 
@@ -274,52 +278,194 @@ pub(crate) fn of_files<'a>(memory_dir: &Path, files: impl Iterator<Item = &'a st
         .collect()
 }
 
+/// Built-in tools of the model CLI whose answers tell nothing it did not
+/// know: what it wrote, what it planned, and what anyone may find.
+const BUILTIN_PLAIN: &[&str] = &[
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "KillBash",
+    "KillShell",
+    "Skill",
+    "SlashCommand",
+    "TodoWrite",
+    "ToolSearch",
+    "WebSearch",
+    "Write",
+];
+
+/// Built-in tools that read files, and those that answer with what a file
+/// held around what they changed.
+const FILE_READERS: &[&str] = &[
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "NotebookRead",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+];
+
+const LOCAL: &str = "手元のファイル";
+const ATTACHED: &str = "添えられたファイル";
+
 /// What a built-in tool of the model CLI reads. Most read without asking
-/// Famulen, so it is told by the call itself.
+/// Famulen, so it is told by the call itself. One not known to tell nothing
+/// counts as private, so that a new one does not slip through.
 pub(crate) fn of_builtin(
     memory_dir: &Path,
     workdir: &Path,
     tool: &str,
     input: &Value,
 ) -> Vec<Taint> {
+    if tool.starts_with("mcp__") || BUILTIN_PLAIN.contains(&tool) {
+        // What a server answers is read where the answer passes.
+        return Vec::new();
+    }
+    let told = |taint: Taint| vec![taint.told_by(&input.to_string())];
+    match tool {
+        "WebFetch" => match input["url"].as_str() {
+            Some(url) if super::web::is_public_page(url) => Vec::new(),
+            _ => told(private("ウェブの公開でない頁")),
+        },
+        tool if FILE_READERS.contains(&tool) => of_files_read(memory_dir, workdir, tool, input),
+        "Bash" | "BashOutput" | "PowerShell" | "TaskOutput" | "Monitor" => {
+            told(private("シェルの出力"))
+        }
+        tool => told(private(format!("組み込みの道具（{tool}）の答え"))),
+    }
+}
+
+fn of_files_read(memory_dir: &Path, workdir: &Path, tool: &str, input: &Value) -> Vec<Taint> {
     let path = ["file_path", "path", "notebook_path"]
         .iter()
         .find_map(|key| input[*key].as_str());
-    match tool {
-        "Bash" | "BashOutput" | "PowerShell" | "TaskOutput" | "Monitor" => {
-            vec![private("シェルの出力").told_by(&input.to_string())]
-        }
-        "Read" | "Grep" | "Glob" | "LS" | "NotebookRead" => {
-            let path = path.map_or_else(|| workdir.to_owned(), |p| workdir.join(p));
-            let root = real(root(memory_dir));
-            let inside = |p: &Path| {
-                let p = real(p);
-                p.starts_with(&root) || root.starts_with(&p)
-            };
-            // What a pattern spells out leads further, or elsewhere.
-            let spelt = input["pattern"]
-                .as_str()
-                .filter(|_| tool == "Glob")
-                .map(|p| {
-                    let end = p.find(['*', '?', '[', '{']).unwrap_or(p.len());
-                    path.join(&p[..end])
-                });
-            if inside(&path) {
-                let named = path.to_string_lossy();
-                return of_path(memory_dir, &named)
-                    .into_iter()
-                    .map(|t| t.told_by(&format!("{named} {}", input["pattern"])))
-                    .collect();
+    let path = path.map_or_else(|| workdir.to_owned(), |p| workdir.join(p));
+    let root = real(root(memory_dir));
+    let inside = |p: &Path| {
+        let p = real(p);
+        p.starts_with(&root) || root.starts_with(&p)
+    };
+    // What a pattern spells out leads further, or elsewhere.
+    let spelt = input["pattern"]
+        .as_str()
+        .filter(|_| tool == "Glob")
+        .map(|p| {
+            let end = p.find(['*', '?', '[', '{']).unwrap_or(p.len());
+            path.join(&p[..end])
+        });
+    // A pattern that steps up finds what is outside where it starts.
+    let climbs = tool == "Glob" && input["pattern"].as_str().is_some_and(|p| p.contains(".."));
+    let local = || private(LOCAL).told_by(&format!("{} {}", path.display(), input["pattern"]));
+    if inside(&path) {
+        let named = path.to_string_lossy();
+        let mut taints: Vec<Taint> = of_path(memory_dir, &named)
+            .into_iter()
+            .map(|t| t.told_by(&format!("{named} {}", input["pattern"])))
+            .collect();
+        taints.extend(climbs.then(local));
+        return taints;
+    }
+    if spelt.as_deref().is_some_and(inside) {
+        return vec![people(), belongings(FILES)];
+    }
+    // A step up may lead out of where it seems to be once it is followed.
+    let under = |dirs: &[PathBuf], p: &Path| {
+        let steps_up = p.components().any(|c| c == std::path::Component::ParentDir);
+        let p = real(p);
+        !climbs && !steps_up && dirs.iter().any(|dir| p.starts_with(dir))
+    };
+    let skills = [SKILLS_DIR, PLUGINS_DIR].map(|dir| real(&workdir.join(dir)));
+    if under(&skills, &path) && spelt.as_deref().is_none_or(|p| under(&skills, p)) {
+        return Vec::new();
+    }
+    let attached = [real(&workdir.join(ATTACHMENTS))];
+    if under(&attached, &path) && spelt.as_deref().is_none_or(|p| under(&attached, p)) {
+        return vec![private(ATTACHED).told_by(&path.to_string_lossy())];
+    }
+    vec![local()]
+}
+
+/// Have what a file attached to `input` holds be of the place it was attached
+/// in, so that it may go back there. A file attached to another input is not.
+pub(crate) fn attached_in(
+    taints: Vec<Taint>,
+    input: &Input,
+    workdir: &Path,
+    called: &Value,
+) -> Vec<Taint> {
+    let Source::Slack {
+        workspace,
+        channel,
+        attached,
+        ..
+    } = &input.source
+    else {
+        return taints;
+    };
+    let Some(read) = called["file_path"].as_str().map(|p| real(&workdir.join(p))) else {
+        return taints;
+    };
+    let its_own = attached.iter().any(|a| match a {
+        crate::attachments::Attached::Kept(kept) => real(&workdir.join(&kept.path)) == read,
+        _ => false,
+    });
+    if !its_own {
+        return taints;
+    }
+    taints
+        .into_iter()
+        .map(|t| match t.label.as_str() {
+            ATTACHED => {
+                let mut t = t.in_place(channel);
+                t.connection = workspace.clone();
+                t
             }
-            if spelt.is_some_and(|p| inside(&p)) {
-                return vec![people(), belongings(FILES)];
-            }
-            // Claude Code puts long answers of tools and whole conversations here.
-            let kept = path.to_string_lossy().replace('\\', "/");
-            let kept = kept.contains("/.claude/projects") || kept.contains("/tool-results/");
-            kept.then(|| private("会話の控え")).into_iter().collect()
-        }
-        _ => Vec::new(),
+            _ => t,
+        })
+        .collect()
+}
+
+/// What a file of the notebook says, by its path, when it is one.
+pub(super) fn notebook_text(memory_dir: &Path, path: &str) -> Option<String> {
+    let given = Path::new(path);
+    let found = if given.is_absolute() {
+        given.to_owned()
+    } else {
+        root(memory_dir).join(given)
+    };
+    let root = real(root(memory_dir));
+    let found = real(&found);
+    (found.starts_with(&root) && found.is_file())
+        .then(|| std::fs::read_to_string(&found).ok())
+        .flatten()
+}
+
+/// What a built-in tool reads of the notebook: the file it names with what
+/// that says, or `None` for more than one file.
+pub(crate) fn read_of_notebook(
+    memory_dir: &Path,
+    workdir: &Path,
+    tool: &str,
+    input: &Value,
+) -> Option<Option<String>> {
+    if !FILE_READERS.contains(&tool) {
+        return None;
+    }
+    let path = ["file_path", "path", "notebook_path"]
+        .iter()
+        .find_map(|key| input[*key].as_str());
+    let path = path.map_or_else(|| workdir.to_owned(), |p| workdir.join(p));
+    let root = real(root(memory_dir));
+    let found = real(&path);
+    if !(found.starts_with(&root) || root.starts_with(&found)) {
+        return None;
+    }
+    let named = path.to_string_lossy().into_owned();
+    match notebook_text(memory_dir, &named) {
+        Some(text) if tool != "Glob" => Some(Some(format!("{named}\n{text}"))),
+        _ => Some(None),
     }
 }
 
@@ -350,36 +496,8 @@ pub(super) fn is_slack(connection: &Connection) -> bool {
         || matches!(&connection.transport, Transport::Defined { definition, .. } if definition == "slack")
 }
 
-/// Words in the name of a tool that reads what people wrote to each other.
-const TALK: &[&str] = &[
-    "message",
-    "messages",
-    "mail",
-    "email",
-    "thread",
-    "threads",
-    "dm",
-    "dms",
-    "chat",
-    "chats",
-    "conversation",
-    "conversations",
-    "emails",
-    "mails",
-    "history",
-    "slack",
-    "inbox",
-    "draft",
-    "drafts",
-    "attachment",
-    "attachments",
-];
-
-/// Tools of Slack that tell only who and what there is.
-const SLACK_PLAIN: &[&str] = &[
-    "list_channels",
-    "channel_info",
-    "user_info",
+/// Tools of Slack that tell only what they did.
+const SLACK_DONE: &[&str] = &[
     "get_permalink",
     "open_dm",
     "post_message",
@@ -390,31 +508,90 @@ const SLACK_PLAIN: &[&str] = &[
     "set_app_icon",
 ];
 
+/// Tools of Slack that tell who and what there is in a workspace.
+const SLACK_DIRECTORY: &[&str] = &["list_channels", "user_info"];
+
+/// Tools of Bluesky that read what anyone sees without logging in, unless
+/// its author asked otherwise. The timeline and notifications are the
+/// account's own.
+const ANYONE_SEES_ON_BLUESKY: &[&str] = &[
+    "get_author_feed",
+    "get_post_thread",
+    "get_profile",
+    "search_posts",
+];
+
+/// Tools of GitHub that read what a repository holds, of the repository the
+/// `owner` and `repo` arguments name. Anyone may read it when the repository
+/// is public. What is the account's own, such as notifications, is not here.
+const REPOSITORY_CONTENT: &[&str] = &[
+    "get_commit",
+    "get_discussion",
+    "get_discussion_comments",
+    "get_file_contents",
+    "get_label",
+    "get_latest_release",
+    "get_release_by_tag",
+    "get_repository_tree",
+    "get_tag",
+    "issue_read",
+    "list_branches",
+    "list_commits",
+    "list_discussion_categories",
+    "list_discussions",
+    "list_issue_types",
+    "list_issues",
+    "list_label",
+    "list_pull_requests",
+    "list_releases",
+    "list_tags",
+    "pull_request_read",
+];
+
+/// Tells whether what is read is what anyone on the internet may read.
+pub(crate) trait Looks: Sync {
+    /// Whether the GitHub repository `owner/name` is public; `None` when it
+    /// cannot be told.
+    fn repository<'a>(&'a self, full_name: &'a str) -> BoxFuture<'a, Option<bool>>;
+}
+
 /// What a connection's answer to a message holds in confidence.
 pub(crate) async fn of_connection<S: Slack>(
     clients: Option<&SlackClients<S>>,
+    looks: &dyn Looks,
     connection: &Connection,
     message: &Value,
     response: &Value,
 ) -> Vec<Taint> {
     let told = response["result"].to_string();
-    read_through(clients, connection, message, response)
+    read_through(clients, looks, connection, message, response)
         .await
         .into_iter()
-        .map(|t| t.told_by(&told))
+        .map(|mut t| match defined_as(connection) {
+            // A repository is not a channel: what was read in it is told apart.
+            Some("github") => {
+                let place = std::mem::take(&mut t.place);
+                t.told_by(&told).in_place(&place)
+            }
+            _ => t.told_by(&told),
+        })
         .collect()
 }
 
+/// What was read through a connection. Only what can be told to be public is
+/// not confidential, so that a new connection or tool does not slip through.
 async fn read_through<S: Slack>(
     clients: Option<&SlackClients<S>>,
+    looks: &dyn Looks,
     connection: &Connection,
     message: &Value,
     response: &Value,
 ) -> Vec<Taint> {
     let id = connection.id.as_str();
+    let content = || vec![Taint::named(id, &connection.name, "の内容")];
     match message["method"].as_str() {
         Some("tools/call") => {}
-        Some("resources/read") => return vec![Taint::of_connection(id, "の内容")],
+        Some("resources/read") => return content(),
         _ => return Vec::new(),
     }
     if response.get("error").is_some() || response["result"]["isError"] == true {
@@ -424,30 +601,109 @@ async fn read_through<S: Slack>(
         .pointer("/params/name")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if !is_slack(connection) {
-        let talks = words(tool).any(|word| TALK.contains(&word.as_str()))
-            || matches!(tool, "http_get" | "http_post");
-        let talks = talks || (connection.kind == "discord" && tool == "read_channel");
-        return talks
-            .then(|| Taint::of_connection(id, "のやりとり"))
-            .into_iter()
-            .collect();
+    let arguments = &message["params"]["arguments"];
+    if is_slack(connection) {
+        return of_slack(clients, connection, tool, arguments, response).await;
     }
-    match tool {
-        tool if SLACK_PLAIN.contains(&tool) => Vec::new(),
-        "read_channel" => {
-            let channel = message
-                .pointer("/params/arguments/channel")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let room = room_of(clients, id, channel).await;
-            (room.private != Some(false))
-                .then(|| Taint::room(id, channel, &room))
-                .into_iter()
-                .collect()
+    let public = match defined_as(connection) {
+        Some("bluesky") => {
+            ANYONE_SEES_ON_BLUESKY.contains(&tool)
+                && !response.to_string().contains("no-unauthenticated")
         }
-        "search_messages" => of_search(id, response),
-        _ => vec![Taint::of_connection(id, "のやりとり")],
+        Some("rss") => anyone_reads_the_feed(connection),
+        Some("github") => {
+            let repository = repository_of(arguments);
+            let public = REPOSITORY_CONTENT.contains(&tool)
+                && !kept_back(response)
+                && match &repository {
+                    Some(name) => looks.repository(name).await == Some(true),
+                    None => false,
+                };
+            if public {
+                return Vec::new();
+            }
+            // What was found across repositories goes back to none of them.
+            let from = repository.unwrap_or_else(|| "*".to_owned());
+            return vec![Taint::named(id, &connection.name, "の内容").in_place(&from)];
+        }
+        _ => false,
+    };
+    if public { Vec::new() } else { content() }
+}
+
+/// The bundled service definition a connection is reached by.
+fn defined_as(connection: &Connection) -> Option<&str> {
+    match &connection.transport {
+        Transport::Defined { definition, .. } => Some(definition),
+        _ => None,
+    }
+}
+
+/// What a public repository shows only to those who may write to it: a
+/// review not sent yet, a release not published yet.
+fn kept_back(response: &Value) -> bool {
+    let text = response.to_string().replace(['\\', ' '], "");
+    text.contains("PENDING") || text.contains("\"draft\":true")
+}
+
+/// `owner/name` of the repository a call is of, in lower case.
+pub(super) fn repository_of(arguments: &Value) -> Option<String> {
+    let field = |key: &str| arguments[key].as_str().filter(|v| !v.is_empty());
+    let (owner, repo) = (field("owner")?, field("repo")?);
+    let plain = |part: &str| {
+        part.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    (plain(owner) && plain(repo) && !repo.starts_with('.'))
+        .then(|| format!("{owner}/{repo}").to_ascii_lowercase())
+}
+
+/// Whether a feed is read on the public internet with nothing that tells who
+/// reads it.
+fn anyone_reads_the_feed(connection: &Connection) -> bool {
+    let Transport::Defined { values, public, .. } = &connection.transport else {
+        return false;
+    };
+    *public
+        && connection.secret == Default::default()
+        && values
+            .get("url")
+            .is_some_and(|url| super::web::opens_to_anyone(url))
+}
+
+/// What a connection of Slack answered: what was said in a channel, by who
+/// can read the channel.
+async fn of_slack<S: Slack>(
+    clients: Option<&SlackClients<S>>,
+    connection: &Connection,
+    tool: &str,
+    arguments: &Value,
+    response: &Value,
+) -> Vec<Taint> {
+    let id = connection.id.as_str();
+    match tool {
+        tool if SLACK_DONE.contains(&tool) => Vec::new(),
+        tool if SLACK_DIRECTORY.contains(&tool) => {
+            vec![Taint::internal(id, &connection.name, "の顔ぶれ")]
+        }
+        "read_channel" | "channel_info" => {
+            let channel = arguments["channel"].as_str().unwrap_or_default();
+            let room = room_of(clients, id, channel).await;
+            vec![of_room(id, &connection.name, channel, &room)]
+        }
+        "search_messages" => of_search(connection, response),
+        _ => vec![Taint::named(id, &connection.name, "のやりとり")],
+    }
+}
+
+/// What was said in a channel of Slack: kept to its channel when not everyone
+/// in the workspace can read it, to the workspace when they can.
+pub(crate) fn of_room(workspace: &str, name: &str, channel: &str, room: &Room) -> Taint {
+    match room.private {
+        Some(false) => {
+            Taint::internal(workspace, name, "の公開のチャンネルの内容").in_place(channel)
+        }
+        _ => Taint::room(workspace, channel, room),
     }
 }
 
@@ -463,8 +719,9 @@ async fn room_of<S: Slack>(
 }
 
 /// What was found by a search, by the channel each was said in.
-fn of_search(id: &str, response: &Value) -> Vec<Taint> {
-    let unknown = || vec![Taint::of_connection(id, "のやりとり")];
+fn of_search(connection: &Connection, response: &Value) -> Vec<Taint> {
+    let id = connection.id.as_str();
+    let unknown = || vec![Taint::named(id, &connection.name, "のやりとり")];
     let text = response
         .pointer("/result/content/0/text")
         .and_then(Value::as_str)
@@ -480,11 +737,15 @@ fn of_search(id: &str, response: &Value) -> Vec<Taint> {
     };
     matches
         .iter()
-        .filter_map(|found| {
+        .map(|found| {
             let channel = &found["channel"];
             let room = Room::of(channel);
-            (room.private != Some(false))
-                .then(|| Taint::room(id, channel["id"].as_str().unwrap_or_default(), &room))
+            of_room(
+                id,
+                &connection.name,
+                channel["id"].as_str().unwrap_or_default(),
+                &room,
+            )
         })
         .collect()
 }

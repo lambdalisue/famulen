@@ -13,6 +13,7 @@ fn from_schedule(text: &str) -> Input {
         source: Source::Schedule {
             name: "朝のまとめ".into(),
             at: text.into(),
+            routine: String::new(),
         },
         text: text.into(),
     }

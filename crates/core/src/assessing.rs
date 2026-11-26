@@ -281,6 +281,7 @@ mod tests {
                 source: Source::Schedule {
                     name: "n".into(),
                     at: "now".into(),
+                    routine: String::new(),
                 },
                 text: text.into(),
             })

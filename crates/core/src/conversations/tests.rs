@@ -117,7 +117,10 @@ impl Bench {
 
     fn told(&self, row: &StoredInput) -> String {
         let c = self.settle(row);
-        self.all.said_before(&self.log, &c, row, "work").unwrap()
+        self.all
+            .said_before(&self.log, &c, row, "work")
+            .unwrap()
+            .text
     }
 }
 
@@ -223,6 +226,7 @@ fn what_arrives_by_itself_and_what_the_owner_let_be_answered_are_each_on_their_o
     let schedule = Source::Schedule {
         name: "朝".into(),
         at: "now".into(),
+        routine: String::new(),
     };
     let mut seen = vec![of];
     for row in [

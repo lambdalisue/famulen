@@ -59,7 +59,7 @@ fn media_type(content_type: &str) -> String {
 
 /// Whether an address is on the public internet, so that what answers there
 /// is neither this machine, its network nor the cloud it runs in.
-fn is_public(ip: IpAddr) -> bool {
+pub fn is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => is_public_v4(ip),
         IpAddr::V6(ip) => is_public_v6(ip),
@@ -105,7 +105,7 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
 }
 
 /// Whether a name is one of this machine or of the network it is in.
-fn is_local_name(name: &str) -> bool {
+pub fn is_local_name(name: &str) -> bool {
     let name = name.trim_end_matches('.').to_ascii_lowercase();
     !name.contains('.')
         || [".localhost", ".local", ".internal", ".home.arpa"]

@@ -197,6 +197,7 @@ fn ask_about_working(app: &App, today: NaiveDate) -> anyhow::Result<Option<Strin
         source: Source::Schedule {
             name: "working-memory".into(),
             at: today.to_string(),
+            routine: String::new(),
         },
         text: format!(
             "This working memory may have outlived its work. Check each: close it with close_working when the work is finished; when it goes on, write where it stands with set_working. Do not close what you could not check.\n{}",
@@ -236,6 +237,7 @@ fn ask_about_people(app: &App, today: NaiveDate) -> anyhow::Result<Option<String
         source: Source::Schedule {
             name: "people".into(),
             at: today.to_string(),
+            routine: String::new(),
         },
         text,
     };
