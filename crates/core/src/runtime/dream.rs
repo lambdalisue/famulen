@@ -131,6 +131,22 @@ async fn dream(app: &App) -> anyhow::Result<(String, bool)> {
     if let Some(unkept) = unkept {
         sweep(app, today, &unkept);
     }
+    let holdings = {
+        let (store, records) = (app.store.clone(), app.records.clone());
+        tokio::task::spawn_blocking(move || tidying::holdings(&store, &records, today)).await?
+    };
+    match holdings {
+        Ok(None) => {}
+        Ok(Some(tidied)) => {
+            outcome.status = format!("{}。{}", outcome.status, tidied.status);
+            if let Err(error) =
+                dreaming::add_to_night(&app.store, outcome.night, tidied.changes, &tidied.status)
+            {
+                tracing::warn!(%error, "what was done of holdings was not added to its night");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "the holdings were not tidied"),
+    }
     // Memory stands by now, whatever becomes of the records.
     let tidied = tidying::tidy(
         &app.store,

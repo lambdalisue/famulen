@@ -2,7 +2,11 @@
 //! something to do becomes a task, and a record that may no longer be true is
 //! marked and asked about. Nothing a record says is rewritten or removed, a
 //! night looks at a few records and changes fewer, and a record looked at is
-//! left alone for a good while.
+//! left alone for a good while. Holdings are the exception: see [`holdings`].
+
+mod holdings;
+
+pub use holdings::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
