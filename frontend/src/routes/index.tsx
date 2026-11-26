@@ -1,4 +1,5 @@
-import { createAsync, query } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
+import { remembered } from "~/lib/remember";
 import { createEffect, createMemo, createSignal, For, Index, type JSX, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import AideIcon from "~/components/AideIcon";
 import { ProgressLine } from "~/components/records/RunProgress";
@@ -22,9 +23,9 @@ import { setView } from "~/lib/view";
 import { type DelegatedTask, delegatedQuery, stageOf, standingText } from "~/lib/workers";
 import { workgroup } from "~/lib/workgroup";
 
-const homeQuery = query(() => api.settings.getHome({}), "home");
+const homeQuery = remembered(() => api.settings.getHome({}), "home");
 
-const eventsQuery = query(async (workgroup: string, day: string) => {
+const eventsQuery = remembered(async (workgroup: string, day: string) => {
   return api.calendar.listEvents({ from: day, to: addDays(day, 1), workgroup });
 }, "home-events");
 
@@ -32,7 +33,7 @@ const eventsQuery = query(async (workgroup: string, day: string) => {
 const NEAR_DAYS = 30;
 
 /** What things and contracts are due by `until`, past ones too, soonest first. */
-const dueQuery = query(async (workgroup: string, until: string) => {
+const dueQuery = remembered(async (workgroup: string, until: string) => {
   const [things, contracts] = await Promise.all([
     api.records.listRecords({ kind: "holdings", workgroup }),
     api.records.listRecords({ kind: "contracts", workgroup }),

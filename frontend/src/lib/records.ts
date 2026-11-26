@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { query } from "@solidjs/router";
+import { remembered } from "./remember";
 import type { Field, FieldType, LinkAccountRequest, Record as Rec, RecordItem, RecordKind } from "~/gen/famulen/v1/records_pb";
 import type { Workgroup } from "~/gen/famulen/v1/workgroups_pb";
 import { api } from "./api";
@@ -34,13 +34,13 @@ export function withField(fields: readonly FieldLike[], name: string, v: FieldVa
 /** The field every kind has: the records it has to do with. */
 export const RELATED = "Related";
 
-export const recordsQuery = query(
+export const recordsQuery = remembered(
   async (kind: string, workgroup: string) => (await api.records.listRecords({ kind, workgroup })).records,
   "records",
 );
 
 /** One record whole, or null when there is none; a read that fails is thrown, not taken for a record that is gone. */
-export const recordQuery = query(async (kind: string, id: string) => {
+export const recordQuery = remembered(async (kind: string, id: string) => {
   try {
     return await api.records.getRecord({ kind, id });
   } catch (e) {
@@ -49,8 +49,8 @@ export const recordQuery = query(async (kind: string, id: string) => {
   }
 }, "record");
 
-export const kindsQuery = query(async () => (await api.records.listKinds({})).kinds, "kinds");
-export const routinesQuery = query(async () => (await api.routines.listRoutines({})).routines, "routines");
+export const kindsQuery = remembered(async () => (await api.records.listKinds({})).kinds, "kinds");
+export const routinesQuery = remembered(async () => (await api.routines.listRoutines({})).routines, "routines");
 
 /** Names of fields and sections are read whatever their case. */
 export const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();

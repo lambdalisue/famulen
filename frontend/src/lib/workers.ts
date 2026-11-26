@@ -1,14 +1,14 @@
-import { query } from "@solidjs/router";
+import { remembered } from "./remember";
 import type { DelegatedTask, LeftBehind, WorkerRun, WorkerStep } from "~/gen/famulen/v1/workers_pb";
 import { api } from "./api";
 import * as icons from "./icons";
 
 export type { DelegatedTask, WorkerRun, WorkerStep };
 
-export const delegatedQuery = query((asked: { workgroup?: string; task?: string } = {}) => api.workers.listDelegated(asked), "delegated");
-export const workerSettingsQuery = query(() => api.workers.getWorkerSettings({}), "workerSettings");
+export const delegatedQuery = remembered((asked: { workgroup?: string; task?: string } = {}) => api.workers.listDelegated(asked), "delegated");
+export const workerSettingsQuery = remembered(() => api.workers.getWorkerSettings({}), "workerSettings");
 
-export const runOutputQuery = query((id: string) => api.workers.readRun({ id: BigInt(id) }), "runOutput");
+export const runOutputQuery = remembered((id: string) => api.workers.readRun({ id: BigInt(id) }), "runOutput");
 
 export const runHref = (run: WorkerRun) => `/runs/${run.id}`;
 

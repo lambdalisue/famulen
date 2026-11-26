@@ -1,5 +1,6 @@
 import { addDays, dayOf, hm, localDate, monthOf, shortTime, today } from "~/lib/dates";
-import { createAsync, query } from "@solidjs/router";
+import { createAsync } from "@solidjs/router";
+import { remembered } from "~/lib/remember";
 import { createEffect, createSignal, For, onMount, Show } from "solid-js";
 import { EntryRow } from "~/components/MemoryEntry";
 import RecordDetail from "~/components/records/detail/RecordDetail";
@@ -19,10 +20,10 @@ import { Button, Callout, EmptyState, List, Tag } from "~/components/ui";
 /** The hues of what stands for a picture. */
 const HUES = [170, 30, 236, 318, 222];
 
-const partyMemoriesQuery = query(async (id: string) => (await api.memory.listPartyMemories({ id })).items, "partyMemories");
+const partyMemoriesQuery = remembered(async (id: string) => (await api.memory.listPartyMemories({ id })).items, "partyMemories");
 
 /** What is coming up with a party, and what was said of it. */
-const partyAroundQuery = query(async (workgroup: string, id: string, names: string) => {
+const partyAroundQuery = remembered(async (workgroup: string, id: string, names: string) => {
   const tz = (await api.settings.getPersona({})).timezone;
   const from = today(tz);
   const called = names.split("\n").map((n) => n.replace(/さん$/, ""));

@@ -1,15 +1,15 @@
-import { query } from "@solidjs/router";
+import { remembered } from "./remember";
 import type { MemoryItem } from "~/gen/famulen/v1/memory_pb";
 import { api } from "./api";
 import { withParams } from "./params";
 
-export const layersQuery = query(async () => (await api.memory.listLayers({})).layers, "memoryLayers");
-export const layerQuery = query((layer: string, at: string) => api.memory.getLayer({ layer, at }), "memoryLayer");
-export const noteOriginQuery = query((id: string) => api.memory.getNoteOrigin({ id }), "noteOrigin");
-export const memoryQuery = query((id: string, path: string) => api.memory.getMemory({ id, path }), "memory");
-export const memoryFileQuery = query((path: string) => api.memory.readFile({ path }), "memoryFile");
-export const dreamsQuery = query(() => api.memory.listDreams({}), "dreams");
-export const dreamSettingsQuery = query(() => api.memory.getDreamSettings({}), "dreamSettings");
+export const layersQuery = remembered(async () => (await api.memory.listLayers({})).layers, "memoryLayers");
+export const layerQuery = remembered((layer: string, at: string) => api.memory.getLayer({ layer, at }), "memoryLayer");
+export const noteOriginQuery = remembered((id: string) => api.memory.getNoteOrigin({ id }), "noteOrigin");
+export const memoryQuery = remembered((id: string, path: string) => api.memory.getMemory({ id, path }), "memory");
+export const memoryFileQuery = remembered((path: string) => api.memory.readFile({ path }), "memoryFile");
+export const dreamsQuery = remembered(() => api.memory.listDreams({}), "dreams");
+export const dreamSettingsQuery = remembered(() => api.memory.getDreamSettings({}), "dreamSettings");
 
 /** Where each layer's page is; the dream is the section's front page. */
 export function layerHref(id: string): string {
