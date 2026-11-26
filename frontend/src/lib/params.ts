@@ -22,3 +22,9 @@ export function withParams(path: string, params: { [name: string]: string }): st
   const text = all.toString();
   return text ? `${base}?${text}` : base;
 }
+
+/** Where `href` leads within the console, as the router names it, or undefined for another site. */
+export function addressOf(href: string): string | undefined {
+  const to = new URL(href, window.location.href);
+  return to.origin === window.location.origin ? `${to.pathname}${to.search}${to.hash}` : undefined;
+}

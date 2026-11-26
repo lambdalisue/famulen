@@ -1,8 +1,10 @@
-import { useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, onMount, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { RecordLink } from "~/gen/famulen/v1/records_pb";
 import { draw, notebookHref } from "~/lib/markdown";
+import { addressOf } from "~/lib/params";
+import { isNarrow } from "~/lib/viewport";
 
 /**
  * Markdown drawn as Arto draws it; until that is ready, the text itself.
@@ -14,11 +16,15 @@ import { draw, notebookHref } from "~/lib/markdown";
 export default function Markdown(props: { text: string; plain?: string; inline?: boolean; attributes?: boolean; links?: RecordLink[] }) {
   let viewer: HTMLElement | undefined;
   const navigate = useNavigate();
+  const location = useLocation();
   const [drawn, setDrawn] = createSignal(false);
   onMount(() => {
     window.handleMarkdownLinkClick = (path) => {
       const href = notebookHref(path);
-      if (href) navigate(href);
+      // Where the page already is, the router would add an entry of the same address, which the chat over the page on a
+      // phone is closed for instead.
+      if (!href) return;
+      if (!isNarrow() || addressOf(href) !== `${location.pathname}${location.search}${location.hash}`) navigate(href);
     };
     let turn = 0;
     createEffect(() => {

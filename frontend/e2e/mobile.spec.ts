@@ -702,12 +702,17 @@ async function middleOf(page: Page, selector: string): Promise<Point> {
 }
 
 /** Begin a conversation that the secretary answers at length, and then with `last`, and open it from the list. */
-async function openLong(page: Page, request: APIRequestContext, title: string, { answers = 8, last = `${title} の終わり` } = {}) {
+async function openLong(
+  page: Page,
+  request: APIRequestContext,
+  title: string,
+  { answers = 8, last = `${title} の終わり`, open = "", at = ["/", /^ホーム/] as [string, RegExp] } = {},
+) {
   const begun = await call<{ id: string }>(request, "ConsoleService", "Send", { text: title, workgroup: "all", newConversation: true });
   await expect.poll(async () => (await call<{ state: string }>(request, "ConsoleService", "GetStatus")).state, { timeout: 20_000 }).not.toBe("running");
   for (let i = 0; i < answers; i++) await call(request, "ConsoleService", "PostMessage", { text: `${title} の答え ${i}\n\n${"長い答え。".repeat(40)}`, replyTo: begun.id });
-  await call(request, "ConsoleService", "PostMessage", { text: last, replyTo: begun.id });
-  await visit(page, "/", /^ホーム/);
+  await call(request, "ConsoleService", "PostMessage", { text: last, open, replyTo: begun.id });
+  await visit(page, ...at);
   await page.getByRole("button", { name: "会話を引き上げる" }).click();
   await page.getByRole("button", { name: /^話の一覧へ/ }).click();
   await talkList(page).getByRole("listitem").filter({ hasText: title }).getByRole("button").first().click();
@@ -941,6 +946,88 @@ test("a tab pressed with the chat open goes to its page, back comes to the chat 
   await expect(talkSaid(page)).toBeVisible();
   await page.goForward();
   await expectView(page, /^タスク/);
+});
+
+/** The chat is folded, and the page it was over shows. */
+async function folded(page: Page) {
+  await expect(page.getByRole("button", { name: "会話を引き上げる" })).toBeVisible();
+  await expect(page.locator("#main")).toBeVisible();
+}
+
+test("a link in a conversation to a record of the page open folds the chat over it, and back comes to the chat as it was", async ({ page, request }) => {
+  const task = await record(request, "tasks", "e2e 会話から開く仕事");
+  const title = "e2e 同じ頁へのリンク";
+  await openLong(page, request, title, { answers: 1, last: `これ: [[records/tasks/${task.id}|会話から開く仕事]]`, at: ["/tasks", /^タスク/] });
+  const url = page.url();
+  await talkSaid(page).locator(".md-link", { hasText: "会話から開く仕事" }).click();
+  await folded(page);
+  await expect(detail(page)).toContainText("e2e 会話から開く仕事");
+  expect(new URL(page.url()).searchParams.get("id")).toBe(task.id);
+  await expect.poll(() => page.evaluate(() => history.state?.["famulen.chat"] ?? null)).toBeNull();
+
+  await page.goBack();
+  expect(page.url()).toBe(url);
+  await expect(talkSaid(page)).toContainText("会話から開く仕事");
+  await page.goForward();
+  await folded(page);
+  await expect(detail(page)).toContainText("e2e 会話から開く仕事");
+
+  // The same link once there folds the chat as its button does, and leaves no entry behind.
+  const there = page.url();
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await talkSaid(page).locator(".md-link", { hasText: "会話から開く仕事" }).click();
+  await folded(page);
+  await expect.poll(() => page.evaluate(() => history.state?.["famulen.chat"] ?? null)).toBeNull();
+  expect(page.url()).toBe(there);
+  await page.goBack();
+  expect(page.url()).toBe(url);
+  await expect(talkSaid(page)).toContainText("会話から開く仕事");
+  await page.goForward();
+  await folded(page);
+});
+
+test("a link in a conversation to a record of another page, and the button that shows a section, fold the chat on that page, which back and forward go between", async ({ page, request }) => {
+  const memo = await record(request, "memos", "e2e 会話から開くメモ");
+  await openLong(page, request, "e2e 別の頁へのリンク", { answers: 1, last: `[[records/memos/${memo.id}|会話から開くメモ]]`, open: "task" });
+  await talkSaid(page).locator(".md-link", { hasText: "会話から開くメモ" }).click();
+  await folded(page);
+  await expect(detail(page)).toContainText("e2e 会話から開くメモ");
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(talkSaid(page)).toContainText("会話から開くメモ");
+  await page.goForward();
+  await folded(page);
+  await expect(detail(page)).toContainText("e2e 会話から開くメモ");
+
+  await page.goBack();
+  await talkSaid(page).getByRole("link", { name: "タスクで見る" }).click();
+  await expectView(page, /^タスク/);
+  await folded(page);
+  await page.goBack();
+  await expectView(page, /^ホーム/);
+  await expect(talkSaid(page)).toContainText("会話から開くメモ");
+  await page.goForward();
+  await expectView(page, /^タスク/);
+  await folded(page);
+});
+
+test("the tab of the page open, pressed with the chat open, folds the chat on that page", async ({ page, request }) => {
+  await openLong(page, request, "e2e 今の頁のタブ", { answers: 1 });
+  const url = page.url();
+  await tabbar(page).getByRole("link", { name: "ホーム" }).click();
+  await folded(page);
+  expect(page.url()).toBe(url);
+  await expect.poll(() => page.evaluate(() => history.state?.["famulen.chat"] ?? null)).toBeNull();
+
+  // Within a page, its tab goes back to the page's own list.
+  const task = await record(request, "tasks", "e2e タブで戻る仕事");
+  await visit(page, `/tasks?id=${task.id}`, /^タスク/);
+  await expect(detail(page)).toContainText("e2e タブで戻る仕事");
+  await page.getByRole("button", { name: "会話を引き上げる" }).click();
+  await expect(page.locator("#main")).toBeHidden();
+  await tabbar(page).getByRole("link", { name: "タスク" }).click();
+  await folded(page);
+  await expect.poll(() => new URL(page.url()).search).toBe("");
 });
 
 test("the page read again with a conversation open shows it open, and back still goes to the list and folds the chat", async ({ page, request }) => {

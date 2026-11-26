@@ -55,6 +55,8 @@ let standing: { mark: Mark; depth: unknown } | undefined;
 let stepping = false;
 /** A step forward again, as back only closed the image open over the chat. */
 let restoring = false;
+/** The entry of the router's gone over to by back or forward, which says whether the chat is open there. */
+let traversed: string | undefined;
 
 const stand = () => {
   const mark = markHere();
@@ -135,11 +137,16 @@ function popped(e: PopStateEvent) {
   // Two entries of one address that the router made, as a link to the page already open does, are its to follow.
   const own = at === seen && (step > 0 || stood > 0);
   const before = standing?.mark.step ?? 0;
+  const was = seen;
   seen = at;
   stood = step;
   stand();
   // Another address is the router's: once it has gone there, and was not kept from leaving, the chat follows.
-  if (!own) return;
+  if (!own) {
+    // Between two entries of one address, the router settles on nothing new.
+    traversed = at === was ? undefined : at;
+    return;
+  }
   // A step between entries of the same address is the chat's alone: the router is not told of it.
   e.stopImmediatePropagation();
   // Opened again by going forward, the page behind is where it is now.
@@ -204,10 +211,16 @@ export function followChatHistory(of: Chat & { address: () => string }) {
         }
         stood = stepHere();
         stand();
+        const came = traversed === here();
+        traversed = undefined;
         // Come back from another page, or read again, onto where the chat was open: it shows as it was.
         if (stood > 0 && narrow()) {
           keepBehind();
           untrack(() => show(stood));
+        } else if (came && narrow()) {
+          // An entry of the same page with no step of the chat, as what was opened from it, shows the page alone.
+          closeImage();
+          untrack(() => show(0));
         }
         untrack(follow);
       }),

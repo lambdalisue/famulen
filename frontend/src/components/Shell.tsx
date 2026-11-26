@@ -11,7 +11,7 @@ import { approvalId, useWaiting } from "~/lib/inbox";
 import { look, say } from "~/lib/act";
 import { api } from "~/lib/api";
 import { followNotices, lapsed } from "~/lib/notices";
-import { useParam, withParams } from "~/lib/params";
+import { addressOf, useParam, withParams } from "~/lib/params";
 import { statusQuery } from "~/lib/data";
 import { followEvents } from "~/lib/events";
 import { createKept } from "~/lib/kept";
@@ -19,6 +19,7 @@ import { ASIDE, BOTTOM, SECTIONS, tabOf, wayBack } from "~/lib/tabs";
 import { followKeyboard, isNarrow, layoutHeld } from "~/lib/viewport";
 import { openTalk, place } from "~/lib/talks";
 import { followChatHistory } from "~/lib/chatHistory";
+import { notebookHref } from "~/lib/markdown";
 import { pageTitle } from "~/lib/view";
 import Chat from "./Chat";
 import ThemeChoice from "./ThemeChoice";
@@ -51,6 +52,23 @@ function Alive() {
       </SideSheet>
     </Dialog.Root>
   );
+}
+
+/**
+ * Where a link under `at` leads, and whether it is the notebook's, which is
+ * followed as it is pressed rather than clicked. Links to other windows and
+ * downloads are not the router's to follow.
+ */
+function linkOf(at: EventTarget | null): { href: string; notebook: boolean } | undefined {
+  if (!(at instanceof Element)) return undefined;
+  const md = at.closest<HTMLElement>("[data-md-link]");
+  if (md) {
+    const href = notebookHref(md.dataset.mdLink ?? "");
+    return href === undefined ? undefined : { href, notebook: true };
+  }
+  const a = at.closest("a[href]");
+  if (!(a instanceof HTMLAnchorElement) || (a.target && a.target !== "_self") || a.hasAttribute("download")) return undefined;
+  return { href: a.href, notebook: false };
 }
 
 /** The console around one page: the bars, the workgroups and the chat. */
@@ -133,16 +151,53 @@ export default function Shell(props: { children?: JSX.Element }) {
   createEffect(() => {
     document.body.classList.toggle("chat-open", chatOpen());
   });
+  const address = () => `${location.pathname}${location.search}${location.hash}`;
+  const fold = () => {
+    // Closing it may open the conversation, as the focus goes back there.
+    closeImage();
+    setChatOpen(false);
+  };
+  /**
+   * Where a link followed from over the page leads, to fold the chat there
+   * even where only its search changes. Coming back, the chat's own history
+   * shows it again as it was.
+   */
+  let following: string | undefined;
+  onMount(() => {
+    const followed = (e: MouseEvent | KeyboardEvent) => {
+      if (!chatOpen() || !isNarrow()) return;
+      const link = linkOf(e.target);
+      const to = link === undefined ? undefined : addressOf(link.href);
+      if (link === undefined || to === undefined) return;
+      // The notebook's own are followed in this tab, as they are pressed, whatever button or key is held.
+      if (link.notebook ? e instanceof MouseEvent && e.button > 1 : e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.type === "mousedown") return;
+      if (e instanceof MouseEvent ? !link.notebook && e.button !== 0 : e.key !== "Enter") return;
+      if (to !== address()) {
+        following = to;
+        return;
+      }
+      // The click after the press is still to land on the link.
+      if (e.type === "mousedown") return;
+      // Where the page already is, the router is not to add an entry for it, and the chat folds as by its button.
+      if (!link.notebook) e.preventDefault();
+      fold();
+    };
+    for (const type of ["mousedown", "click", "keydown"] as const) document.addEventListener(type, followed, true);
+    onCleanup(() => {
+      for (const type of ["mousedown", "click", "keydown"] as const) document.removeEventListener(type, followed, true);
+    });
+  });
+  // A link pressed and not followed, as when leaving was kept from, is forgotten with the chat.
+  createEffect(() => {
+    if (!chatOpen()) following = undefined;
+  });
   createEffect(
-    on(
-      () => location.pathname,
-      () => {
-        // Closing it may open the conversation, as the focus goes back there.
-        closeImage();
-        setChatOpen(false);
-      },
-      { defer: true },
-    ),
+    on([() => location.pathname, address], ([path, at], before) => {
+      if (!before) return;
+      const went = path !== before[0] || at === following;
+      following = undefined;
+      if (went) fold();
+    }),
   );
 
   const choose = async (id: string) => {
