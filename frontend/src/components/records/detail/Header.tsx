@@ -1,4 +1,4 @@
-import { createEffect, For, type JSX, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, For, type JSX, onCleanup, onMount } from "solid-js";
 import AskAbout from "~/components/AskAbout";
 import { Icon, IconButton, Segmented, Tag, TextField } from "~/components/ui";
 import { own } from "~/lib/colors";
@@ -15,10 +15,13 @@ function Title(props: { title: string; onSave: (title: string) => void }) {
   let box!: HTMLTextAreaElement;
   const fit = () => {
     box.style.height = "auto";
-    box.style.height = `${box.scrollHeight}px`;
+    // The height set counts the borders, which scrollHeight does not.
+    box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
   };
+  // Fitting moves what is read below, so not for a record that comes again with the same title.
+  const title = createMemo(() => props.title);
   createEffect(() => {
-    box.value = props.title;
+    box.value = title();
     fit();
   });
   onMount(() => {
