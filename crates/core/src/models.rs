@@ -9,11 +9,13 @@ mod limits;
 mod openai;
 mod registry;
 mod spec;
+mod transcribe;
 
 pub use discovery::*;
 pub use limits::*;
 pub use registry::*;
 pub use spec::*;
+pub use transcribe::*;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};

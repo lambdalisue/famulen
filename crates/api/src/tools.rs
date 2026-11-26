@@ -307,6 +307,7 @@ mod tests {
         for console_only in [
             "list_link_previews",
             "send",
+            "transcribe",
             "subscribe_events",
             "answer_approval",
             "connect_known",

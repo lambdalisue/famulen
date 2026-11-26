@@ -343,11 +343,16 @@ impl Models {
             .ok_or_else(|| anyhow::anyhow!("no model {}", model.as_ref()))?;
         check_assignment(role, &registered.spec)?;
         let effort = effort.filter(|_| registered.spec.kind == ModelKind::AgentCli);
-        let unit = if registered.spec.price.is_metered() {
-            CapUnit::Yen
-        } else {
-            CapUnit::Calls
+        // A transcription is told no tokens, so only its price per call can be added up in yen.
+        let priced = match registered.spec.kind {
+            ModelKind::Transcribe => registered
+                .spec
+                .price
+                .per_call_yen
+                .is_some_and(|yen| yen > 0.0),
+            _ => registered.spec.price.is_metered(),
         };
+        let unit = if priced { CapUnit::Yen } else { CapUnit::Calls };
         self.store.conn().execute(
             "INSERT INTO roles (role, model, cap, cap_unit, effort) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (role) DO UPDATE SET model = ?2, cap = ?3, cap_unit = ?4, effort = ?5",
@@ -563,6 +568,45 @@ impl Models {
         .await?;
         self.record(role, &spec, &usage)?;
         Ok(label)
+    }
+
+    /// Turn what the owner said aloud into text with the voice's model, within
+    /// its cap, and record the call. A `preview` of what is said so far is
+    /// heard only while the cap leaves room for the hearing that sends it.
+    pub async fn transcribe(
+        &self,
+        tz: chrono_tz::Tz,
+        sound: &models::Pcm,
+        language: Option<&str>,
+        preview: bool,
+    ) -> anyhow::Result<String> {
+        let (spec, _) = self.spec_for(Role::Voice, tz)?;
+        if preview && !self.room_for_another(Role::Voice, &spec, tz)? {
+            return Ok(String::new());
+        }
+        let heard = models::transcribe(&spec, sound, language, self.via(Role::Voice)).await?;
+        self.record(Role::Voice, &spec, &heard.usage)?;
+        Ok(heard.text)
+    }
+
+    /// Whether a role may make this call and one more today.
+    fn room_for_another(
+        &self,
+        role: Role,
+        spec: &ModelSpec,
+        tz: chrono_tz::Tz,
+    ) -> anyhow::Result<bool> {
+        let Some(assignment) = self.assignment(role)? else {
+            return Ok(false);
+        };
+        let Some(cap) = assignment.cap else {
+            return Ok(true);
+        };
+        let (cost, calls) = self.used_today(role, tz, Utc::now())?;
+        Ok(match assignment.cap_unit {
+            CapUnit::Yen => cost + 2.0 * spec.price.per_call_yen.unwrap_or(0.0) <= cap,
+            CapUnit::Calls => (calls + 2) as f64 <= cap,
+        })
     }
 
     /// The gateway a role's model calls go through, named for the role.
@@ -921,5 +965,76 @@ mod tests {
         b.assign(Role::Dream, "local", None, None).unwrap();
         assert!(b.unregister("local").is_err());
         b.unregister("api").unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_voice_transcribes_within_its_cap_and_records_each_call() {
+        use axum::{Json, Router, routing::post};
+        let app = Router::new().route(
+            "/v1/audio/transcriptions",
+            post(|| async { Json(serde_json::json!({ "text": "送って" })) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let b = empty();
+        let whisper = ModelSpec {
+            endpoint: Some(format!("http://{addr}/v1")),
+            ..spec("whisper", ModelKind::Transcribe, Price::default())
+        };
+        b.register(whisper, None).unwrap();
+        let tz = chrono_tz::Asia::Tokyo;
+        let sound = models::Pcm {
+            samples: vec![0; 320],
+            rate: 16_000,
+        };
+        assert!(
+            b.transcribe(tz, &sound, None, false).await.is_err(),
+            "nothing is assigned"
+        );
+
+        b.assign(Role::Voice, "whisper", Some(2.0), None).unwrap();
+        assert_eq!(
+            b.transcribe(tz, &sound, Some("ja"), false).await.unwrap(),
+            "送って"
+        );
+        assert_eq!(b.used_today(Role::Voice, tz, Utc::now()).unwrap().1, 1);
+        assert_eq!(
+            b.transcribe(tz, &sound, None, true).await.unwrap(),
+            "",
+            "a preview leaves the last call for what is sent"
+        );
+        assert_eq!(b.used_today(Role::Voice, tz, Utc::now()).unwrap().1, 1);
+        b.transcribe(tz, &sound, None, false).await.unwrap();
+        let error = b.transcribe(tz, &sound, None, false).await.unwrap_err();
+        assert!(error.to_string().contains("cap"), "{error}");
+    }
+
+    #[test]
+    fn a_transcription_priced_only_by_tokens_is_capped_in_calls() {
+        let b = empty();
+        let tokens = Price {
+            input_per_mtok_yen: Some(100.0),
+            ..Default::default()
+        };
+        let per_call = Price {
+            per_call_yen: Some(1.0),
+            ..Default::default()
+        };
+        b.register(spec("tokens", ModelKind::Transcribe, tokens), None)
+            .unwrap();
+        b.register(spec("per-call", ModelKind::Transcribe, per_call), None)
+            .unwrap();
+
+        b.assign(Role::Voice, "tokens", Some(5.0), None).unwrap();
+        assert_eq!(
+            b.assignment(Role::Voice).unwrap().unwrap().cap_unit,
+            CapUnit::Calls
+        );
+        b.assign(Role::Voice, "per-call", Some(5.0), None).unwrap();
+        assert_eq!(
+            b.assignment(Role::Voice).unwrap().unwrap().cap_unit,
+            CapUnit::Yen
+        );
     }
 }

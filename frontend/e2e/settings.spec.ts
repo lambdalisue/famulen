@@ -27,6 +27,7 @@ const PAGES: [string, string, string][] = [
   ["トリアージ", "/settings/roles/triage", "トリアージ"],
   ["見極め", "/settings/roles/assess", "見極め"],
   ["手代", "/settings/roles/worker", "手代"],
+  ["声の聞き取り", "/settings/roles/voice", "声の聞き取り"],
   ["登録したモデル", "/settings/models", "登録したモデル"],
   ["使った量", "/settings/usage", "使った量"],
   ["チャネル", "/settings/channels", "チャネル"],

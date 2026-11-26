@@ -265,6 +265,8 @@ enum Role {
   ROLE_ASSESS = 5;
   // A worker: one session for each task delegated to an agent.
   ROLE_WORKER = 6;
+  // The voice: what the owner says aloud to the glasses, as text.
+  ROLE_VOICE = 7;
 }
 
 message Model {

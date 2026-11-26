@@ -21,6 +21,7 @@ export const NAV: [string, [string, string, string][]][] = [
       ["/settings/roles/triage", "トリアージ", icons.arrowsSplit],
       ["/settings/roles/assess", "見極め", icons.shieldCheck],
       ["/settings/roles/worker", "手代", icons.robot],
+      ["/settings/roles/voice", "声の聞き取り", icons.microphone],
     ],
   ],
   [

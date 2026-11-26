@@ -20,6 +20,7 @@ const ROLE_PAGES: Record<Role, string> = {
   [Role.TRIAGE]: "/settings/roles/triage",
   [Role.ASSESS]: "/settings/roles/assess",
   [Role.WORKER]: "/settings/roles/worker",
+  [Role.VOICE]: "/settings/roles/voice",
 };
 
 /** The group of models found nowhere, whose accounts are told by their program. */

@@ -32,6 +32,7 @@ export { default as devices } from "@tabler/icons/outline/devices.svg?raw";
 export { default as download } from "@tabler/icons/outline/download.svg?raw";
 export { default as externalLink } from "@tabler/icons/outline/external-link.svg?raw";
 export { default as eye } from "@tabler/icons/outline/eye.svg?raw";
+export { default as eyeglass } from "@tabler/icons/outline/eyeglass.svg?raw";
 export { default as fileCertificate } from "@tabler/icons/outline/file-certificate.svg?raw";
 export { default as folder } from "@tabler/icons/outline/folder.svg?raw";
 export { default as folderOpen } from "@tabler/icons/outline/folder-open.svg?raw";

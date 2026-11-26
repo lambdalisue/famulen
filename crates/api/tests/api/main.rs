@@ -24,5 +24,6 @@ mod status;
 mod support;
 mod tools;
 mod vault;
+mod voice;
 mod workers;
 mod writable;

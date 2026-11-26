@@ -40,6 +40,16 @@ export default function Channels() {
           sub={`コンソール${origin() ? ` · ${origin()}` : ""}`}
           end={<Tag tone="ok">使える</Tag>}
         />
+        <ListRow
+          icon={icons.eyeglass}
+          title="Even G2"
+          sub={`Even App で開く · ${origin() ? `${origin()}/g2` : "/g2"}`}
+          end={
+            <a class="tag" href="/settings/roles/voice">
+              声の聞き取り
+            </a>
+          }
+        />
         <For each={channels() ?? []}>
           {(c) => (
             <ListRow
@@ -67,6 +77,11 @@ export default function Channels() {
           Slack のワークスペースや眼鏡などは、<a href="/settings/services">サービス</a>で足すとここに並ぶ。
         </p>
       </Show>
+      <p class="sub">
+        Even G2 には、スマートフォンの Even App の開発者向けの読み込みで上の番地を開くと、このコンソールが出る。スマートフォンがこのコンソールを開ける網の中にいるときだけ使える。声で話すには、
+        <a href="/settings/roles/voice">声の聞き取り</a>
+        のモデルを選ぶ。
+      </p>
       <p class="sub">
         メンションのあと、そのチャンネルを注視する長さは<a href="/settings/roles/triage">トリアージ</a>で決める。
       </p>

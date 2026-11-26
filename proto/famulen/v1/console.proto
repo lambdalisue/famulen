@@ -184,6 +184,9 @@ message SendRequest {
   int64 conversation = 7;
   // Begin a conversation, for what is no reply.
   bool new_conversation = 8;
+  // Where it was said: empty is the console in a browser, g2 the Even G2
+  // glasses.
+  string device = 9;
 }
 
 message PostMessageRequest {
@@ -357,6 +360,23 @@ message ListInputsResponse {
   bool more = 2;
 }
 
+// What the owner said aloud.
+message TranscribeRequest {
+  // 16-bit signed little-endian samples of one channel.
+  bytes pcm = 1;
+  // Samples a second.
+  int32 rate = 2;
+  // A hearing of what is said so far, while it is said: it is skipped, and
+  // heard as nothing, unless today's cap leaves room for the hearing that
+  // sends it.
+  bool preview = 3;
+}
+
+message TranscribeResponse {
+  // What the voice heard; empty when nothing was said.
+  string text = 1;
+}
+
 message SubscribeEventsRequest {
   // Messages of this workgroup only; empty is all.
   string workgroup = 1;
@@ -383,6 +403,10 @@ service ConsoleService {
   }
   // The owner says something to the secretary.
   rpc Send(SendRequest) returns (ConsoleMessage) {
+    option (console_only) = true;
+  }
+  // What the owner said aloud, as text, by the voice's model.
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse) {
     option (console_only) = true;
   }
   // The secretary says something to the owner on the console.
