@@ -14,7 +14,9 @@ use crate::app::App;
 use crate::mail_line::{Kept, Stopped, Waiting, day, filled, line, plain, price};
 use crate::models::Role;
 use crate::notebook::Writer;
-use crate::records::{Field, HOLDINGS, Patch, Record, Records, SectionContent};
+use crate::records::{
+    Field, HOLDINGS, Patch, QUANTITY, Record, Records, SectionContent, quantity, with_quantity,
+};
 use crate::store::Store;
 use crate::words::Said;
 
@@ -39,7 +41,7 @@ You read a mail a shop sent to the owner of a personal secretary, and say what t
 Answer the orders of the owner's own it tells of, none when it tells of none. For each:
 - event: ordered (also told again, or shipped), delivered (it arrived), returned or cancelled.
 - shop, order (the order number, empty when there is none) and on (the day it happened, YYYY-MM-DD).
-- items: every product the event is about, each with name, keep, holding, category, price (such as 1980 JPY, empty when unknown), maker, model and details (other facts worth keeping, such as a book's 著者 and 出版社). The same product bought twice, as with a quantity of 2, is two items. Leave out what is empty or unknown.
+- items: every product the event is about, each with name, keep, holding, quantity (how many of it), category, price (of one, such as 1980 JPY, empty when unknown), maker, model and details (other facts worth keeping, such as a book's 著者 and 出版社). The same product bought several times, as with a quantity of 2, is one item with that quantity; another colour, size or volume is another item. Leave out what is empty or unknown.
 keep says whether it is worth keeping: what lasts, such as appliances, computers and their parts, furniture, tools, clothes, hobby gear, and every book, printed or electronic; \
 not food, daily goods and other consumables, gift cards, tickets, subscriptions or licences. When unsure, it is not. List what is not kept all the same, with its name, keep and holding alone.
 holding is the id of the known thing the item is, when one is the same purchase, whatever its wording and whether it is kept; empty otherwise.
@@ -87,6 +89,8 @@ struct Bought {
     model: String,
     #[serde(default)]
     details: Vec<Detail>,
+    #[serde(default)]
+    quantity: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,7 +112,7 @@ fn schema() -> Value {
                     "type": "object",
                     "properties": {
                         "name": text(), "keep": { "type": "boolean" }, "holding": text(),
-                        "category": text(), "price": text(), "maker": text(), "model": text(),
+                        "quantity": { "type": "integer" }, "category": text(), "price": text(), "maker": text(), "model": text(),
                         "details": { "type": "array", "items": {
                             "type": "object",
                             "properties": { "name": text(), "value": text() },
@@ -375,8 +379,7 @@ fn keep(
         return Ok(Kept::All);
     }
     let mut all = Kept::All;
-    let named = told.items.iter().filter(|b| !b.name.trim().is_empty());
-    for bought in named.take(ITEMS) {
+    for bought in fold(&told.items).iter().take(ITEMS) {
         let free: Vec<&(Option<i64>, Known)> = things
             .iter()
             .filter(|(_, k)| !taken.contains(&k.id))
@@ -407,8 +410,13 @@ fn keep(
         if let Some((_, thing)) = chosen().or_else(of_order).or_else(again) {
             taken.push(thing.id.clone());
             // One the owner removed is left so.
-            if let Some(r) = record(&thing.id) {
-                settle(into, &held, r, told)?;
+            if let Some(r) = record(&thing.id)
+                && !settled.contains(&r.id)
+            {
+                match quantity(r).checked_sub(bought.quantity.unwrap_or(1)) {
+                    Some(left) if undoes && left > 0 => keep_back(into, &held, r, told, left)?,
+                    _ => settle(into, &held, r, told)?,
+                }
             }
         } else if undoes {
             if bought.keep {
@@ -453,6 +461,78 @@ fn advances(record: &Record, event: Event) -> bool {
     }
 }
 
+/// One line for each thing: the same one listed several times is how many.
+fn fold(items: &[Bought]) -> Vec<Bought> {
+    let said = |b: &Bought| {
+        let word = |s: &str| line(s).to_lowercase();
+        let mut details: Vec<(String, String)> = b
+            .details
+            .iter()
+            .filter(|d| d.name.trim() != QUANTITY)
+            .map(|d| (word(&d.name), word(&d.value)))
+            .collect();
+        details.sort();
+        let kind = [&b.name, &b.maker, &b.model, &b.holding].map(|s| word(s));
+        (kind, price(&b.price), b.keep, details)
+    };
+    let mut folded: Vec<Bought> = Vec::new();
+    for b in items.iter().filter(|b| !b.name.trim().is_empty()) {
+        match folded.iter_mut().find(|o| said(o) == said(b)) {
+            Some(one) => {
+                let many = one.quantity.unwrap_or(1) + b.quantity.unwrap_or(1);
+                one.quantity = Some(many);
+            }
+            None => folded.push(b.clone()),
+        }
+    }
+    folded
+}
+
+/// Some of many went back: the rest stay as they were.
+fn keep_back(
+    into: &Target<'_>,
+    held: &crate::records::Held<'_>,
+    record: &Record,
+    told: &Told,
+    left: u32,
+) -> anyhow::Result<()> {
+    if !advances(record, told.event) {
+        return Ok(());
+    }
+    let patch = Patch {
+        details: Some(with_quantity(crate::records::details(record), left)),
+        log: vec![format!("返品・取り消しで数量が {left} になった")],
+        ..Patch::default()
+    };
+    change_settled(into, held, &record.id, patch)
+}
+
+/// Note that the mail settled a thing and change it. Noted before the change:
+/// one settled but not noted would be taken for the other of two alike when the
+/// mail is read again.
+fn change_settled(
+    into: &Target<'_>,
+    held: &crate::records::Held<'_>,
+    holding: &str,
+    patch: Patch,
+) -> anyhow::Result<()> {
+    let noted = into.store.conn().execute(
+        "INSERT OR IGNORE INTO purchase_settled (mail, holding) VALUES (?1, ?2)",
+        params![into.mail, holding],
+    )?;
+    if let Err(error) = held.change(Writer::Secretary, HOLDINGS, holding, patch) {
+        // Left noted, what could not be written would never be.
+        if noted > 0 {
+            into.store.conn().execute(
+                "DELETE FROM purchase_settled WHERE mail = ?1 AND holding = ?2",
+                params![into.mail, holding],
+            )?;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn added(told: &Told, bought: &Bought, workgroups: &[String]) -> Patch {
     let status = if told.event == Event::Delivered {
         "owned"
@@ -462,7 +542,10 @@ fn added(told: &Told, bought: &Bought, workgroups: &[String]) -> Patch {
     let details: Vec<Field> = bought
         .details
         .iter()
-        .filter(|d| !d.name.trim().is_empty() && !d.name.contains([':', '\n', '[']))
+        .filter(|d| {
+            let name = d.name.trim();
+            !name.is_empty() && name != QUANTITY && !name.contains([':', '\n', '['])
+        })
         .map(|d| Field::new(&line(&d.name), line(&d.value)))
         .collect();
     let mut patch = Patch::titled(line(&bought.name));
@@ -486,7 +569,10 @@ fn added(told: &Told, bought: &Bought, workgroups: &[String]) -> Patch {
         ]),
         items: vec![],
     }];
-    let details = filled(details);
+    let mut details = filled(details);
+    if let Some(many) = bought.quantity.filter(|n| *n > 1) {
+        details = with_quantity(details, many);
+    }
     if !details.is_empty() {
         patch.details = Some(details);
     }
@@ -536,14 +622,7 @@ fn settle(
         }
         Event::Ordered => return Ok(()),
     }
-    // Before the change: one settled but not noted would be taken for the other
-    // of two alike when the mail is read again.
-    into.store.conn().execute(
-        "INSERT OR IGNORE INTO purchase_settled (mail, holding) VALUES (?1, ?2)",
-        params![into.mail, record.id],
-    )?;
-    held.change(Writer::Secretary, HOLDINGS, &record.id, patch)?;
-    Ok(())
+    change_settled(into, held, &record.id, patch)
 }
 
 #[cfg(test)]
@@ -762,11 +841,120 @@ mod tests {
         assert_eq!(status(&only(&r)), "owned");
     }
 
+    /// The same product bought twice in two kinds, which stay two things.
+    fn two_kinds(event: &str, order: &str) -> Told {
+        let mut t = told(event, order, &["鍵盤", "鍵盤"]);
+        t.items[1].price = "2,980 JPY".into();
+        t
+    }
+
+    fn quantity(record: &Record) -> Option<String> {
+        crate::records::details(record)
+            .into_iter()
+            .find(|f| f.name == "数量")
+            .map(|f| f.value)
+    }
+
+    #[test]
+    fn the_same_thing_bought_several_times_is_one_holding_with_how_many() {
+        let (_dir, r) = records("purchases-many-alike");
+        let store = Store::open_in_memory().unwrap();
+        let t = told("ordered", "A-1", &["鍵盤", "鍵盤", "鍵盤"]);
+        put_from(&r, &store, 1, &[], &t);
+        put_from(&r, &store, 1, &[], &t);
+        assert_eq!(quantity(&only(&r)).as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn how_many_a_mail_says_is_kept() {
+        let (_dir, r) = records("purchases-quantity");
+        let mut t = told("ordered", "A-1", &["鍵盤"]);
+        t.items[0].quantity = Some(4);
+        t.items[0].details.push(Detail {
+            name: "数量".into(),
+            value: "4点".into(),
+        });
+        put(&r, &[], &t);
+        let h = only(&r);
+        assert_eq!(quantity(&h).as_deref(), Some("4"));
+        assert_eq!(crate::records::details(&h).len(), 2);
+    }
+
+    #[test]
+    fn how_many_several_lines_of_one_thing_say_is_added_up() {
+        let (_dir, r) = records("purchases-lines");
+        let mut t = told("ordered", "A-1", &["鍵盤", "鍵盤"]);
+        t.items[0].quantity = Some(2);
+        t.items[1].quantity = Some(3);
+        put(&r, &[], &t);
+        assert_eq!(quantity(&only(&r)).as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn what_could_not_be_written_is_settled_when_the_mail_is_read_again() {
+        for (many, left) in [(1, None), (3, Some("2"))] {
+            let (_dir, r) = records(&format!("purchases-unwritten-{many}"));
+            let store = Store::open_in_memory().unwrap();
+            let mut t = told("delivered", "A-1", &["鍵盤"]);
+            t.items[0].quantity = Some(many);
+            put_from(&r, &store, 1, &[], &t);
+            let path = r.notebook().root().join(only(&r).rel());
+            let writable = |yes: bool| {
+                let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+                permissions.set_readonly(!yes);
+                std::fs::set_permissions(&path, permissions).unwrap();
+            };
+            let back = told("returned", "A-1", &["鍵盤"]);
+            writable(false);
+            let known = known(&r, &store, "", "").unwrap();
+            let into = Target {
+                records: &r,
+                store: &store,
+                mail: 2,
+                workgroups: &[],
+            };
+            assert!(keep(&into, &back, &known, &mut Vec::new()).is_err());
+            writable(true);
+            put_from(&r, &store, 2, &[], &back);
+            let h = only(&r);
+            match left {
+                Some(left) => assert_eq!(quantity(&h).as_deref(), Some(left)),
+                None => assert_eq!(status(&h), "released"),
+            }
+        }
+    }
+
+    #[test]
+    fn two_kinds_of_one_name_are_two_holdings_without_how_many() {
+        let (_dir, r) = records("purchases-kinds");
+        put(&r, &[], &two_kinds("ordered", "A-1"));
+        let list = r.list(HOLDINGS).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().all(|h| quantity(h).is_none()));
+    }
+
+    #[test]
+    fn a_return_of_some_of_many_leaves_the_rest_once() {
+        let (_dir, r) = records("purchases-return-some");
+        let store = Store::open_in_memory().unwrap();
+        let mut t = told("delivered", "A-1", &["鍵盤"]);
+        t.items[0].quantity = Some(3);
+        put_from(&r, &store, 1, &[], &t);
+        let back = told("returned", "A-1", &["鍵盤"]);
+        put_from(&r, &store, 2, &[], &back);
+        put_from(&r, &store, 2, &[], &back);
+        let h = only(&r);
+        assert_eq!(
+            (status(&h).as_str(), quantity(&h).as_deref()),
+            ("owned", Some("2"))
+        );
+    }
+
     #[test]
     fn one_of_two_alike_is_returned_for_one_named() {
         let (_dir, r) = records("purchases-two");
-        put(&r, &[], &told("ordered", "A-1", &["鍵盤", "鍵盤"]));
-        put(&r, &[], &told("ordered", "A-1", &["鍵盤", "鍵盤"]));
+        put(&r, &[], &two_kinds("ordered", "A-1"));
+        put(&r, &[], &two_kinds("ordered", "A-1"));
         put(&r, &[], &told("returned", "A-1", &["鍵盤"]));
         let mut all: Vec<_> = r.list(HOLDINGS).unwrap().iter().map(status).collect();
         all.sort();
@@ -776,7 +964,7 @@ mod tests {
     #[test]
     fn two_alike_delivered_one_by_one_both_arrive() {
         let (_dir, r) = records("purchases-one-by-one");
-        put(&r, &[], &told("ordered", "A-1", &["鍵盤", "鍵盤"]));
+        put(&r, &[], &two_kinds("ordered", "A-1"));
         put(&r, &[], &told("delivered", "A-1", &["鍵盤"]));
         put(&r, &[], &told("delivered", "A-1", &["鍵盤"]));
         assert!(
@@ -801,13 +989,7 @@ mod tests {
     fn a_return_read_again_returns_no_other_of_two_alike() {
         let (_dir, r) = records("purchases-return-again");
         let store = Store::open_in_memory().unwrap();
-        put_from(
-            &r,
-            &store,
-            1,
-            &[],
-            &told("delivered", "A-1", &["鍵盤", "鍵盤"]),
-        );
+        put_from(&r, &store, 1, &[], &two_kinds("delivered", "A-1"));
         for _ in 0..3 {
             let t = told("returned", "A-1", &["鍵盤", "知らない物"]);
             assert_eq!(put_from(&r, &store, 2, &[], &t), Kept::Unknown);

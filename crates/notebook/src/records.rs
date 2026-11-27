@@ -458,15 +458,50 @@ impl Records {
     /// Give the links to a record its new title where they carry the old.
     fn retitle_links(&self, record: &Record, before: &str) -> anyhow::Result<Vec<String>> {
         let old = titled_link(&record.kind, &record.id, before);
-        let new = record.link();
+        self.replace_everywhere(&[(old, record.link())])
+    }
+
+    /// Lead every link to one record to another, in records and memory alike,
+    /// and commit it.
+    pub fn relink(
+        &self,
+        signature: &Signature,
+        kind: &str,
+        from: impl AsRef<str>,
+        to: impl AsRef<str>,
+        subject: &str,
+    ) -> anyhow::Result<()> {
+        let (from, to) = (from.as_ref(), to.as_ref());
+        check_kind(kind)?;
+        check_id(from)?;
+        check_id(to)?;
+        let _hold = self.notebook.hold()?;
+        let replaced = ["]", "|", "#", ".md]", ".md|", ".md#"].map(|end| {
+            (
+                format!("[[{RECORDS}/{kind}/{from}{end}"),
+                format!("[[{RECORDS}/{kind}/{to}{end}"),
+            )
+        });
+        let touched = self.replace_everywhere(&replaced)?;
+        if !touched.is_empty() {
+            self.notebook.commit(signature, subject, &touched)?;
+        }
+        Ok(())
+    }
+
+    /// The files that were changed.
+    fn replace_everywhere(&self, replaced: &[(String, String)]) -> anyhow::Result<Vec<String>> {
         let mut touched = Vec::new();
         for rel in crate::check::markdown_files(&self.notebook)? {
             let path = self.notebook.root().join(&rel);
-            let Ok(text) = std::fs::read_to_string(&path) else {
+            let Ok(before) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            if text.contains(&old) {
-                std::fs::write(&path, text.replace(&old, &new))?;
+            let after = replaced
+                .iter()
+                .fold(before.clone(), |text, (old, new)| text.replace(old, new));
+            if after != before {
+                std::fs::write(&path, after)?;
                 touched.push(rel);
             }
         }

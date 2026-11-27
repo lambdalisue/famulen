@@ -3,9 +3,11 @@
 //! written; here is what Famulen does when one is written, and who may.
 
 mod deadlines;
+mod merge;
 mod obsolete;
 mod parties;
 
+pub(crate) use merge::*;
 pub use obsolete::CONFIRM_SOURCE;
 pub use parties::*;
 
