@@ -274,3 +274,14 @@ async fn live_finishing_of_work_run_directly_merges_what_was_checked_and_reviewe
     assert!(merged.contains("sub"), "{merged}");
     assert_eq!(stage, Some(Stage::Done));
 }
+
+#[tokio::test]
+async fn an_agent_that_cannot_be_ended_keeps_the_finishing_from_going_on() {
+    let dir = TempDir::new("pool-finishing-unended");
+    let (app, ..) = agent_app(&dir, SAYS_IT_IS_DONE, &[]);
+    let kept = app.workers.executors.of("7").dir().to_path_buf();
+    // What the executor kept cannot be read, so nothing tells that it ended.
+    std::fs::create_dir_all(kept.join("journal")).unwrap();
+    assert!(crate::workers::agent::end_turn(&app, 7).await.is_err());
+    assert!(kept.exists(), "what tells of the agent is kept");
+}

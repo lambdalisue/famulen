@@ -150,7 +150,7 @@ impl Hands for Fake {
         Ok(*self.answer.lock().unwrap())
     }
 
-    async fn deploy(&self, _: &Pinned, command: &str) -> anyhow::Result<Started> {
+    async fn deploy(&self, _: &Pinned, _: &PullRequest, command: &str) -> anyhow::Result<Started> {
         if self.busy.load(Ordering::SeqCst) {
             return Ok(Started::Busy);
         }
@@ -406,6 +406,11 @@ async fn deploying_waits_for_the_one_under_way_and_gives_up_in_time() {
     hands.busy.store(true, Ordering::SeqCst);
     f.stage = Stage::Deploying;
     f.merged = true;
+    f.pull = Some(PullRequest {
+        number: 1,
+        url: "https://forge.example/pull/1".into(),
+        head: "one".into(),
+    });
     assert!(matches!(f.step(&hands, 0).await.unwrap(), Next::Wait(_)));
     assert_eq!(f.deploy_started, None);
     assert_eq!(outside(&hands), Vec::<String>::new());
@@ -466,4 +471,28 @@ async fn a_turn_not_yet_taken_is_told_again_after_a_restart() {
     f.turned();
     let told = run(&mut f, &hands).await;
     assert_eq!(f.step(&hands, 0).await.unwrap(), told);
+}
+
+#[tokio::test]
+async fn what_changed_after_the_last_review_allowed_is_not_pushed() {
+    let mut once = rule();
+    once.reviews = 1;
+    let (mut f, hands) = (finishing(once), Fake::default());
+    hands.ci.lock().unwrap().extend([
+        Ci::Failed {
+            name: "ci".into(),
+            log: "broke".into(),
+        },
+        Ci::Passed,
+    ]);
+    f.turned();
+    assert!(matches!(run(&mut f, &hands).await, Next::Turn(_)));
+    hands.now("two");
+    f.turned();
+    let next = run(&mut f, &hands).await;
+    assert!(
+        matches!(&next, Next::Stop(why) if why.contains("review") && why.contains("/pull/1")),
+        "{next:?}"
+    );
+    assert_eq!(outside(&hands), ["publish one"]);
 }

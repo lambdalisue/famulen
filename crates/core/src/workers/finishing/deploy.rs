@@ -10,7 +10,7 @@ use anyhow::Context as _;
 use tokio::process::Command;
 
 use super::check::tail;
-use super::repo::output;
+use super::repo::{Repo, output};
 
 /// Runs the command, and keeps what it wrote and how it ended. The input of
 /// this shell is the lock, held for as long as it lives and kept from the
@@ -24,18 +24,36 @@ pub enum Started {
     Busy,
 }
 
-/// Move `checkout` onto `target` as origin has it and start `command` there,
-/// one deployment at a time: `lock` is held from before the checkout is
-/// touched until the command ends, whatever becomes of Famulen. What it comes
-/// to is kept in `kept`.
+/// Move the checkout onto what was merged and start `command` there, one
+/// deployment at a time: `lock` is held from before the checkout is touched
+/// until the command ends, whatever becomes of Famulen. What it comes to is
+/// kept in `kept`. A checkout on the target that holds the work already, as
+/// after a later merge was deployed, is not moved back.
+/// Where deploying runs, and what it takes up.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Source<'a> {
+    pub jj: &'a str,
+    pub checkout: &'a Path,
+    /// The remote and the branch pinned when the work began.
+    pub remote: &'a str,
+    pub target: &'a str,
+    /// The commit the work was merged as.
+    pub merged: &'a str,
+}
+
 pub(crate) async fn start_deploy(
-    jj: &str,
-    checkout: &Path,
-    target: &str,
+    source: &Source<'_>,
     command: &str,
     kept: &Path,
     lock: &Path,
 ) -> anyhow::Result<Started> {
+    let Source {
+        jj,
+        checkout,
+        remote,
+        target,
+        merged,
+    } = *source;
     let lock = File::options()
         .create(true)
         .truncate(false)
@@ -65,8 +83,23 @@ pub(crate) async fn start_deploy(
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
         _ => {}
     }
-    ran(&["git", "fetch"]).await?;
-    ran(&["new", &format!("{target}@origin")]).await?;
+    let at = ran(&[
+        "log",
+        "--no-graph",
+        "-r",
+        "@-",
+        "-T",
+        r#"commit_id ++ "\n""#,
+    ])
+    .await?;
+    let repo = Repo {
+        jj: jj.to_owned(),
+        checkout: checkout.to_path_buf(),
+        workspace: checkout.to_path_buf(),
+    };
+    if !repo.holds(remote, target, merged, at.trim()).await? {
+        ran(&["new", merged]).await?;
+    }
     let mut run = std::process::Command::new("/bin/sh");
     run.args(["-c", WRAPPER, "sh", command])
         .arg(kept)

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use super::{
-    Answer, Ci, Content, Finishing, Forge, Hands, Pinned, PullRequest, Repo, Snapshot, Started,
-    Verdict, check, deployed, review_message, start_deploy, verdict,
+    Answer, Ci, Content, Finishing, Forge, Hands, Pinned, PullRequest, Repo, Snapshot, Source,
+    Started, Verdict, check, deployed, review_message, start_deploy, verdict,
 };
 use crate::app::App;
 use crate::permissions::Decision;
@@ -160,11 +160,21 @@ impl Hands for OwnHands {
         )
     }
 
-    async fn deploy(&self, pinned: &Pinned, command: &str) -> anyhow::Result<Started> {
+    async fn deploy(
+        &self,
+        pinned: &Pinned,
+        pull: &PullRequest,
+        command: &str,
+    ) -> anyhow::Result<Started> {
+        let merged = self.forge(pinned).merge_commit(pull).await?;
         start_deploy(
-            &self.direct.jj,
-            &self.place.checkout,
-            &pinned.target,
+            &Source {
+                jj: &self.direct.jj,
+                checkout: &self.place.checkout,
+                remote: &pinned.remote,
+                target: &pinned.target,
+                merged: &merged,
+            },
             command,
             &finishing_dir(&self.app, self.run).join("deploy"),
             &self.app.workers.dir.join("deploy.lock"),

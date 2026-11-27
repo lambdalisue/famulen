@@ -403,6 +403,11 @@ impl Finishing {
             return Ok(Next::Again);
         }
         if self.reviews >= self.pinned.rule.reviews {
+            // What was reviewed is not what is here now, and no review is
+            // left to look at this.
+            if self.pinned.rule.reviews > 0 {
+                return Ok(self.stop_unreviewed());
+            }
             self.stage = Stage::Publishing;
             return Ok(Next::Again);
         }
@@ -434,6 +439,16 @@ impl Finishing {
         }
         self.stage = Stage::Publishing;
         Ok(Next::Again)
+    }
+
+    fn stop_unreviewed(&mut self) -> Next {
+        let pull = match &self.pull {
+            Some(pull) => format!(": {}", pull.url),
+            None => ".".to_owned(),
+        };
+        self.stop(format!(
+            "The work changed after the last review allowed, so what it is now was not pushed{pull}"
+        ))
     }
 
     fn stop_faulty(&mut self, found: &str) -> Next {
@@ -566,11 +581,14 @@ impl Finishing {
             return Ok(Next::Again);
         };
         let Some(since) = self.deploy_started else {
+            let Some(pull) = self.pull.clone() else {
+                return Ok(self.stop("Merged, but not deployed: what was merged is not known."));
+            };
             let waiting_since = *self.deploy_waiting_since.get_or_insert(now);
             // Kept before it runs, so that it never runs twice by itself.
             self.deploy_started = Some(now);
             hands.keep(self)?;
-            return Ok(match hands.deploy(&self.pinned, &command).await {
+            return Ok(match hands.deploy(&self.pinned, &pull, &command).await {
                 Ok(Started::Yes) => Next::Again,
                 Ok(Started::Busy) => {
                     self.deploy_started = None;
@@ -689,6 +707,7 @@ pub trait Hands: Send + Sync {
     fn deploy(
         &self,
         pinned: &Pinned,
+        pull: &PullRequest,
         command: &str,
     ) -> impl Future<Output = anyhow::Result<Started>> + Send;
     /// How deploying ended, once it has; its log when it failed.

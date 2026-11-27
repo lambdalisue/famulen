@@ -32,8 +32,11 @@ pub(super) async fn pin_finishing(app: &App, run: &Run, place: &Place) -> anyhow
 pub(in crate::workers) async fn end_turn(app: &App, run: i64) -> anyhow::Result<()> {
     direct::forget_asked(app, run)?;
     let executor = executor(app, run);
-    executor.stop(STOP_GRACE).await.ok();
+    let stopped = executor.stop(STOP_GRACE).await;
     revoke(app, run);
+    // What goes outside next must not be changed under Famulen by an agent
+    // that may still be running.
+    stopped.context("the agent could not be ended")?;
     executor.forget().await
 }
 

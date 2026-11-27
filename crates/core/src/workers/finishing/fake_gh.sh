@@ -51,9 +51,10 @@ case $verb in
 	;;
 "pr view")
 	if [ -f "$state/merged" ]; then
-		printf '{"state":"MERGED","headRefOid":"%s"}\n' "$(cat "$state/merged")"
+		printf '{"state":"MERGED","headRefOid":"%s","mergeCommit":{"oid":"%s"}}\n' \
+			"$(cat "$state/merged")" "$(cat "$state/merge-commit")"
 	else
-		printf '{"state":"OPEN","headRefOid":"%s"}\n' "$(of "$(cat "$state/branch")")"
+		printf '{"state":"OPEN","headRefOid":"%s","mergeCommit":null}\n' "$(of "$(cat "$state/branch")")"
 	fi
 	;;
 "pr checks")
@@ -76,6 +77,7 @@ case $verb in
 		GIT_COMMITTER_NAME=forge GIT_COMMITTER_EMAIL=forge@example.com \
 		git -C "$bare" commit-tree "$at^{tree}" -p "$(of "$base")" -p "$at" -m "Merge pull request #$number")
 	git -C "$bare" update-ref "refs/heads/$base" "$merge"
+	echo "$merge" >"$state/merge-commit"
 	echo "$at" >"$state/merged"
 	;;
 *)

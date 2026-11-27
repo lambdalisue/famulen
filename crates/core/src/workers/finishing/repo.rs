@@ -92,6 +92,30 @@ impl Repo {
         }))
     }
 
+    /// Fetch the target, refuse a `merged` it does not hold, and say whether
+    /// `at`, a commit of the target, has it already.
+    pub(super) async fn holds(
+        &self,
+        remote: &str,
+        target: &str,
+        merged: &str,
+        at: &str,
+    ) -> anyhow::Result<bool> {
+        anyhow::ensure!(is_id(merged), "the forge named no commit: {merged}");
+        let tip = self.take_up(remote, target).await?;
+        anyhow::ensure!(
+            self.is_ancestor(merged, &tip).await,
+            "{merged} is not on {target} of the remote"
+        );
+        Ok(is_id(at) && self.is_ancestor(merged, at).await && self.is_ancestor(at, &tip).await)
+    }
+
+    async fn is_ancestor(&self, ancestor: &str, of: &str) -> bool {
+        self.git(&["merge-base", "--is-ancestor", ancestor, of])
+            .await
+            .is_ok()
+    }
+
     /// Fetch the target as the remote has it, make jj see it as that of
     /// origin, and say which commit it is.
     async fn take_up(&self, remote: &str, target: &str) -> anyhow::Result<String> {

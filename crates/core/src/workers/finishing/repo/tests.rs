@@ -311,6 +311,10 @@ async fn a_pull_request_is_made_once_checked_and_merged_only_at_the_commit_pushe
     world.bare(&format!("git update-ref refs/heads/famulen/x {head}"));
     forge.merge(&pull).await.unwrap();
     assert!(forge.merged(&pull).await.unwrap());
+    assert_eq!(
+        forge.merge_commit(&pull).await.unwrap(),
+        world.bare("git rev-parse main")
+    );
     assert_eq!(world.bare("git show main:b"), "two");
 
     world

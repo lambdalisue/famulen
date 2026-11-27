@@ -28,6 +28,13 @@ struct Listed {
 struct Viewed {
     state: String,
     head_ref_oid: String,
+    #[serde(default)]
+    merge_commit: Option<Commit>,
+}
+
+#[derive(Deserialize)]
+struct Commit {
+    oid: String,
 }
 
 #[derive(Deserialize)]
@@ -137,6 +144,19 @@ impl<'a> Forge<'a> {
         Ok(true)
     }
 
+    /// The commit the pull request was merged as.
+    pub(crate) async fn merge_commit(&self, pull: &PullRequest) -> anyhow::Result<String> {
+        let viewed = self.view(pull.number).await?;
+        anyhow::ensure!(
+            viewed.state == "MERGED" && viewed.head_ref_oid == pull.head,
+            "the pull request is not merged holding the commit pushed"
+        );
+        viewed
+            .merge_commit
+            .map(|commit| commit.oid)
+            .context("the forge names no commit the pull request was merged as")
+    }
+
     pub(crate) async fn merge(&self, pull: &PullRequest) -> anyhow::Result<()> {
         let number = pull.number.to_string();
         let mut command = self.command(&["pr", "merge", &number])?;
@@ -156,7 +176,7 @@ impl<'a> Forge<'a> {
     async fn view(&self, number: u64) -> anyhow::Result<Viewed> {
         let number = number.to_string();
         let mut command = self.command(&["pr", "view", &number])?;
-        command.args(["--json", "state,headRefOid"]);
+        command.args(["--json", "state,headRefOid,mergeCommit"]);
         serde_json::from_str(&output(command).await?).context("the pull request could not be read")
     }
 
