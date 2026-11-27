@@ -314,6 +314,7 @@ mod tests {
             "transcribe",
             "subscribe_events",
             "answer_approval",
+            "tell_run",
             "connect_known",
             "get_note_origin",
             "get_memory",

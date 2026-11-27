@@ -38,6 +38,8 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 | `FAMULEN_NOTEBOOK_DIR` | `notebook_dir` | コンソールで決めるまでの、手帳の既定の場所。`~/` から書ける | データの置き場所の `notebook/` |
 | `FAMULEN_WORKERS_SEALED` | `[workers] sealed` | [手代](worker.md#手代)に届かせない場所。手帳の控えなど。`~/` から書ける。環境変数では `PATH` と同じ区切りで並べる | `~/notebook` |
 | `FAMULEN_WORKERS_DIRECT` | `[workers] direct` | コードの仕事を[直接](worker.md#直接)動かしてよい、一つのリポジトリ（jj のチェックアウト）。`~/` から書ける。消すと直接の委託は始まらない | なし |
+| （書けない） | `[workers] direct_by_default` | 委ね先を言わないコードの仕事のうち、仕上げを許したリポジトリのものを直接にする | `false` |
+| （書けない） | `[[workers.finishing]]` | [Famulen が行う仕上げ](#仕上げの許し) | なし |
 | `FAMULEN_LISTEN` | `[api] listen` | API の待ち受け先 | `127.0.0.1:7790` |
 | `FAMULEN_API_HOSTS` | `[api] hosts` | API がほかに答えてよいホスト名（カンマ区切り）。localhost と待ち受け先の番地には、いつも答える | なし |
 | `FAMULEN_RECEIVE_LISTEN` | （書けない） | [ゲートウェイ](gateway.md#受け口と宛先)の HTTP の受け口の待ち受け先。なければ HTTP の受け口は開かない | なし |
@@ -55,6 +57,33 @@ Famulen は、何も設定しないまま起動できる。環境変数（`.env`
 | `FAMULEN_API_URL` | 本体の API の URL | `http://127.0.0.1:7790` |
 | `FAMULEN_CONSOLE_URL` | 主人がコンソールを開く URL。このホスト名で開ける | なし |
 | `FAMULEN_CONSOLE_HOSTS` | ほかに開いてよいホスト名（カンマ区切り） | なし |
+
+## 仕上げの許し
+
+`[[workers.finishing]]` は、[Famulen が仕上げてよい](worker.md#famulen-が行う仕上げ)リポジトリを一つずつ名指す。項目があると、Famulen はそのリポジトリの仕事を push して PR を開く。項目がなければ外へ何もしない。
+
+```toml
+[workers]
+direct = "~/src/famulen"
+direct_by_default = true
+
+[[workers.finishing]]
+repository = "~/src/famulen"
+checks = ["just ci"]
+reviews = 2
+merge = false
+deploy = "just deploy"
+forge = ["gh"]
+```
+
+| キー | 意味 | 既定 |
+| --- | --- | --- |
+| `repository` | 直接の仕事を動かすチェックアウト | 必須 |
+| `checks` | レビューの前に通らなければならないシェルのコマンド | なし |
+| `reviews` | レビューする回数の上限。`0` でレビューしない | `2` |
+| `merge` | 確認せずにマージするか | `false` |
+| `deploy` | マージした中身を反映するシェルのコマンド。Famulen 自身のリポジトリでだけ使う | なし |
+| `forge` | PR を扱うコマンド。`gh` の引数を受けるもの | `["gh"]` |
 
 ## テストで押さえること
 

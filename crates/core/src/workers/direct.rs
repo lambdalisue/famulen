@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 
 use super::Kept;
 use super::adroit::token;
-use super::order::Order;
+use super::finishing::Finishing;
+use super::order::{Order, Runner};
 use super::runs::Run;
 use crate::agents::Fence;
 use crate::app::App;
@@ -118,7 +119,7 @@ pub(super) fn checkout(
 
 /// `path` with what is there of it read as it really is, and the rest as
 /// written.
-fn real_as_far_as_there(path: &Path) -> PathBuf {
+pub(super) fn real_as_far_as_there(path: &Path) -> PathBuf {
     let mut rest = Vec::new();
     let mut at = path;
     loop {
@@ -235,7 +236,7 @@ pub(super) async fn prepare(direct: &Direct, place: &Place, base: &str) -> anyho
 
 /// Take away a workspace that cannot be worked in: jj may have made some of
 /// it before it failed.
-async fn forget(direct: &Direct, place: &Place) {
+pub(super) async fn forget(direct: &Direct, place: &Place) {
     let mut forget = tokio::process::Command::new(&direct.jj);
     forget
         .args(["--ignore-working-copy", "-R"])
@@ -359,6 +360,8 @@ pub(super) fn fence(kept: &Kept, runs: &Path, place: &Place) -> Fence {
             git.join("index"),
             // The Git store of a repository jj keeps apart from Git.
             jj.join("repo/store/git/config"),
+            jj.join("repo/store/git/config.worktree"),
+            jj.join("repo/store/git/commondir"),
             jj.join("repo/store/git/hooks"),
             jj.join("repo/store/git/info"),
             jj.join("repo/store/git/modules"),
@@ -682,6 +685,27 @@ pub fn direct_question(app: &App, run: &Run) -> Option<DirectQuestion> {
     })
 }
 
+/// Put what the owner has to say to a run into the turn it is in.
+pub async fn tell_direct(app: &App, run: i64, text: impl AsRef<str>) -> anyhow::Result<()> {
+    let run = app
+        .workers
+        .runs
+        .get(run)?
+        .with_context(|| format!("no run #{run}"))?;
+    let text = text.as_ref().trim();
+    anyhow::ensure!(!text.is_empty(), "there is nothing to tell it");
+    anyhow::ensure!(
+        run.order.runner == Runner::Direct,
+        "only work run directly can be told so"
+    );
+    anyhow::ensure!(
+        run.outcome.is_none()
+            && Finishing::load(&app.store, run.id)?.is_none_or(|f| f.with_agent()),
+        "the agent's turn is over"
+    );
+    super::agent::tell(app, run.id, text).await
+}
+
 /// Give a run the owner's answer to what it asks: a request of the gateway is
 /// answered as any is, so that it is answered once wherever it is shown; what
 /// it asks its user is kept for it to read.
@@ -739,4 +763,4 @@ pub(super) fn fenced(repository: impl Into<PathBuf>) -> Direct {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

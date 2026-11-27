@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::workers::direct::fenced;
-use crate::workers::{Direct, answer_direct, direct_question};
+use crate::workers::{Direct, answer_direct, direct_question, tell_direct};
 
 /// Tells how it was started and where, asks to use the shell and then asks
 /// its user, and writes down each answer.
@@ -21,7 +21,7 @@ read -r never
 /// Makes the workspace as `jj workspace add` would, and tells it was asked.
 const JJ: &str = "#!/bin/sh\necho \"$@\" >> DIR/jj.log\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\nmkdir -p \"$last/.jj\"\ntouch \"$last/README.md\"\n";
 
-fn install(dir: &TempDir, name: &str, script: &str) -> String {
+pub(super) fn install(dir: &TempDir, name: &str, script: &str) -> String {
     let (source, bin) = (dir.path().join(format!("{name}.sh")), dir.path().join(name));
     std::fs::write(
         &source,
@@ -40,7 +40,58 @@ fn install(dir: &TempDir, name: &str, script: &str) -> String {
     bin.display().to_string()
 }
 
-async fn until(pool: &Pool, what: &str, done: impl Fn() -> bool) {
+/// Waits to be told something more, and writes it down.
+const WAITS_TO_BE_TOLD: &str = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"system","subtype":"init","session_id":"c1"}'
+read -r more; echo "$more" > DIR/more
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+read -r never
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn what_the_owner_says_more_reaches_work_run_directly_while_it_is_at_work() {
+    let dir = TempDir::new("pool-direct-told");
+    let checkout = dir.path().join("src");
+    std::fs::create_dir_all(checkout.join(".jj/repo")).unwrap();
+    let checkout = checkout.canonicalize().unwrap();
+    let (mut app, _, _) = agent_app(
+        &dir,
+        &WAITS_TO_BE_TOLD.replace("DIR", &dir.path().display().to_string()),
+        &[
+            ("Runner", "direct"),
+            ("Directory", &checkout.display().to_string()),
+        ],
+    );
+    app.workers = app.workers.clone().with_direct(Some(Direct {
+        repository: checkout.clone(),
+        jj: install(&dir, "jj", JJ),
+        fenced: true,
+    }));
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+
+    until(&pool, "at work", || {
+        app.workers
+            .runs
+            .recent(1)
+            .unwrap()
+            .first()
+            .is_some_and(|r| r.state == State::Running)
+    })
+    .await;
+    let run = app.workers.runs.recent(1).unwrap().remove(0);
+    assert!(tell_direct(&app, run.id, "  ").await.is_err());
+    tell_direct(&app, run.id, "also add c").await.unwrap();
+    until(&pool, "over", || {
+        app.workers.runs.open().unwrap().is_empty()
+    })
+    .await;
+    assert!(read(&dir, "more").contains("also add c"));
+    let error = tell_direct(&app, run.id, "and d").await.unwrap_err();
+    assert!(error.to_string().contains("over"), "{error}");
+}
+
+pub(super) async fn until(pool: &Pool, what: &str, done: impl Fn() -> bool) {
     let runs = pool.app.workers.runs.clone();
     for _ in 0..400 {
         pool.tick().await.unwrap();
@@ -52,7 +103,7 @@ async fn until(pool: &Pool, what: &str, done: impl Fn() -> bool) {
     panic!("never: {what}; {:?}", runs.recent(3).unwrap());
 }
 
-fn read(dir: &TempDir, name: &str) -> String {
+pub(super) fn read(dir: &TempDir, name: &str) -> String {
     std::fs::read_to_string(dir.path().join(name)).unwrap_or_default()
 }
 
@@ -203,7 +254,7 @@ async fn work_run_directly_is_refused_where_the_owner_did_not_let_it_run() {
 }
 
 /// A jj repository of one small script at `root`, whose `main` is what it holds.
-fn made_repository(root: &std::path::Path) -> std::path::PathBuf {
+pub(super) fn made_repository(root: &std::path::Path) -> std::path::PathBuf {
     let checkout = root.join("calc");
     std::fs::create_dir_all(&checkout).unwrap();
     std::fs::write(

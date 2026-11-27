@@ -160,7 +160,7 @@ pub(crate) fn executor_program() -> anyhow::Result<Program> {
 
 /// The variables an agent does not see: the secrets, the way to the owner's
 /// keys, and the credentials of a session Famulen itself was started inside.
-fn hidden_env() -> Vec<String> {
+pub(super) fn hidden_env() -> Vec<String> {
     let mut hidden = crate::config::hidden_vars();
     hidden.extend(
         std::env::vars_os()
@@ -172,7 +172,11 @@ fn hidden_env() -> Vec<String> {
 
 /// Whether the variable `name` leads to the owner's keys or to a session.
 fn way_in(name: &str) -> bool {
-    name.starts_with("ADROIT_") || name == "SSH_AUTH_SOCK"
+    let token =
+        (name.starts_with("GH_") || name.starts_with("GITHUB_")) && name.ends_with("_TOKEN");
+    name.starts_with("ADROIT_")
+        || token
+        || ["SSH_AUTH_SOCK", "SSH_ASKPASS", "GIT_ASKPASS"].contains(&name)
 }
 
 /// The model a worker runs on, as its role is assigned.
@@ -247,6 +251,9 @@ fn message(run: &Run, place: Option<&Place>) -> String {
         text.push_str(
             "\nThis work was begun before and cut off before it ended. Check what was already done before doing anything again.\n",
         );
+    }
+    if place.is_some() {
+        text.push_str(&crate::workers::finish::steps_in_workspace(&run.order));
     }
     text
 }
@@ -327,6 +334,11 @@ pub(super) async fn clear(app: &App, run: i64) -> anyhow::Result<()> {
     }
     revoke(app, run);
     executor(app, run).forget().await?;
+    forget_review(app, run).await?;
+    match std::fs::remove_dir_all(crate::workers::finishing_dir(app, run)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
     // What it was handed goes, and what is kept of it, whatever fails of
     // the other.
     let removed = match std::fs::remove_dir_all(workdir(app, run)) {
@@ -342,6 +354,21 @@ pub(super) async fn clear(app: &App, run: i64) -> anyhow::Result<()> {
         app.store.clear_state(key)?;
     }
     removed
+}
+
+/// Write `text` to the agent of `run`, to join the turn under way.
+pub(super) async fn tell(app: &App, run: i64, text: &str) -> anyhow::Result<()> {
+    let executor = executor(app, run);
+    anyhow::ensure!(
+        matches!(executor.standing().await?, Standing::Working),
+        "the agent is not at work"
+    );
+    let line = AGENT.adapter().codec().send(text, When::Now)?;
+    let now = chrono::Utc::now();
+    let key = format!("tell:{}", now.timestamp_nanos_opt().unwrap_or_default());
+    executor.write(&key, &line).await?;
+    app.workers.sights.asked(run, now.timestamp_millis(), text);
+    Ok(())
 }
 
 /// End a run run directly as it is asked to end: its turn is stopped at once,
@@ -618,6 +645,9 @@ impl Job {
                 None
             }
         };
+        if let Some(place) = &job.place {
+            pin_finishing(app, run, place).await?;
+        }
         let asked = message(run, job.place.as_ref());
         let limit = if job.direct {
             DIRECT_TIME_LIMIT
@@ -668,11 +698,7 @@ impl Job {
             "it was gone on with {resumed} times"
         );
         // How long it may take counts from when it was first started.
-        let began = run.started_at.unwrap_or(run.created_at);
-        let used = Duration::from_secs((chrono::Utc::now().timestamp() - began).max(0) as u64);
-        let limit = DIRECT_TIME_LIMIT
-            .checked_sub(used)
-            .context("it took as long as a run may")?;
+        let limit = left_of(app, run)?;
         app.store
             .set_state(direct::resumed_key(run.id), (resumed + 1).to_string())?;
         job.executor.forget().await?;
@@ -1921,6 +1947,11 @@ fn told_of(id: i64, tool: &str, status: &str, carried: Option<Option<bool>>) -> 
     }
 }
 
+mod finishing;
+mod review;
+pub(in crate::workers) use finishing::*;
+pub(in crate::workers) use review::*;
+
 #[cfg(test)]
 mod live;
 
@@ -1939,9 +1970,15 @@ mod tests {
     }
 
     #[test]
-    fn no_agent_sees_the_way_to_the_ssh_agent_or_to_adroit() {
+    fn no_agent_sees_the_way_to_the_owners_keys_or_to_adroit() {
         for (name, kept) in [
             ("SSH_AUTH_SOCK", true),
+            ("SSH_ASKPASS", true),
+            ("GIT_ASKPASS", true),
+            ("GH_TOKEN", true),
+            ("GITHUB_TOKEN", true),
+            ("GH_ENTERPRISE_TOKEN", true),
+            ("GH_HOST", false),
             ("ADROIT_SOCKET", true),
             ("PATH", false),
         ] {

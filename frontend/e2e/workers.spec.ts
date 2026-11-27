@@ -424,3 +424,39 @@ test("a worker's run is followed as it writes, each tool in its own part, and it
   await expect(output).toContainText("テストを流して確かめる。");
   await expect(output.locator(".run-tool")).toHaveCount(3);
 });
+
+test("work run directly shows how its finishing stands and is told more while its agent works", async ({ page, request }) => {
+  await settle(request, true);
+  const title = "直接の直しもの";
+  const t = await call<{ id: string }>(request, "WorkerService", "DelegateTask", { title, request: "read", runner: "agent" });
+  let stage = "implementing";
+  await page.route(/WorkerService\/ListDelegated$/, async (route) => {
+    const response = await route.fetch();
+    const listed = await response.json();
+    for (const q of listed.queue ?? []) {
+      if (q.task !== t.id) continue;
+      const note = stage === "ci" ? "tests failed" : "";
+      Object.assign(q, { state: "running", runner: "direct", run: { id: "999", task: t.id, title, runner: "direct", state: "running", stage, stageNote: note } });
+    }
+    await route.fulfill({ response, json: listed });
+  });
+  const told: unknown[] = [];
+  await page.route(/WorkerService\/TellRun$/, async (route) => {
+    told.push(route.request().postDataJSON());
+    stage = "ci";
+    await route.fulfill({ json: {} });
+  });
+
+  await visit(page, `/tasks?tab=delegated&id=${t.id}`, /タスク/);
+  const more = detail(page).getByRole("textbox", { name: "エージェントへの追加の指示" });
+  await expect(detail(page).getByRole("group", { name: "仕上げ" })).toContainText("実装中");
+  await more.fill("テストも足して");
+  await detail(page).getByRole("button", { name: "送る" }).click();
+  await expect.poll(() => told).toEqual([{ run: "999", text: "テストも足して" }]);
+  // Once the agent's turn is over there is nothing to join.
+  await expect(detail(page).getByRole("group", { name: "仕上げ" })).toContainText("CI 待ち");
+  await expect(detail(page).getByRole("group", { name: "仕上げ" })).toContainText("tests failed");
+  await expect(more).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await call(request, "WorkerService", "CancelDelegated", { id: t.id });
+});

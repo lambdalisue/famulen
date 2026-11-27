@@ -72,7 +72,7 @@ fn same(a: &str, b: &str) -> bool {
 /// The steps that finish `order`: those of the repository it works on, else
 /// those for any work. None for work that changes no code of the owner's.
 pub(super) async fn steps_for(own: &[Finish], order: &Order) -> String {
-    if order.runner != Runner::Adroit || order.permissions == READ_ONLY {
+    if !matches!(order.runner, Runner::Adroit | Runner::Direct) || order.permissions == READ_ONLY {
         return String::new();
     }
     let repository = repository_of(Path::new(&order.directory)).await;
@@ -128,7 +128,7 @@ async fn git(directory: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// A repository as `host/path`, from any address it is cloned by.
-fn repository_name(address: &str) -> Option<String> {
+pub(super) fn repository_name(address: &str) -> Option<String> {
     let address = address.trim();
     let (host, path) = if address.contains("://") {
         let url = Url::parse(address).ok()?;
@@ -168,6 +168,18 @@ pub(super) fn prompt(order: &Order) -> String {
         "{request}\n\n---\n\n\
          # How this work is finished\n\n\
          The owner's standing steps, for every piece of work that changes code here. Take them in order once the work above is done, all of them, by yourself: the owner has decided on them, so do not stop in between to ask whether to go on. They stand over what the request says about finishing (a commit, a pull request, whether to merge), unless it says the owner asked otherwise for this work. Put right what fails on the way. Leave out what a change of nothing has no use for. Your turn ends when they are all done, or when one cannot be: then say which, and why. Say in your last answer how each of them went.\n\n{}",
+        order.finish
+    )
+}
+
+/// The owner's steps as work run directly is told them: whoever runs so has
+/// nothing to reach outside its workspace with.
+pub(super) fn steps_in_workspace(order: &Order) -> String {
+    if order.finish.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n---\n\n# The owner's steps to finish work like this\n\nTake those that are done in the workspace. A push, a pull request, a merge and anything else outside it are not yours: leave them, and say in your last message which are left.\n\n{}\n",
         order.finish
     )
 }
@@ -313,6 +325,21 @@ mod tests {
         for order in [agent, reads] {
             assert_eq!(steps_for(&all, &order).await, "");
         }
+    }
+
+    #[tokio::test]
+    async fn work_run_directly_is_told_the_steps_but_nothing_outside_its_workspace() {
+        let all = [finish("", "1. Merge it.")];
+        let mut order = Order {
+            runner: Runner::Direct,
+            ..order(&at("/src"))
+        };
+        order.finish = steps_for(&all, &order).await;
+        let told = steps_in_workspace(&order);
+        assert!(told.contains("not yours"), "{told}");
+        assert!(told.ends_with("\n1. Merge it.\n"), "{told}");
+        order.finish.clear();
+        assert_eq!(steps_in_workspace(&order), "");
     }
 
     #[test]

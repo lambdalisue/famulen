@@ -5,12 +5,42 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use super::{Asked, Candidate, Limits, Order, Placed, Run, Settings, Sight, State, plan};
+use super::{Asked, Candidate, Limits, Order, Placed, Run, Runner, Settings, Sight, State, plan};
 use crate::app::App;
 use crate::conversations::task_key;
 use crate::models::{CapUnit, Role};
 pub use crate::records::is_delegated;
 use crate::records::{OWNER, Record, Records, SECRETARY, TASKS, is_over};
+
+/// `order` as it runs when who delegated it named no runner: directly for
+/// work on code that Famulen can also finish, if the owner made that the
+/// default, else in Adroit.
+pub fn with_default_runner(app: &App, order: Order) -> Order {
+    let direct = Order {
+        runner: Runner::Direct,
+        // Work run directly has a workspace of its own anyway.
+        worktree: false,
+        ..order.clone()
+    };
+    let finished = app.workers.direct_by_default
+        && super::direct::checkout(app.workers.direct.as_ref(), &direct).is_ok_and(
+            |(checkout, _)| {
+                app.workers.finishing.iter().any(|rule| {
+                    rule.repository
+                        .canonicalize()
+                        .is_ok_and(|named| named == checkout)
+                })
+            },
+        );
+    if finished && direct.check().is_ok() && fit(app, &direct).is_ok() {
+        direct
+    } else {
+        Order {
+            runner: Runner::Adroit,
+            ..order
+        }
+    }
+}
 
 /// A delegated task in the queue, with the newest of its runs.
 #[derive(Debug, Clone)]
@@ -226,4 +256,80 @@ pub fn queue(app: &App, now: DateTime<Utc>) -> anyhow::Result<Vec<Queued>> {
             placed,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod default_runner_tests {
+    use super::*;
+    use crate::notebook::testing::TempDir;
+    use crate::workers::{Direct, Rule};
+
+    #[test]
+    fn work_is_run_directly_by_default_only_where_famulen_may_finish_it() {
+        let dir = TempDir::new("default-runner");
+        let repo = TempDir::new("default-runner-repo");
+        let checkout = repo.path().canonicalize().unwrap();
+        std::fs::create_dir_all(checkout.join(".jj/repo")).unwrap();
+        let mut app = crate::runtime::testing::app(dir.path());
+        let direct = Direct {
+            repository: checkout.clone(),
+            jj: "jj".into(),
+            fenced: true,
+        };
+        let rule = Rule {
+            repository: checkout.clone(),
+            checks: Vec::new(),
+            reviews: 0,
+            merge: false,
+            deploy: None,
+            forge: vec!["gh".to_owned()],
+        };
+        let order = Order {
+            title: "Add b".into(),
+            request: "add b".into(),
+            runner: Runner::Adroit,
+            directory: checkout.display().to_string(),
+            worktree: true,
+            ..Order::default()
+        };
+        eprintln!("{:?}", {
+            app.workers = app.workers.clone().with_direct(Some(direct.clone()));
+            Order {
+                runner: Runner::Direct,
+                worktree: false,
+                ..order.clone()
+            }
+            .check()
+        });
+        let mut chosen = |by_default: bool, rules: Vec<Rule>, order: Order| {
+            app.workers = app
+                .workers
+                .clone()
+                .with_direct(Some(direct.clone()))
+                .with_finishing(rules)
+                .with_direct_by_default(by_default);
+            with_default_runner(&app, order).runner
+        };
+
+        let rules = || vec![rule.clone()];
+        assert_eq!(chosen(true, rules(), order.clone()), Runner::Direct);
+        assert_eq!(chosen(false, rules(), order.clone()), Runner::Adroit);
+        assert_eq!(chosen(true, Vec::new(), order.clone()), Runner::Adroit);
+        for other in [
+            Order {
+                permissions: "read_only".into(),
+                ..order.clone()
+            },
+            Order {
+                agent: "codex".into(),
+                ..order.clone()
+            },
+            Order {
+                directory: "/elsewhere".into(),
+                ..order.clone()
+            },
+        ] {
+            assert_eq!(chosen(true, rules(), other), Runner::Adroit);
+        }
+    }
 }

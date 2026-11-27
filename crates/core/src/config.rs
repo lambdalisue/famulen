@@ -15,6 +15,8 @@ use serde::Deserialize;
 
 pub use famulen_gateway::process::{hidden_vars, hide_secrets};
 
+use crate::workers::Rule;
+
 /// Where to keep data, instead of the default.
 pub const DATA_DIR_ENV: &str = "FAMULEN_DATA_DIR";
 /// Where to keep the notebook until the owner chooses another place on the
@@ -72,6 +74,10 @@ pub struct Config {
     pub workers_sealed: Vec<PathBuf>,
     /// The one repository work may run directly in; none runs so without it.
     pub workers_direct: Option<PathBuf>,
+    /// Whether work Famulen can finish is run directly when no runner is named.
+    pub workers_direct_by_default: bool,
+    /// How work run directly may be finished, for each repository named.
+    pub workers_finishing: Vec<Rule>,
     /// Where the owner opens the console, if set.
     pub console_url: Option<String>,
     /// The key the vault seals secrets with, from the environment only.
@@ -104,6 +110,10 @@ struct File {
 struct Workers {
     sealed: Option<Vec<PathBuf>>,
     direct: Option<PathBuf>,
+    #[serde(default)]
+    direct_by_default: bool,
+    #[serde(default)]
+    finishing: Vec<Rule>,
 }
 
 /// What applies when neither the environment nor the file says.
@@ -251,6 +261,19 @@ impl Config {
             }
             None => None,
         };
+        let mut workers_finishing = file.workers.finishing;
+        for rule in &mut workers_finishing {
+            rule.repository = below_home(std::mem::take(&mut rule.repository))?;
+            anyhow::ensure!(
+                rule.repository.is_absolute(),
+                "[[workers.finishing]] names a repository whole, not {}",
+                rule.repository.display()
+            );
+            anyhow::ensure!(
+                !rule.forge.is_empty(),
+                "[[workers.finishing]] forge names a command"
+            );
+        }
         let mut claude = file.claude;
         if let Some(model) = env(MODEL_ENV) {
             claude.model = Some(model.trim().to_owned());
@@ -286,6 +309,8 @@ impl Config {
             api,
             workers_sealed,
             workers_direct,
+            workers_direct_by_default: file.workers.direct_by_default,
+            workers_finishing,
             console_url: env(CONSOLE_URL_ENV)
                 .or(file.console_url)
                 .map(|u| u.trim().trim_end_matches('/').to_owned()),
@@ -486,6 +511,24 @@ mod tests {
         );
         let error = load(None, &[(WORKERS_DIRECT_ENV, "src")]).unwrap_err();
         assert!(error.to_string().contains(WORKERS_DIRECT_ENV), "{error}");
+    }
+
+    #[test]
+    fn famulen_finishes_nothing_and_changes_no_default_unless_told() {
+        let bare = load(None, &[]).unwrap();
+        assert!(bare.workers_finishing.is_empty() && !bare.workers_direct_by_default);
+        let told = load(
+            Some(
+                "[workers]\ndirect_by_default = true\n[[workers.finishing]]\nrepository = \"/src/a\"\n",
+            ),
+            &[],
+        )
+        .unwrap();
+        assert!(told.workers_direct_by_default);
+        let rule = &told.workers_finishing[0];
+        assert!(!rule.merge && rule.deploy.is_none());
+        let error = load(Some("[[workers.finishing]]\nrepository = \"a\"\n"), &[]).unwrap_err();
+        assert!(error.to_string().contains("workers.finishing"), "{error}");
     }
 
     #[test]

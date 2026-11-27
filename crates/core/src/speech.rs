@@ -4,7 +4,7 @@
 
 mod catalog;
 mod engine;
-mod process;
+pub(crate) mod process;
 mod server;
 
 use std::collections::HashMap;
