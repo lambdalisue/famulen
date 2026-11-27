@@ -778,7 +778,7 @@ pub fn discloses(ticket: &Ticket) -> bool {
 /// answers: it tells something more widely, or a run of work run directly
 /// asks it, whose approval would let every caller use the tool.
 pub fn answered_once(ticket: &Ticket) -> bool {
-    discloses(ticket) || crate::permissions::is_direct_actor(&ticket.actor)
+    discloses(ticket) || crate::permissions::is_job_actor(&ticket.actor)
 }
 
 /// Whether the owner answers questions in a request instead of approving it.

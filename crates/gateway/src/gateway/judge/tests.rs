@@ -93,6 +93,96 @@ fn what_was_granted_to_a_caller_is_taken_back_whole_and_from_it_alone() {
     assert!(is_allow(&g.judge(&call("search_threads")).unwrap()));
 }
 
+/// A caller with every tool of `mail`, and the call it makes.
+fn named(g: &Gateway, actor: &str, tool: &str) -> Call {
+    g.grant(actor, "mail", ANY).unwrap();
+    Call {
+        actor: actor.into(),
+        ..call(tool)
+    }
+}
+
+#[test]
+fn a_caller_past_its_deadline_calls_nothing() {
+    let g = gateway();
+    let late = named(&g, "worker:run-1", "search_threads");
+    let early = named(&g, "worker:run-2", "search_threads");
+    g.expire(&late.actor, now() - 1).unwrap();
+    g.expire(&early.actor, now() + 60).unwrap();
+    assert!(matches!(g.judge(&late).unwrap(), Verdict::Deny { .. }));
+    assert!(is_allow(&g.judge(&early).unwrap()));
+}
+
+#[tokio::test]
+async fn what_a_caller_past_its_deadline_still_waits_on_cannot_be_approved() {
+    let g = gateway();
+    let worker = named(&g, "worker:run-1", "send_message");
+    let Verdict::Hold(ticket) = g.judge(&worker).unwrap() else {
+        panic!("should be held");
+    };
+    g.expire(&worker.actor, now() - 1).unwrap();
+
+    let answered = g.answer_ticket(ticket.id, Answer::Approve).await.unwrap();
+
+    assert!(answered.is_none());
+    assert_eq!(g.ticket(ticket.id).unwrap().unwrap().status, "lapsed");
+    assert!(!g.has_pass(ticket.id).unwrap());
+}
+
+#[test]
+fn a_caller_holds_a_grant_until_its_deadline_or_until_it_is_taken_back() {
+    let g = gateway();
+    assert!(!g.holds_any("worker:run-1").unwrap());
+    g.grant("worker:run-1", "mail", ANY).unwrap();
+    assert!(g.holds_any("worker:run-1").unwrap());
+    assert!(!g.holds_any("worker:run-2").unwrap());
+    g.expire("worker:run-1", now() - 1).unwrap();
+    assert!(!g.holds_any("worker:run-1").unwrap());
+    g.expire("worker:run-1", now() + 60).unwrap();
+    g.revoke("worker:run-1").unwrap();
+    assert!(!g.holds_any("worker:run-1").unwrap());
+}
+
+#[tokio::test]
+async fn an_approval_serves_the_caller_that_asked_for_it_alone_and_once() {
+    let g = gateway();
+    let first = named(&g, "worker:run-1", "send_message");
+    let second = named(&g, "worker:run-2", "send_message");
+    let Verdict::Hold(ticket) = g.judge(&first).unwrap() else {
+        panic!("should be held");
+    };
+    g.answer_ticket(ticket.id, Answer::Approve).await.unwrap();
+    assert!(matches!(g.judge(&second).unwrap(), Verdict::Hold(_)));
+    assert!(is_allow(&g.judge(&first).unwrap()));
+    assert!(matches!(g.judge(&first).unwrap(), Verdict::Hold(_)));
+}
+
+#[tokio::test]
+async fn revoking_a_caller_takes_back_what_it_asked_and_what_it_was_approved() {
+    let g = gateway();
+    let worker = named(&g, "worker:run-1", "send_message");
+    let Verdict::Hold(approved) = g.judge(&worker).unwrap() else {
+        panic!("should be held");
+    };
+    g.answer_ticket(approved.id, Answer::Approve).await.unwrap();
+    let other = Call {
+        tool: "delete_message".into(),
+        ..worker.clone()
+    };
+    let Verdict::Hold(waiting) = g.judge(&other).unwrap() else {
+        panic!("should be held");
+    };
+
+    let withdrawn = g.revoke(&worker.actor).unwrap();
+
+    assert_eq!(withdrawn, [waiting.id]);
+    assert!(g.held_tickets().unwrap().is_empty());
+    assert!(!g.has_pass(approved.id).unwrap());
+    // Granted again under the same name, it begins with nothing.
+    g.grant(&worker.actor, "mail", ANY).unwrap();
+    assert!(matches!(g.judge(&worker).unwrap(), Verdict::Hold(_)));
+}
+
 #[test]
 fn a_caller_without_grants_calls_nothing() {
     let g = gateway();

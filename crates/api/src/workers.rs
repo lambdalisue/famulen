@@ -8,8 +8,8 @@ use famulen_core::conversations::task_key;
 use famulen_core::notebook::Writer;
 use famulen_core::records::{Field as CoreField, Patch, TASKS, is_over};
 use famulen_core::workers::{
-    self, Finish, How, Left, Order, Outcome, Placed, Run, Runner, Settings, Sight, Standing, State,
-    WORKER, is_delegated,
+    self, Finish, How, Left, Order, Outcome, Placed, Reading, Run, Runner, Settings, Sight,
+    Standing, State, WORKER, is_delegated,
 };
 use famulen_core::workgroups::ALL;
 
@@ -261,6 +261,13 @@ impl WorkerService for Api {
             permissions: trimmed(&r.permissions),
             tools: r.tools,
             files: r.files,
+            wait: r.wait,
+            notebook: match r.notebook.trim() {
+                "" => Reading::default(),
+                level => Reading::parse(level)
+                    .ok_or_else(|| fail("a notebook is none, excerpt, named, search or propose"))?,
+            },
+            search: r.search,
             ..Order::default()
         };
         order.check().or_fail()?;

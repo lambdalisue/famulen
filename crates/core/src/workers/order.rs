@@ -48,6 +48,52 @@ pub fn may_hand(tool: &str) -> bool {
 /// The section of a task that says how it is delegated.
 pub const DELEGATION: &str = "Delegation";
 
+/// How much of the notebook a run reads, each level with what is below it.
+/// No level writes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reading {
+    /// Nothing.
+    None,
+    /// What the request quotes of it, and no more.
+    Excerpt,
+    /// The files the order names.
+    #[default]
+    Named,
+    /// Besides, the records of the kinds the order names, found by search.
+    Search,
+    /// Besides, proposing what the secretary may write.
+    Propose,
+}
+
+impl Reading {
+    const ALL: [Reading; 5] = [
+        Reading::None,
+        Reading::Excerpt,
+        Reading::Named,
+        Reading::Search,
+        Reading::Propose,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reading::None => "none",
+            Reading::Excerpt => "excerpt",
+            Reading::Named => "named",
+            Reading::Search => "search",
+            Reading::Propose => "propose",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Reading::ALL.into_iter().find(|r| r.as_str() == text)
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Reading::default()
+    }
+}
+
 /// What runs a delegated task.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,6 +165,15 @@ pub struct Order {
     pub permissions: String,
     pub tools: Vec<String>,
     pub files: Vec<String>,
+    /// Whether a call that needs the owner's approval waits for it instead
+    /// of being refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wait: bool,
+    #[serde(default, skip_serializing_if = "Reading::is_default")]
+    pub notebook: Reading,
+    /// The kinds of record it may search.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search: Vec<String>,
     /// The owner's steps that finish it. Decided when a run is made.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub finish: String,
@@ -174,6 +229,13 @@ impl Order {
             permissions: text("Permissions"),
             tools: list("Tools"),
             files: list("Files").iter().map(|f| file_of(f)).collect(),
+            wait: flag(&text("Wait")).unwrap_or(false),
+            notebook: match text("Notebook").as_str() {
+                "" => Reading::default(),
+                level => Reading::parse(level)
+                    .context("its Notebook is none, excerpt, named, search or propose")?,
+            },
+            search: list("Search"),
             finish: String::new(),
         };
         order.check()?;
@@ -196,6 +258,12 @@ impl Order {
     /// The section of a task that orders this.
     pub fn section(&self) -> SectionContent {
         let worktree = if self.worktree { "yes" } else { "" };
+        let wait = if self.wait { "yes" } else { "" };
+        let notebook = if self.notebook.is_default() {
+            ""
+        } else {
+            self.notebook.as_str()
+        };
         let mut fields: Vec<Field> = [
             ("Runner", self.runner.as_str()),
             ("Connection", &self.connection),
@@ -205,12 +273,18 @@ impl Order {
             ("Agent", &self.agent),
             ("Agent model", &self.model),
             ("Permissions", &self.permissions),
+            ("Wait", wait),
+            ("Notebook", notebook),
         ]
         .into_iter()
         .filter(|(_, value)| !value.is_empty())
         .map(|(name, value)| Field::new(name, value))
         .collect();
-        for (name, values) in [("Tools", &self.tools), ("Files", &self.files)] {
+        for (name, values) in [
+            ("Tools", &self.tools),
+            ("Files", &self.files),
+            ("Search", &self.search),
+        ] {
             if !values.is_empty() {
                 fields.push(Field {
                     name: name.to_owned(),
@@ -237,20 +311,38 @@ impl Order {
             "Directory is an absolute path, not {}",
             self.directory
         );
+        anyhow::ensure!(
+            !self.wait || self.runner.runs_here(),
+            "Wait is for work Famulen runs itself"
+        );
+        anyhow::ensure!(
+            self.runner.runs_here() || (self.notebook.is_default() && self.search.is_empty()),
+            "Notebook and Search are for work Famulen runs itself"
+        );
+        anyhow::ensure!(
+            self.files.is_empty() || !self.runner.runs_here() || self.notebook >= Reading::Named,
+            "Files are for a Notebook of named or more"
+        );
+        anyhow::ensure!(
+            self.search.is_empty() || self.notebook >= Reading::Search,
+            "Search is for a Notebook of search or propose"
+        );
+        anyhow::ensure!(
+            self.notebook != Reading::Search || !self.search.is_empty(),
+            "a Notebook of search needs Search, the kinds of record"
+        );
+        for kind in &self.search {
+            anyhow::ensure!(
+                kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+                "{kind:?} is not a kind of record"
+            );
+        }
         match self.runner {
             Runner::Adroit => anyhow::ensure!(
                 !self.directory.is_empty(),
                 "a task for Adroit needs a Directory"
             ),
-            Runner::Agent => {
-                for tool in &self.tools {
-                    anyhow::ensure!(
-                        may_hand(tool),
-                        "{tool:?} is never handed to a worker; it may have {}, and a connection's tools as mcp__<connection>__<tool>",
-                        HANDABLE.join(", ")
-                    );
-                }
-            }
+            Runner::Agent => self.check_tools()?,
             Runner::Direct => {
                 anyhow::ensure!(
                     !self.directory.is_empty(),
@@ -269,22 +361,19 @@ impl Order {
                 ] {
                     anyhow::ensure!(!set, "{field} is for Adroit, not for work run directly");
                 }
-                for tool in &self.tools {
-                    anyhow::ensure!(
-                        split_tool(tool).is_none(),
-                        "{tool:?}: no connection is handed to work run directly yet"
-                    );
-                    anyhow::ensure!(
-                        may_hand(tool),
-                        "{tool:?} is never handed to a worker; it may have {}",
-                        HANDABLE.join(", ")
-                    );
-                }
-                anyhow::ensure!(
-                    self.files.is_empty(),
-                    "no file of the notebook is handed to work run directly yet"
-                );
+                self.check_tools()?;
             }
+        }
+        Ok(())
+    }
+
+    fn check_tools(&self) -> anyhow::Result<()> {
+        for tool in &self.tools {
+            anyhow::ensure!(
+                may_hand(tool),
+                "{tool:?} is never handed to a worker; it may have {}, and a connection's tools as mcp__<connection>__<tool>",
+                HANDABLE.join(", ")
+            );
         }
         Ok(())
     }
@@ -292,7 +381,7 @@ impl Order {
 
 /// The path in the notebook a file handed over is written as: a path, or a
 /// wiki link to a record or a memory.
-fn file_of(text: &str) -> String {
+pub(super) fn file_of(text: &str) -> String {
     if !text.starts_with("[[") {
         return text.to_owned();
     }
@@ -388,11 +477,42 @@ pub(super) mod tests {
             directory: at("/src"),
             tools: vec!["Read".into(), "mcp__mail__search".into()],
             files: vec!["memory/core.md".into()],
+            wait: true,
+            notebook: Reading::Propose,
+            search: vec!["tasks".into(), "memos".into()],
             ..Order::default()
         };
         let mut patch = delegated("直す", &[]);
         patch.sections = vec![wanted.section()];
         assert_eq!(order(&r, patch).unwrap(), wanted);
+    }
+
+    #[test]
+    fn work_run_directly_is_handed_connections_and_the_named_notebook() {
+        let (_tmp, r) = crate::records::testing::records("order-direct");
+        let src = at("/src");
+        let got = order(
+            &r,
+            delegated(
+                "直す",
+                &[
+                    ("Runner", "direct"),
+                    ("Directory", &src),
+                    ("Tools", "mcp__mail__search"),
+                    ("Files", "memory/core.md"),
+                ],
+            ),
+        )
+        .unwrap();
+        assert_eq!(got.tools, ["mcp__mail__search"]);
+        assert_eq!(got.files, ["memory/core.md"]);
+        assert_eq!(got.notebook, Reading::Named, "named unless it says");
+    }
+
+    #[test]
+    fn an_order_that_says_nothing_of_the_notebook_keeps_its_digest() {
+        let written = serde_json::to_string(&Order::default()).unwrap();
+        assert!(!written.contains("notebook") && !written.contains("search"));
     }
 
     #[test]
@@ -427,6 +547,10 @@ pub(super) mod tests {
             ),
             (&[("Runner", "direct")][..], "needs a Directory"),
             (
+                &[("Runner", "adroit"), ("Directory", "/src"), ("Wait", "yes")][..],
+                "runs itself",
+            ),
+            (
                 &[
                     ("Runner", "direct"),
                     ("Directory", "/src"),
@@ -444,19 +568,35 @@ pub(super) mod tests {
             ),
             (
                 &[
-                    ("Runner", "direct"),
+                    ("Runner", "adroit"),
                     ("Directory", "/src"),
-                    ("Tools", "mcp__mail__search"),
+                    ("Notebook", "none"),
                 ][..],
-                "no connection",
+                "runs itself",
             ),
             (
                 &[
-                    ("Runner", "direct"),
-                    ("Directory", "/src"),
+                    ("Runner", "agent"),
+                    ("Notebook", "excerpt"),
                     ("Files", "memory/core.md"),
                 ][..],
-                "no file of the notebook",
+                "named",
+            ),
+            (
+                &[("Runner", "agent"), ("Notebook", "search")][..],
+                "needs Search",
+            ),
+            (
+                &[("Runner", "agent"), ("Search", "tasks")][..],
+                "search or propose",
+            ),
+            (
+                &[
+                    ("Runner", "agent"),
+                    ("Notebook", "search"),
+                    ("Search", "../memory"),
+                ][..],
+                "kind of record",
             ),
         ] {
             let error = order(&r, delegated("x", fields)).unwrap_err().to_string();

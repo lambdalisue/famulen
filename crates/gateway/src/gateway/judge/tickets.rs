@@ -2,7 +2,7 @@
 //! fields of a held call that carry a secret are sealed in the vault until
 //! the ticket is answered, so a ticket keeps none in plain form.
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde_json::{Map, Value};
 
 use super::super::{DEFINITIONS, Gateway, VAULT};
@@ -211,6 +211,14 @@ impl Gateway {
         Ok(self.tickets_where(&format!("id = {id}"))?.pop())
     }
 
+    /// Every ticket of the calls `actor` made, however it stands.
+    pub fn tickets_of(&self, actor: impl AsRef<str>) -> anyhow::Result<Vec<Ticket>> {
+        let actor = actor.as_ref();
+        let mut tickets = self.tickets_where("1")?;
+        tickets.retain(|t| t.actor == actor);
+        Ok(tickets)
+    }
+
     fn tickets_where(&self, filter: &str) -> anyhow::Result<Vec<Ticket>> {
         let conn = self.store.conn();
         let mut statement = conn.prepare(&format!(
@@ -400,6 +408,20 @@ impl Gateway {
         self.answer_ticket(id, Answer::Approve).await
     }
 
+    /// How the call the gateway made for an answered ticket went. `None`
+    /// while it is not known, and for a ticket the gateway makes no call for.
+    pub fn carried_out(&self, id: i64) -> anyhow::Result<Option<bool>> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT ok FROM carried_out WHERE ticket = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Answer a held ticket, once. `None` when it was answered or lapsed.
     pub async fn answer_ticket(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Answered>> {
         self.lapse_tickets()?;
@@ -500,6 +522,10 @@ impl Gateway {
             outcome: if ran.is_ok() { "ok" } else { "error" }.into(),
             ..LogEntry::default()
         })?;
+        self.store.conn().execute(
+            "INSERT INTO carried_out (ticket, ok) VALUES (?1, ?2)",
+            params![ticket.id, ran.is_ok()],
+        )?;
         Ok(ran)
     }
 
@@ -535,14 +561,19 @@ impl Gateway {
         Ok(())
     }
 
-    /// Let tickets that waited too long lapse, and drop what they sealed.
+    /// Let tickets that waited too long, or whose caller is past its
+    /// deadline, lapse, and drop what they sealed.
     pub(super) fn lapse_tickets(&self) -> anyhow::Result<()> {
         let ids: Vec<i64> = {
             let conn = self.store.conn();
-            let mut statement =
-                conn.prepare("SELECT id FROM tickets WHERE status = 'held' AND created_at < ?1")?;
+            let mut statement = conn.prepare(
+                "SELECT id FROM tickets WHERE status = 'held' AND (created_at < ?1
+                 OR actor IN (SELECT actor FROM actor_deadlines WHERE until <= ?2))",
+            )?;
             statement
-                .query_map(params![now() - TICKET_LIFETIME_SECS], |row| row.get(0))?
+                .query_map(params![now() - TICKET_LIFETIME_SECS, now()], |row| {
+                    row.get(0)
+                })?
                 .collect::<Result<_, _>>()?
         };
         for id in ids {

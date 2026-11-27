@@ -559,6 +559,7 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
         };
 
         let first = hold(call("q1")).await;
+        assert_eq!(g.carried_out(first.id).unwrap(), None);
         assert_eq!(hold(call("q1")).await.id, first.id, "asked once");
         assert_eq!(first.shown["decides"]["text"], "rm -rf?");
         assert_eq!(first.shown["call"]["question"], "q1");
@@ -577,6 +578,7 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
             .unwrap()
             .unwrap();
         answered.ran.unwrap().unwrap();
+        assert_eq!(g.carried_out(first.id).unwrap(), Some(true));
         let second = hold(call("q1")).await;
         let answered = g
             .answer_ticket(second.id, Answer::Reject)
@@ -640,11 +642,16 @@ on_reject = ["-e", "open my $f, '>>', shift; print $f qq(deny @ARGV\n)", "--", "
                 .is_none()
         );
 
+        let blank = hold().await;
+        let answered = g.answer_ticket(blank.id, Answer::Approve).await;
+        assert!(answered.unwrap().unwrap().ran.unwrap().is_err());
+        assert_eq!(g.carried_out(blank.id).unwrap(), Some(false));
+
         let unasked = Call::new("owner", "ask", "answer", json!({ "question": "q1" }));
         let mut told = g.subscribe_held();
         let lacking = g.answer_unasked(&unasked, Answer::Approve, vec![]);
         assert!(lacking.await.is_err(), "its questions were not answered");
-        assert_eq!(g.ticket(ticket.id + 1).unwrap().unwrap().status, "lapsed");
+        assert_eq!(g.ticket(blank.id + 1).unwrap().unwrap().status, "lapsed");
         g.answer_unasked(&unasked, Answer::Approve, vec!["e f".into()])
             .await
             .unwrap();

@@ -104,7 +104,7 @@ async fn work_run_directly_waits_for_the_owner_in_a_workspace_of_its_own_and_end
     let ticket = app.gateway.ticket(asked.ticket).unwrap().unwrap();
     assert_eq!(
         (ticket.actor, ticket.tool.as_str()),
-        (crate::permissions::direct_actor(run.id), "Bash")
+        (crate::permissions::job_actor(run.id), "Bash")
     );
     assert!(read(&dir, "first").is_empty());
     assert!(
@@ -202,20 +202,8 @@ async fn work_run_directly_is_refused_where_the_owner_did_not_let_it_run() {
     assert!(!dir.path().join("args").exists(), "nothing is started");
 }
 
-/// A real Claude Code with the owner's login does a small piece of work on
-/// code, run directly in a jj workspace of a repository made for it, through
-/// the pool and an executor as Famulen runs it. What it asks the owner is
-/// answered here as the owner would, and printed. Nothing is opened: run it
-/// alone, where `jj` and `claude` are on the PATH:
-///
-/// ```sh
-/// cargo test -p famulen-core --lib live_direct -- --ignored --nocapture
-/// ```
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "runs a real Claude Code with the owner's login"]
-async fn live_direct_work_on_code_runs_to_its_end() {
-    let home = crate::sealed::home().unwrap();
-    let root = home.join(format!(".famulen-live-direct-{}", std::process::id()));
+/// A jj repository of one small script at `root`, whose `main` is what it holds.
+fn made_repository(root: &std::path::Path) -> std::path::PathBuf {
     let checkout = root.join("calc");
     std::fs::create_dir_all(&checkout).unwrap();
     std::fs::write(
@@ -249,7 +237,24 @@ async fn live_direct_work_on_code_runs_to_its_end() {
     jj(&["describe", "-m", "calc: add"]);
     jj(&["bookmark", "create", "main", "-r", "@"]);
     jj(&["new"]);
-    let checkout = checkout.canonicalize().unwrap();
+    checkout.canonicalize().unwrap()
+}
+
+/// A real Claude Code with the owner's login does a small piece of work on
+/// code, run directly in a jj workspace of a repository made for it, through
+/// the pool and an executor as Famulen runs it. What it asks the owner is
+/// answered here as the owner would, and printed. Nothing is opened: run it
+/// alone, where `jj` and `claude` are on the PATH:
+///
+/// ```sh
+/// cargo test -p famulen-core --lib live_direct -- --ignored --nocapture
+/// ```
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "runs a real Claude Code with the owner's login"]
+async fn live_direct_work_on_code_runs_to_its_end() {
+    let home = crate::sealed::home().unwrap();
+    let root = home.join(format!(".famulen-live-direct-{}", std::process::id()));
+    let checkout = made_repository(&root);
 
     let dir = TempDir::new("live-direct");
     let mut app = crate::runtime::testing::app(dir.path());
@@ -527,4 +532,207 @@ async fn a_workspace_of_its_name_famulen_did_not_make_for_it_is_neither_used_nor
         "of other work"
     );
     assert!(!dir.path().join("args").exists(), "nothing is started");
+}
+
+/// Asks to use a connection's tool it was handed, one it was not, and reads
+/// the notebook.
+const USES_WHAT_IT_WAS_HANDED: &str = r#"#!/bin/sh
+read -r init; read -r ask; echo "$ask" > DIR/message
+may() { echo "{\"type\":\"control_request\",\"request_id\":\"$1\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"$1\",\"input\":{}}}"; read -r answer; echo "$answer" > "DIR/$1"; }
+may mcp__adroit__send_to_session
+may mcp__adroit__start_session
+may mcp__famulen__notebook_read
+may mcp__famulen__notebook_search
+echo '{"type":"control_request","request_id":"r","request":{"subtype":"mcp_message","server_name":"famulen","message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notebook_read","arguments":{"path":"records/memos/README.md"}}}}}'
+read -r got; echo "$got" > DIR/got
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+read -r never
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_run_directly_uses_the_connections_and_the_notebook_it_was_handed() {
+    let dir = TempDir::new("pool-direct-handed");
+    let checkout = dir.path().join("src");
+    std::fs::create_dir_all(checkout.join(".jj/repo")).unwrap();
+    let checkout = checkout.canonicalize().unwrap();
+    let (mut app, _, _) = agent_app(
+        &dir,
+        &USES_WHAT_IT_WAS_HANDED.replace("DIR", &dir.path().display().to_string()),
+        &[
+            ("Runner", "direct"),
+            ("Directory", &checkout.display().to_string()),
+            ("Tools", "mcp__adroit__send_to_session"),
+            ("Files", "records/memos/README.md"),
+        ],
+    );
+    app.workers = app.workers.clone().with_direct(Some(Direct {
+        repository: checkout.clone(),
+        jj: install(&dir, "jj", JJ),
+        fenced: true,
+    }));
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+
+    // It is given the notebook along with a connection, so the owner says yes
+    // before it starts.
+    until(&pool, "asked to start", || {
+        !pool.app.gateway.held_tickets().unwrap().is_empty()
+    })
+    .await;
+    let start = pool.app.gateway.held_tickets().unwrap().remove(0);
+    let approve = crate::approvals::Answer::Approve;
+    pool.app
+        .gateway
+        .answer_ticket(start.id, approve.into())
+        .await
+        .unwrap();
+    until(&pool, "read the notebook", || !read(&dir, "got").is_empty()).await;
+
+    for (asked, answer) in [
+        ("mcp__adroit__send_to_session", "\"allow\""),
+        ("mcp__adroit__start_session", "\"deny\""),
+        ("mcp__famulen__notebook_read", "\"allow\""),
+        ("mcp__famulen__notebook_search", "\"deny\""),
+    ] {
+        let got = read(&dir, asked);
+        assert!(got.contains(answer), "{asked}: {got}");
+    }
+    assert!(
+        read(&dir, "got").contains("code: memo"),
+        "{}",
+        read(&dir, "got")
+    );
+    assert!(
+        read(&dir, "message").contains("records/memos/README.md"),
+        "{}",
+        read(&dir, "message")
+    );
+}
+
+/// A connection made for a test: what it is told to send is appended to the
+/// file its account names.
+const OUTBOX: &str = r#"
+format = 1
+id = "outbox"
+name = "Outbox"
+
+[account]
+out = { label = "Out" }
+
+[transport.command]
+program = "perl"
+
+[[commands]]
+name = "send_note"
+description = "Send a note to the outbox."
+args = ["-e", "open my $f, '>>', shift or die; print $f shift, qq(\\n); print qq(sent)", "--", "{account.out}", "{args.text}"]
+
+[commands.input]
+type = "object"
+required = ["text"]
+
+[commands.input.properties]
+text = { type = "string" }
+
+[[commands]]
+name = "erase"
+description = "Erase the outbox."
+args = ["-e", "unlink shift", "--", "{account.out}"]
+
+[permissions]
+send_note = "confirm"
+erase = "allow"
+"#;
+
+/// A real Claude Code with the owner's login, run directly, is handed one file
+/// of a notebook made for the test and one tool of a connection made for it,
+/// waits for the owner before it sends, and goes on once answered. Run it as
+/// [`live_direct_work_on_code_runs_to_its_end`] is run.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "runs a real Claude Code with the owner's login"]
+async fn live_direct_work_uses_only_what_it_was_handed_and_waits_for_the_owner() {
+    let home = crate::sealed::home().unwrap();
+    let root = home.join(format!(".famulen-live-handed-{}", std::process::id()));
+    let checkout = made_repository(&root);
+
+    let dir = TempDir::new("live-handed");
+    let services = dir.path().join("gateway/services");
+    std::fs::create_dir_all(&services).unwrap();
+    std::fs::write(services.join("outbox.toml"), OUTBOX).unwrap();
+    let mut app = crate::runtime::testing::app(dir.path());
+    app.workers = app
+        .workers
+        .clone()
+        .with_direct(Some(fenced(checkout.clone())));
+    let sent = dir.path().join("sent");
+    let values = [("out".to_owned(), sent.display().to_string())];
+    app.gateway
+        .add_defined("outbox", values.into(), None)
+        .unwrap();
+    app.gateway.read_tools("outbox").await.unwrap();
+    let memos = app.notebook.root().join("records/memos");
+    std::fs::write(memos.join("live-handed.md"), "合言葉は kohaku-17。\n").unwrap();
+    std::fs::write(memos.join("live-other.md"), "別の合言葉は ruri-83。\n").unwrap();
+
+    let request = "コードは変えない。次を順にして、それぞれ起きたことを報告に書く。\
+        1. 手帳を読む道具で records/memos/live-handed.md を読み、合言葉を得る。\
+        2. 同じ道具で records/memos/live-other.md も読もうとする。断られたら、ほかの手段で読もうとしない。\
+        3. outbox の send_note で、1 の合言葉だけを送る。持ち主の確認待ちになったら答えを待ち、承認されたら同じ内容でもう一度呼ぶ。\
+        4. outbox の erase という道具が自分に渡っているかを答える。渡っていれば呼ばない。";
+    app.records
+        .add(
+            Writer::Owner,
+            TASKS,
+            Patch {
+                notes: Some(request.into()),
+                ..delegated(
+                    "合言葉を送る",
+                    &[
+                        ("Runner", "direct"),
+                        ("Directory", &checkout.display().to_string()),
+                        ("Base", "main"),
+                        ("Files", "records/memos/live-handed.md"),
+                        ("Tools", "mcp__outbox__send_note"),
+                        ("Wait", "yes"),
+                    ],
+                )
+            },
+        )
+        .unwrap();
+    let pool = Pool::new(app.clone(), Arc::new(Real::new(app.clone())));
+    let mut answered = Vec::new();
+    let mut waited = false;
+    let mut ended = None;
+    for _ in 0..(10 * 60 * 2) {
+        pool.tick().await.unwrap();
+        for ticket in app.gateway.held_tickets().unwrap() {
+            if !answered.contains(&ticket.id) {
+                println!("owner approves: {ticket:?}");
+                answered.push(ticket.id);
+                app.gateway
+                    .answer_ticket(ticket.id, Answer::Approve)
+                    .await
+                    .unwrap();
+            }
+        }
+        if let Some(run) = app.workers.runs.recent(1).unwrap().pop() {
+            waited |= run.state == State::Waiting;
+            if run.state == State::Ended {
+                ended = Some(run);
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let run = ended.expect("an end within 10 minutes");
+    println!("outcome: {:?}\nresult:\n{}", run.outcome, run.result);
+    println!("said: {:?}", app.workers.sights.said(run.id));
+    println!("approved: {}, waited: {waited}", answered.len());
+    assert!(waited, "it never waited for the owner");
+    assert_eq!(run.outcome, Some(Outcome::Done), "{}", run.result);
+    assert_eq!(
+        std::fs::read_to_string(&sent).unwrap_or_default(),
+        "kohaku-17\n"
+    );
+    assert!(!run.result.contains("ruri-83"), "{}", run.result);
+    std::fs::remove_dir_all(&root).ok();
 }

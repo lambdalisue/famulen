@@ -26,14 +26,15 @@ pub const SECRETARY: &str = "secretary";
 /// Who starts and runs delegated tasks, to the gateway.
 pub const WORKER: &str = "worker";
 
-/// Who a run of work run directly is to the gateway: one of the workers,
-/// but none other, so that the owner's approval of its call is its alone.
-pub fn direct_actor(run: i64) -> String {
+/// Who a run of work Famulen runs itself is to the gateway: one of the
+/// workers, but none other, so that what it was handed and the owner's
+/// approval of its call are its alone.
+pub fn job_actor(run: i64) -> String {
     format!("{WORKER}:run-{run}")
 }
 
-/// Whether a caller is a run of work run directly.
-pub fn is_direct_actor(actor: impl AsRef<str>) -> bool {
+/// Whether a caller is a run of work Famulen runs itself.
+pub fn is_job_actor(actor: impl AsRef<str>) -> bool {
     actor
         .as_ref()
         .strip_prefix(WORKER)
@@ -315,14 +316,16 @@ impl Permissions {
             .map(|error| format!("{error:#}"))
     }
 
-    /// Decide one call of a worker's model, refused when `refuse` says why. A
+    /// Decide one call of a hired worker's model, refused when `refuse` says why. A
     /// connection's tool is judged when it reaches the gateway. What would be
     /// asked of the owner is refused: a worker cannot wait for the answer.
     pub async fn decide_worker(
         &self,
+        run: i64,
         tool_name: &str,
         input: &Value,
         refuse: Option<String>,
+        ask: Option<String>,
     ) -> anyhow::Result<Decision> {
         if refuse.is_none() && split_tool(tool_name).is_some() {
             return Ok(Decision::Allow);
@@ -330,8 +333,9 @@ impl Permissions {
         let call = Call {
             marks: Some(builtin_marks(tool_name)),
             refuse,
+            ask,
             never_ask: true,
-            ..Call::new(WORKER, "", tool_name, input.clone())
+            ..Call::new(job_actor(run), "", tool_name, input.clone())
         };
         Ok(match self.gateway.judge_assessed(&call).await? {
             Verdict::Allow { .. } => Decision::Allow,
@@ -349,13 +353,15 @@ impl Permissions {
         tool_name: &str,
         input: &Value,
         refuse: Option<String>,
+        ask: Option<String>,
     ) -> anyhow::Result<Decision> {
         let call = Call {
             marks: Some(builtin_marks(tool_name)),
             refuse: refuse.or_else(|| {
                 split_tool(tool_name).map(|_| format!("{tool_name} was not handed to you."))
             }),
-            ..Call::new(direct_actor(run), "", tool_name, input.clone())
+            ask,
+            ..Call::new(job_actor(run), "", tool_name, input.clone())
         };
         Ok(match self.gateway.judge_assessed(&call).await? {
             Verdict::Allow { .. } => Decision::Allow,
@@ -364,16 +370,47 @@ impl Permissions {
         })
     }
 
-    /// Let a run of work run directly call its built-in tools, as every
-    /// worker may; what was handed to it is judged before. Until it ends.
-    pub fn grant_direct(&self, run: i64) -> anyhow::Result<()> {
-        self.gateway
-            .grant(direct_actor(run), "", famulen_gateway::ANY)
+    /// Ask the owner whether a run may start, for the reason `why` gives. An
+    /// approval lets it start once, as `input` describes it, until `until`.
+    pub async fn decide_start(
+        &self,
+        run: i64,
+        input: &Value,
+        why: impl Into<String>,
+        until: i64,
+    ) -> anyhow::Result<Decision> {
+        const START: &str = "start_work";
+        let actor = job_actor(run);
+        self.gateway.grant(&actor, "", START)?;
+        self.gateway.expire(&actor, until)?;
+        let call = Call {
+            marks: Some(builtin_marks(START)),
+            ask: Some(why.into()),
+            ..Call::new(actor, "", START, input.clone())
+        };
+        Ok(match self.gateway.judge_assessed(&call).await? {
+            Verdict::Allow { .. } => Decision::Allow,
+            Verdict::Hold(ticket) => Decision::Held(ticket.id),
+            Verdict::Deny { reason } => Decision::Forbid(reason),
+        })
     }
 
-    /// A run of work run directly is over: it calls nothing any more.
-    pub fn revoke_direct(&self, run: i64) -> anyhow::Result<()> {
-        self.gateway.revoke(direct_actor(run))
+    /// Let a run call what it was handed, until `until` at the latest, in
+    /// seconds since the epoch. Built-in tools are granted all together:
+    /// which of them it was handed is judged before the gateway is asked.
+    pub fn grant_job(&self, run: i64, tools: &[String], until: i64) -> anyhow::Result<()> {
+        let actor = job_actor(run);
+        self.gateway.grant(&actor, "", famulen_gateway::ANY)?;
+        for (connection, tool) in tools.iter().filter_map(|t| split_tool(t)) {
+            self.gateway.grant(&actor, connection, tool)?;
+        }
+        self.gateway.expire(&actor, until)
+    }
+
+    /// A run is over: it calls nothing any more, and what it asked or was
+    /// approved goes with it. The ids of the requests it still waited on.
+    pub fn revoke_job(&self, run: i64) -> anyhow::Result<Vec<i64>> {
+        self.gateway.revoke(job_actor(run))
     }
 
     /// Use the one pass the owner's approval of `ticket` left for a built-in
@@ -393,7 +430,7 @@ impl Permissions {
         let call = Call {
             marks: Some(builtin_marks(tool_name)),
             waive: true,
-            ..Call::new(direct_actor(run), "", tool_name, input.clone())
+            ..Call::new(job_actor(run), "", tool_name, input.clone())
         };
         Ok(match self.gateway.judge(&call)? {
             Verdict::Allow { .. } => Pass::Taken,
@@ -717,14 +754,38 @@ mod tests {
         matches!(d, Decision::Held(_))
     }
 
+    #[test]
+    fn a_run_calls_only_what_it_was_handed_and_only_while_it_runs() {
+        let p = permissions();
+        let judged = |run, connection: &str, tool: &str| {
+            let call = Call::new(job_actor(run), connection, tool, json!({}));
+            !matches!(p.gateway.judge(&call).unwrap(), Verdict::Deny { .. })
+        };
+        let handed = ["Read".to_owned(), "mcp__mail__search_threads".to_owned()];
+        let later = crate::store::now() + 60;
+        p.grant_job(1, &handed, later).unwrap();
+        assert!(judged(1, "mail", "search_threads"));
+        assert!(judged(1, "", "Read"));
+        assert!(!judged(1, "mail", "get_thread"), "another tool");
+        assert!(
+            !judged(1, "calendar", "search_threads"),
+            "another connection"
+        );
+        assert!(!judged(2, "mail", "search_threads"), "another run");
+        p.revoke_job(1).unwrap();
+        assert!(!judged(1, "mail", "search_threads"), "once over");
+        p.grant_job(1, &handed, crate::store::now() - 1).unwrap();
+        assert!(!judged(1, "mail", "search_threads"), "past its time");
+    }
+
     #[tokio::test]
     async fn the_owners_approval_of_a_call_run_directly_is_used_once_and_by_that_run_alone() {
         let p = permissions();
         let call = json!({ "command": "rm -rf build" });
         for run in [1, 2] {
-            p.grant_direct(run).unwrap();
+            p.grant_job(run, &[], crate::store::now() + 60).unwrap();
         }
-        let ask = |run| p.decide_direct(run, "Bash", &call, None);
+        let ask = |run| p.decide_direct(run, "Bash", &call, None, None);
         let (Decision::Held(first), Decision::Held(second)) =
             (ask(1).await.unwrap(), ask(2).await.unwrap())
         else {
@@ -732,9 +793,9 @@ mod tests {
         };
         assert_ne!(first, second);
         let ticket = p.gateway.ticket(first).unwrap().unwrap();
-        assert_eq!(ticket.actor, direct_actor(1));
+        assert_eq!(ticket.actor, job_actor(1));
         assert!(is_worker(&ticket.actor) && !is_worker("workers") && is_worker(WORKER));
-        assert!(is_direct_actor(&ticket.actor) && !is_direct_actor(WORKER));
+        assert!(is_job_actor(&ticket.actor) && !is_job_actor(WORKER));
         p.gateway
             .answer_ticket(first, famulen_gateway::Answer::Approve)
             .await
@@ -773,7 +834,7 @@ mod tests {
         );
         p.set_scoped("owner", "", "Bash", None).unwrap();
         assert!(held(&ask(1).await.unwrap()), "no pass is left behind");
-        p.revoke_direct(1).unwrap();
+        p.revoke_job(1).unwrap();
         assert!(
             matches!(ask(1).await.unwrap(), Decision::Forbid(_)),
             "nothing once over"

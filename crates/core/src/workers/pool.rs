@@ -12,6 +12,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::dispatch::is_later;
 use super::finish::steps_for;
+use super::notebook;
 use super::order::Runner;
 use super::queue::{Approval, approval, is_delegated, ordered, queue, scopes};
 use super::runners::{Began, Looked, Real, Runners};
@@ -688,7 +689,8 @@ impl Pool {
                 .records
                 .note_task(&run.task, &note(run, outcome, again))?;
         }
-        if let Some(text) = told(run, outcome, again, task.as_ref(), &self.working(run)) {
+        if let Some(mut text) = told(run, outcome, again, task.as_ref(), &self.working(run)) {
+            text.push_str(&notebook::proposed(&self.app.store, run.id));
             let input = Input {
                 sender: Sender::System,
                 source: Source::Worker {
@@ -704,6 +706,8 @@ impl Pool {
                 self.app.inputs.notify_one();
             }
         }
+        notebook::forget_proposals(&self.app.store, run.id)?;
+        notebook::forget_outside(&self.app.store, run.id)?;
         self.app.workers.runs.ended(run.id)?;
         self.app.workers.closed.notify_one();
         self.app.journal.record(

@@ -1407,11 +1407,10 @@ while (my $line = <STDIN>) {
     next unless $line =~ /"type":"user"/;
     my $told = decode_json($line)->{message}{content};
     $got{told} = $told;
-    $got{file} = -e "handed/records/memos/README.md" ? "there" : "gone";
     $got{bash} = may("Bash", { command => "ls" });
     $got{task} = may("Task", { prompt => "x" });
     $got{web} = may("WebSearch", { query => "x" });
-    $got{read} = may("Read", { file_path => "handed/records/memos/README.md" });
+    $got{read} = may("Read", { file_path => "note.md" });
     $got{outside} = may("Read", { file_path => "/etc/hosts" });
     $got{own} = may("mcp__famulen__save_record", {});
     my $listed = ask("list", { subtype => "mcp_message", server_name => "adroit",
@@ -1536,7 +1535,6 @@ async fn an_agent_uses_only_what_it_was_handed_and_asks_nobody() {
         &[
             ("Runner", "agent"),
             ("Tools", "Read, Bash, mcp__adroit__send_to_session"),
-            ("Files", "records/memos/README.md"),
         ],
     )
     .await;
@@ -1547,7 +1545,6 @@ async fn an_agent_uses_only_what_it_was_handed_and_asks_nobody() {
     let (answer, refused) = run.result.split_once("\n\n").unwrap();
     let got: serde_json::Value = serde_json::from_str(answer).unwrap();
     assert!(got["told"].as_str().unwrap().contains("Do it."), "{got}");
-    assert_eq!(got["file"], "there");
     assert_eq!(got["read"], "allow");
     for tool in ["bash", "task", "web", "outside", "own"] {
         assert_eq!(got[tool], "deny", "{tool}: {got}");
@@ -2270,3 +2267,318 @@ async fn a_session_whose_start_was_not_told_is_found_however_many_sessions_ended
 mod again;
 #[cfg(unix)]
 mod direct;
+
+/// Sends in its first turn; makes the same call twice in a turn it is told
+/// of an approval; reports once it is told of a rejection, or was not held.
+#[cfg(unix)]
+const FAKE_CLAUDE_THAT_WAITS: &str = r#"#!/usr/bin/env perl
+use strict;
+use JSON::PP;
+$| = 1;
+my (@said, @told);
+sub ask {
+    my ($id, $request) = @_;
+    print encode_json({ type => "control_request", request_id => $id, request => $request }), "\n";
+    while (my $line = <STDIN>) {
+        my $m = decode_json($line);
+        next unless ($m->{type} // "") eq "control_response";
+        return $m->{response}{response};
+    }
+}
+my $calls = 0;
+sub send_it {
+    $calls++;
+    my $r = ask("call-$calls", { subtype => "mcp_message", server_name => "adroit",
+        message => { jsonrpc => "2.0", id => $calls, method => "tools/call",
+                     params => { name => "send_to_session", arguments => { session => "s", prompt => "p" } } } });
+    $r->{mcp_response}{result}{content}[0]{text} // "";
+}
+while (my $line = <STDIN>) {
+    next unless $line =~ /"type":"user"/;
+    my $told = decode_json($line)->{message}{content};
+    push @told, $told;
+    push @said, send_it() unless $told =~ /rejected/;
+    push @said, send_it() if $told =~ /was approved/;
+    my $result = JSON::PP->new->canonical->encode({ said => \@said, told => \@told });
+    print encode_json({ type => "result", is_error => JSON::PP::false, session_id => "w",
+        result => $result, usage => { input_tokens => 1, output_tokens => 1 } }), "\n";
+}
+"#;
+
+#[cfg(unix)]
+async fn held_by(app: &App, pool: &Pool, run: i64, after: i64) -> famulen_gateway::Ticket {
+    for _ in 0..200 {
+        pool.tick().await.unwrap();
+        let waiting = app
+            .workers
+            .runs
+            .get(run)
+            .unwrap()
+            .is_some_and(|r| r.state == State::Waiting);
+        let ticket = app
+            .gateway
+            .tickets_of(crate::permissions::job_actor(run))
+            .unwrap()
+            .into_iter()
+            .find(|t| t.id > after && t.status == "held");
+        if let Some(ticket) = ticket.filter(|_| waiting) {
+            return ticket;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("it never waited");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_agent_told_to_wait_goes_on_once_answered_and_its_approval_goes_through_once() {
+    let dir = TempDir::new("pool-agent-waits");
+    let fields = [
+        ("Runner", "agent"),
+        ("Tools", "mcp__adroit__send_to_session"),
+        ("Wait", "yes"),
+    ];
+    let (app, pool, _) = agent_app(&dir, FAKE_CLAUDE_THAT_WAITS, &fields);
+
+    let first = held_by(&app, &pool, 1, 0).await;
+    // A call that waits was not made: nothing of others' was read.
+    assert!(!crate::workers::notebook::read_outside(&app.store, 1));
+    app.gateway
+        .answer_ticket(first.id, famulen_gateway::Answer::Approve)
+        .await
+        .unwrap();
+    // The same call made again used the approval up: the next is held anew.
+    let second = held_by(&app, &pool, 1, first.id).await;
+    assert!(!app.gateway.has_pass(first.id).unwrap());
+    app.gateway
+        .answer_ticket(second.id, famulen_gateway::Answer::Reject)
+        .await
+        .unwrap();
+    for _ in 0..200 {
+        pool.tick().await.unwrap();
+        if app.workers.runs.open().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let run = app.workers.runs.get(1).unwrap().unwrap();
+    let got: serde_json::Value = serde_json::from_str(&run.result).unwrap();
+    let told: Vec<&str> = got["told"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t.as_str())
+        .collect();
+    assert_eq!(told.len(), 3, "{got}");
+    assert!(
+        told[1].contains(&format!("#{} ", first.id)) && told[1].contains("approved"),
+        "{got}"
+    );
+    assert!(told[2].contains("rejected"), "{got}");
+}
+
+const FAKE_CLAUDE_THAT_READS: &str = r#"#!/usr/bin/env perl
+use strict;
+use JSON::PP;
+$| = 1;
+sub ask {
+    my ($id, $request) = @_;
+    print encode_json({ type => "control_request", request_id => $id, request => $request }), "\n";
+    while (my $line = <STDIN>) {
+        my $m = decode_json($line);
+        next unless ($m->{type} // "") eq "control_response";
+        return $m->{response}{response};
+    }
+}
+my $calls = 0;
+sub call {
+    my ($name, $arguments) = @_;
+    $calls++;
+    my $r = ask("call-$calls", { subtype => "mcp_message", server_name => "famulen",
+        message => { jsonrpc => "2.0", id => $calls, method => "tools/call",
+                     params => { name => $name, arguments => $arguments } } });
+    $r->{mcp_response}{result}{content}[0]{text} // "";
+}
+while (my $line = <STDIN>) {
+    next unless $line =~ /"type":"user"/;
+    my %got = (
+        may => ask("use-read", { subtype => "can_use_tool",
+            tool_name => "mcp__famulen__notebook_read", input => {} })->{behavior},
+        named => call("notebook_read", { path => "records/memos/README.md" }),
+        other => call("notebook_read", { path => "records/tasks/README.md" }),
+        search => call("notebook_search", { text => "memo" }),
+        proposed => call("notebook_propose", { title => "learned", content => "a fact" }),
+    );
+    print encode_json({ type => "result", is_error => JSON::PP::false, session_id => "r",
+        result => JSON::PP->new->canonical->encode(\%got),
+        usage => { input_tokens => 1, output_tokens => 1 } }), "\n";
+}
+"#;
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_agent_reads_what_was_named_and_what_it_proposes_goes_to_the_secretary_unwritten() {
+    let fields = [
+        ("Runner", "agent"),
+        ("Notebook", "propose"),
+        ("Files", "records/memos/README.md"),
+    ];
+    let dir = TempDir::new("pool-agent-reads");
+    let (app, pool, _) = agent_app(&dir, FAKE_CLAUDE_THAT_READS, &fields);
+    approve_until_over(&app, &pool).await;
+
+    let run = app.workers.runs.get(1).unwrap().unwrap();
+    let got: serde_json::Value = serde_json::from_str(&run.result).unwrap();
+    assert_eq!(got["may"], "allow", "{got}");
+    let named =
+        std::fs::read_to_string(app.notebook.root().join("records/memos/README.md")).unwrap();
+    assert_eq!(got["named"], named.as_str());
+    assert!(got["other"].as_str().unwrap().contains("may read"), "{got}");
+    assert!(got["search"].as_str().unwrap().contains("no tool"), "{got}");
+    assert!(app.records.list(crate::records::MEMOS).unwrap().is_empty());
+    let told = app.store.recent_inputs(0, 10).unwrap();
+    assert!(
+        told.iter()
+            .any(|(i, _)| i.input.text.contains("## learned\na fact")),
+        "the proposal is told to the secretary"
+    );
+    assert!(crate::workers::notebook::proposals(&app.store, 1).is_empty());
+}
+
+#[cfg(unix)]
+async fn approve_until_over(app: &App, pool: &Pool) {
+    for _ in 0..200 {
+        pool.tick().await.unwrap();
+        for ticket in app.gateway.held_tickets().unwrap() {
+            let approve = crate::approvals::Answer::Approve;
+            app.gateway
+                .answer_ticket(ticket.id, approve.into())
+                .await
+                .unwrap();
+        }
+        if app.workers.runs.open().unwrap().is_empty() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the work did not end");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_that_mixes_the_notebook_with_others_words_starts_only_once_the_owner_approves() {
+    let script = r#"#!/bin/sh
+read -r init; read -r ask
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+"#;
+    let fields = [
+        ("Runner", "agent"),
+        ("Files", "records/memos/README.md"),
+        ("Tools", "mcp__adroit__list_sessions"),
+    ];
+    for (approve, ended) in [(true, "done"), (false, "failed")] {
+        let dir = TempDir::new(&format!("pool-agent-mixes-{approve}"));
+        let (app, pool, _) = agent_app(&dir, script, &fields);
+        pool.tick().await.unwrap();
+        pool.tick().await.unwrap();
+
+        let run = app.workers.runs.get(1).unwrap().unwrap();
+        assert_eq!(run.state, State::Asking);
+        assert!(!app.workers.dir.join("1").exists(), "nothing was started");
+        let held = app.gateway.held_tickets().unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].actor, crate::permissions::job_actor(1));
+
+        if approve {
+            approve_until_over(&app, &pool).await;
+        } else {
+            let reject = crate::approvals::Answer::Reject;
+            app.gateway
+                .answer_ticket(held[0].id, reject.into())
+                .await
+                .unwrap();
+            pool.tick().await.unwrap();
+        }
+        let run = app.workers.runs.get(1).unwrap().unwrap();
+        assert_eq!(run.result == "done", ended == "done", "{}", run.result);
+        assert!(app.workers.runs.open().unwrap().is_empty());
+    }
+}
+
+const FAKE_CLAUDE_THAT_MIXES: &str = r#"#!/usr/bin/env perl
+use strict;
+use JSON::PP;
+$| = 1;
+my $asked = 0;
+sub ask {
+    my ($request) = @_;
+    my $id = "ask-" . ++$asked;
+    print encode_json({ type => "control_request", request_id => $id, request => $request }), "\n";
+    while (my $line = <STDIN>) {
+        my $m = decode_json($line);
+        next unless ($m->{type} // "") eq "control_response";
+        return $m->{response}{response};
+    }
+}
+sub call {
+    my ($server, $name, $arguments) = @_;
+    my $r = ask({ subtype => "mcp_message", server_name => $server,
+        message => { jsonrpc => "2.0", id => $asked, method => "tools/call",
+                     params => { name => $name, arguments => $arguments } } });
+    $r->{mcp_response}{result}{content}[0]{text} // "";
+}
+while (my $line = <STDIN>) {
+    next unless $line =~ /"type":"user"/;
+    my %got;
+    $got{before} = call("famulen", "notebook_read", { path => "records/memos/README.md" });
+    call("adroit", "list_sessions", {});
+    $got{after} = call("famulen", "notebook_read", { path => "records/memos/README.md" });
+    $got{send} = call("adroit", "send_to_session", { session => "s", prompt => "p" });
+    $got{web} = ask({ subtype => "can_use_tool", tool_name => "WebSearch",
+        input => { query => "x" } })->{behavior};
+    print encode_json({ type => "result", is_error => JSON::PP::false, session_id => "m",
+        result => JSON::PP->new->canonical->encode(\%got),
+        usage => { input_tokens => 1, output_tokens => 1 } }), "\n";
+}
+"#;
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_that_read_others_words_reads_no_more_of_the_notebook_and_sends_nothing_unasked() {
+    let fields = [
+        ("Runner", "agent"),
+        ("Files", "records/memos/README.md"),
+        (
+            "Tools",
+            "WebSearch, mcp__adroit__list_sessions, mcp__adroit__send_to_session",
+        ),
+    ];
+    let dir = TempDir::new("pool-agent-after-outside");
+    let (app, pool, id) = agent_app(&dir, FAKE_CLAUDE_THAT_MIXES, &fields);
+    let task = app.records.need(TASKS, &id).unwrap();
+    crate::workers::written(&app, &task, Writer::Owner).unwrap();
+    app.gateway
+        .set_permission(
+            famulen_gateway::OWNER,
+            "conn:adroit",
+            "send_to_session",
+            Some(famulen_gateway::permissions::Permission::Allow),
+        )
+        .unwrap();
+    approve_until_over(&app, &pool).await;
+
+    let run = app.workers.runs.get(1).unwrap().unwrap();
+    let answer = run.result.split("\n\n").next().unwrap();
+    let got: serde_json::Value = serde_json::from_str(answer).unwrap();
+    assert!(
+        got["before"].as_str().unwrap().contains("code: memo"),
+        "{got}"
+    );
+    assert!(
+        got["after"].as_str().unwrap().contains("others wrote"),
+        "{got}"
+    );
+    assert!(got["send"].as_str().unwrap().contains("approval"), "{got}");
+    assert_eq!(got["web"], "deny", "{got}");
+}
