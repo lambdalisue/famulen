@@ -294,6 +294,12 @@ impl Input {
     }
 
     /// What was said, with the names of the files that came with it.
+    /// Whether these are words someone said to the secretary, and not what the
+    /// system put to it.
+    pub fn is_spoken(&self) -> bool {
+        matches!(self.source, Source::Console { .. } | Source::Slack { .. })
+    }
+
     pub fn gist(&self) -> String {
         attachments::with_names(&self.text, self.attached())
     }

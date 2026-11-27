@@ -1,6 +1,6 @@
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { faint } from "./legible";
-import { call, expectView, visit } from "./support";
+import { call, expectView, tellUnasked, visit } from "./support";
 
 // Every test begins from the list, as an owner who never chose otherwise does.
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -252,4 +252,144 @@ test("on a phone the conversations open over the page, and where it goes is told
     await page.getByRole("button", { name: "閉じる" }).click();
     await expect(page.locator(".m-peek")).toContainText("e2e 携帯の話 甲");
   }
+});
+
+for (const [device, size] of [
+  ["a wide screen", { width: 1440, height: 900 }],
+  ["a phone", { width: 390, height: 844 }],
+] as const) {
+  test(`on ${device}, what is told unasked is read as notices, and a reply to one makes it a conversation`, async ({ page, request }) => {
+    test.setTimeout(150_000);
+    await page.setViewportSize(size);
+    const phone = size.width < 800;
+    const first = `e2e ${device} 打ち合わせが 15 時に移りました`;
+    const second = `e2e ${device} 請求書が届いています`;
+    await tellUnasked(request, `${device} 一つ目`, first);
+    await tellUnasked(request, `${device} 二つ目`, second);
+
+    await visit(page, "/", /^ホーム/);
+    if (phone) await page.getByRole("button", { name: "会話を引き上げる" }).click();
+    const notices = list(page).getByTestId("notices-row");
+    await expect(notices).toContainText(second);
+    await expect(notices.getByLabel(/^未読 /)).toBeVisible();
+    // Neither is listed as a conversation of its own, and nothing told to the secretary is a title.
+    await expect(row(page, first)).toHaveCount(0);
+    await expect(list(page)).not.toContainText(`e2e-work ${device}`);
+    expect(await faint(page)).toEqual([]);
+
+    await notices.getByRole("button", { name: "通知" }).click();
+    const told = page.getByRole("log", { name: "通知" });
+    await expect(told).toContainText(first);
+    await expect(told).toContainText(second);
+    await expect(told).toContainText("起床予約");
+    await expect(told).not.toContainText(`e2e-work ${device}`);
+
+    await told.getByTestId("message").filter({ hasText: first }).getByRole("button", { name: "返信" }).click();
+    await expect(dest(page)).toContainText("返信");
+    await send(page, `e2e ${device} 了解です`);
+    await expect(said(page)).toContainText(first);
+    await expect(said(page)).toContainText(`e2e ${device} 了解です`);
+    await expect(said(page)).not.toContainText(second);
+
+    await page.getByRole("button", { name: /^話の一覧へ/ }).click();
+    await expect(row(page, first)).toBeVisible();
+    await expect(notices).toContainText(second);
+    await settled(request);
+  });
+}
+
+test("notices read back for one workgroup are dropped once another is chosen", async ({ page }) => {
+  const notice = (id: string, text: string) => ({ id, at: "1700000000", who: "SPEAKER_AIDE", text, notice: "wake" });
+  let letGo = () => {};
+  const gate = new Promise<void>((go) => (letGo = go));
+  let held = 0;
+  let chosen = "";
+  await page.route(/\/ListMessages$/, async (route) => {
+    const asked = route.request().postDataJSON() as { workgroup?: string; notices?: boolean; before?: string };
+    if (!asked.notices) return route.continue();
+    if (asked.before) {
+      held++;
+      await gate;
+      return route.fulfill({ json: { messages: [notice("50", "e2e 前の通知")] } });
+    }
+    chosen ||= asked.workgroup ?? "";
+    const first = asked.workgroup === chosen;
+    return route.fulfill({ json: { messages: [first ? notice("100", "e2e 切替前の通知") : notice("101", "e2e 切替後の通知")], more: first, readTo: first ? "100" : "101" } });
+  });
+  await page.addInitScript(() => localStorage.setItem("famulen.talk", "notices"));
+  await visit(page, "/", /^ホーム/);
+  const told = page.getByRole("log", { name: "通知" });
+  await expect(told).toContainText("e2e 切替前の通知");
+  await told.getByRole("button", { name: "前の通知も見る" }).click();
+  await expect.poll(() => held).toBeGreaterThan(0);
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "個人" }).click();
+  await expect(told).toContainText("e2e 切替後の通知");
+  const back = page.waitForResponse((r) => r.url().endsWith("/ListMessages") && !!r.request().postDataJSON()?.before);
+  letGo();
+  await (await back).finished();
+  await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  await expect(told).not.toContainText("e2e 前の通知");
+  await expect(told.getByRole("button", { name: "前の通知も見る" })).toHaveCount(0);
+  await page.getByRole("group", { name: "ワークグループ", exact: true }).getByRole("button", { name: "すべて" }).click();
+});
+
+test("notices unread beyond one page are read in before any is marked read, and none is when they cannot be", async ({ page }) => {
+  const notice = (id: number) => ({ id: String(id), at: "1700000000", who: "SPEAKER_AIDE", text: `e2e 知らせ${id}番`, notice: "wake" });
+  const asked: string[] = [];
+  let lost = false;
+  await page.route(/\/ListMessages$/, (route) => {
+    const q = route.request().postDataJSON() as { notices?: boolean; before?: string };
+    if (!q.notices) return route.continue();
+    const before = q.before ?? "0";
+    asked.push(`list ${before}`);
+    if (lost && before !== "0") return route.fulfill({ status: 500, json: { code: "internal" } });
+    const at = before === "0" ? 300 : Number(before) - 100;
+    return route.fulfill({ json: { messages: [notice(at)], more: at > 100, readTo: "199" } });
+  });
+  await page.route(/\/ReadConversation$/, (route) => {
+    const { message } = route.request().postDataJSON() as { message?: string };
+    asked.push(`read ${message}`);
+    return route.fulfill({ json: {} });
+  });
+  await page.addInitScript(() => localStorage.setItem("famulen.talk", "notices"));
+  await visit(page, "/", /^ホーム/);
+  const told = page.getByRole("log", { name: "通知" });
+  await expect.poll(() => asked).toContain("read 300");
+  const before = asked.slice(0, asked.indexOf("read 300"));
+  expect(before).toContain("list 300");
+  expect(before.filter((a) => a.startsWith("read"))).toEqual([]);
+  await expect(told).toContainText("知らせ200番");
+
+  lost = true;
+  asked.length = 0;
+  await page.reload();
+  await expect(told).toContainText("知らせ300番");
+  await expect.poll(() => asked).toContain("list 300");
+  await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  expect(asked).not.toContain("read 300");
+});
+
+test("what was being read stays in place when older notices are put above it", async ({ page }) => {
+  const notice = (id: number) => ({ id: String(id), at: "1700000000", who: "SPEAKER_AIDE", text: `e2e 前の知らせ${id}番`, notice: "wake" });
+  const span = (from: number) => Array.from({ length: 30 }, (_, i) => notice(from + i));
+  await page.route(/\/ListMessages$/, (route) => {
+    const q = route.request().postDataJSON() as { notices?: boolean; before?: string };
+    if (!q.notices) return route.continue();
+    const older = (q.before ?? "0") !== "0";
+    return route.fulfill({ json: { messages: span(older ? 71 : 101), more: !older, readTo: "130" } });
+  });
+  await page.route(/\/ReadConversation$/, (route) => route.fulfill({ json: {} }));
+  await page.addInitScript(() => localStorage.setItem("famulen.talk", "notices"));
+  await visit(page, "/", /^ホーム/);
+  const told = page.getByRole("log", { name: "通知" });
+  const first = told.getByText("e2e 前の知らせ101番");
+  await expect(told).toContainText("e2e 前の知らせ130番");
+  await told.hover();
+  await page.mouse.wheel(0, -100_000);
+  await expect.poll(() => told.evaluate((list) => list.scrollTop)).toBe(0);
+  const before = (await first.boundingBox())?.y ?? 0;
+
+  await told.getByRole("button", { name: "前の通知も見る" }).click();
+  await expect(told).toContainText("e2e 前の知らせ71番");
+  await expect.poll(async () => Math.abs(((await first.boundingBox())?.y ?? 0) - before)).toBeLessThan(60);
 });

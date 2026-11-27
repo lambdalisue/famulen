@@ -6,20 +6,14 @@ import { dateTimeText, shortTime } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { shortTokens } from "~/lib/models";
 import { offsetIn, pointOut } from "~/lib/scroll";
-import { type createTalk, go, SOURCES, titleOf } from "~/lib/talks";
+import { type createTalk, go, NOTICES, SOURCES, titleOf } from "~/lib/talks";
 
 /** What stands over what is said: which conversation it is, the way back to the others, and the way to another. */
 export function TalkHead(props: { talk: Conversation | undefined; fresh: boolean; elsewhere: number; tz: string }) {
   const c = () => props.talk;
-  const back = () => `話の一覧へ${props.elsewhere > 0 ? `（ほかに ${props.elsewhere} 件が待っている）` : ""}`;
   return (
     <header class="talk-head">
-      <button type="button" class="btn ghost small talk-back" aria-label={back()} title={back()} onClick={() => go({ kind: "list" })}>
-        <Icon svg={icons.chevronLeft} size={18} />
-        <Show when={props.elsewhere > 0}>
-          <span class="talk-count warn">{props.elsewhere}</span>
-        </Show>
-      </button>
+      <Back elsewhere={props.elsewhere} />
       <Show
         when={!props.fresh}
         fallback={
@@ -55,6 +49,32 @@ export function TalkHead(props: { talk: Conversation | undefined; fresh: boolean
           新しい話
         </Button>
       </Show>
+    </header>
+  );
+}
+
+/** The way back to the list, and whether something waits there. */
+function Back(props: { elsewhere: number }) {
+  const back = () => `話の一覧へ${props.elsewhere > 0 ? `（ほかに ${props.elsewhere} 件が待っている）` : ""}`;
+  return (
+    <button type="button" class="btn ghost small talk-back" aria-label={back()} title={back()} onClick={() => go({ kind: "list" })}>
+      <Icon svg={icons.chevronLeft} size={18} />
+      <Show when={props.elsewhere > 0}>
+        <span class="talk-count warn">{props.elsewhere}</span>
+      </Show>
+    </button>
+  );
+}
+
+/** What stands over what was told unasked. */
+export function NoticesHead(props: { elsewhere: number }) {
+  return (
+    <header class="talk-head">
+      <Back elsewhere={props.elsewhere} />
+      <div class="talk-name">
+        <b>通知</b>
+        <span class="sub">返信すると、その知らせの話になる</span>
+      </div>
     </header>
   );
 }
@@ -111,13 +131,26 @@ export default function Talk(props: {
     list.scrollTop += offsetIn(list, to);
     pointOut(to);
   };
+  // What was being read stays where it is while older notices are put above it.
+  const readBack = async () => {
+    const id = props.talk.messages()[0]?.id;
+    const placed = () => {
+      const first = list?.querySelector<HTMLElement>(`[data-id="${id}"]`);
+      return list && first ? list.scrollTop + offsetIn(list, first) : undefined;
+    };
+    const from = placed();
+    follows = false;
+    await props.talk.older();
+    const to = placed();
+    if (list && from !== undefined && to !== undefined) list.scrollTop += to - from;
+  };
   let was = { top: 0, height: 0, room: 0 };
   return (
     <div
       class="messages talk-said"
       ref={list}
       role="log"
-      aria-label="この話の発言"
+      aria-label={props.id === NOTICES ? "通知" : "この話の発言"}
       tabindex="0"
       onScroll={(e) => {
         const { scrollTop: top, scrollHeight: height, clientHeight: room } = e.currentTarget;
@@ -130,6 +163,11 @@ export default function Talk(props: {
         <Show when={props.talk.failed()}>{(error) => <ErrorState error={error()} onRetry={() => void props.talk.retry()} />}</Show>
         <Show when={!props.talk.there() && props.talk.messages().length === 0}>
           <Loading />
+        </Show>
+        <Show when={props.talk.more()}>
+          <Button small onClick={readBack}>
+            前の通知も見る
+          </Button>
         </Show>
         <For each={props.talk.messages()}>
           {(m) => (

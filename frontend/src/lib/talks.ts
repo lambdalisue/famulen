@@ -1,14 +1,14 @@
 import { createAsync, query, revalidate } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
-import { type Conversation, ConversationSchema, type ConsoleMessage, ConsoleMessageSchema } from "~/gen/famulen/v1/console_pb";
+import { type Conversation, type ConversationNotices, ConversationSchema, type ConsoleMessage, ConsoleMessageSchema } from "~/gen/famulen/v1/console_pb";
 import { api } from "./api";
 import { merged } from "./conversation";
 import { pushed, working } from "./events";
 import { createSame } from "./kept";
 import { keep, kept } from "./storage";
 
-/** What the conversation column shows: every conversation, one, the beginning of another, or all that was said in one line. */
-export type Place = { kind: "list" } | { kind: "new" } | { kind: "all" } | { kind: "talk"; id: bigint };
+/** What the conversation column shows: every conversation, one, what was told unasked, the beginning of another conversation, or all that was said in one line. */
+export type Place = { kind: "list" } | { kind: "new" } | { kind: "all" } | { kind: "notices" } | { kind: "talk"; id: bigint };
 
 const KEY = "famulen.talk";
 
@@ -33,20 +33,20 @@ export const openTalk = (id: bigint) => go(id ? { kind: "talk", id } : { kind: "
 /** Put back what was shown when the page was left. Only in the browser, once the page has been taken over. */
 export function restorePlace() {
   const was = kept(KEY);
-  if (was === "all") go({ kind: "all" });
+  if (was === "all" || was === "notices") go({ kind: was });
   else if (was && /^\d+$/.test(was)) openTalk(BigInt(was));
 }
 
 const PAGE = 30;
 
-type Read = { workgroup: string; also: bigint; talks: Conversation[]; more: boolean };
+type Read = { workgroup: string; also: bigint; talks: Conversation[]; more: boolean; notices: ConversationNotices | undefined };
 
 /** How long changes are gathered before the list is read again. */
 const GATHER = 250;
 
 const talksQuery = query(async (workgroup: string, limit: number, also: string): Promise<Read> => {
-  const { conversations, more } = await api.console.listConversations({ workgroup, limit, also: BigInt(also) });
-  return { workgroup, also: BigInt(also), talks: conversations, more };
+  const { conversations, more, notices } = await api.console.listConversations({ workgroup, limit, also: BigInt(also) });
+  return { workgroup, also: BigInt(also), talks: conversations, more, notices };
 }, "conversations");
 
 /** The secretary's conversations, the one used last first, with `also` however long ago it was used. They are read again as something is said or done in one. */
@@ -84,26 +84,35 @@ export function createTalks(workgroup: () => string, also: () => bigint | undefi
     more: () => now()?.more ?? false,
     further: () => setLimit((l) => l + PAGE),
     of: (id: bigint) => talks().find((c) => c.id === id),
+    /** What was told unasked: how much of it is unread, and the newest. */
+    notices: () => now()?.notices,
     failed,
     retry: again,
   };
 }
 
-type Said = { workgroup: string; id: bigint; opening: number; readTo: bigint; messages: ConsoleMessage[]; error?: unknown };
+/** The id under which what was told unasked is read, as if it were one conversation. */
+export const NOTICES = 0n;
+
+type Said = { workgroup: string; id: bigint; opening: number; readTo: bigint; more: boolean; messages: ConsoleMessage[]; error?: unknown };
 
 // The id is given as text, as what a query is keyed by cannot hold a bigint.
 const saidQuery = query(async (workgroup: string, id: string, opening: number): Promise<Said> => {
   const conversation = BigInt(id);
-  const { messages, readTo } = await api.console.listMessages({ workgroup, conversation });
-  return { workgroup, id: conversation, opening, readTo, messages };
+  const notices = conversation === NOTICES;
+  const { messages, readTo, more } = await api.console.listMessages(notices ? { workgroup, notices } : { workgroup, conversation });
+  return { workgroup, id: conversation, opening, readTo, more: notices && more, messages };
 }, "conversation");
 
-/** What is said in one conversation, oldest first, with what comes in as it is said. */
+/** What is said in one conversation, or what was told unasked, oldest first, with what comes in as it is said. */
 export function createTalk(workgroup: () => string, id: () => bigint | undefined) {
   const [came, setCame] = createSignal<ConsoleMessage[]>([]);
-  // Each opening reads anew, as what came meanwhile was not kept.
+  // Each opening reads anew, as what came meanwhile was not kept. Another
+  // workgroup is another opening: what was asked for under the last is not of it.
   let openings = 0;
+  const chosen = createMemo(workgroup);
   const opened = createMemo(() => {
+    chosen();
     const which = id();
     return which === undefined ? undefined : { id: which, opening: ++openings };
   });
@@ -113,7 +122,7 @@ export function createTalk(workgroup: () => string, id: () => bigint | undefined
     if (!now) return undefined;
     return saidQuery(of, now.id.toString(), now.opening).catch((error: unknown) => {
       const had = before?.id === now.id && before.workgroup === of ? before : undefined;
-      return { workgroup: of, ...now, readTo: had?.readTo ?? 0n, messages: had?.messages ?? [], error };
+      return { workgroup: of, ...now, readTo: had?.readTo ?? 0n, more: had?.more ?? false, messages: had?.messages ?? [], error };
     });
   });
   createEffect(on([workgroup, id], () => setCame([]), { defer: true }));
@@ -124,7 +133,7 @@ export function createTalk(workgroup: () => string, id: () => bigint | undefined
       (p) => {
         const which = id();
         if (which === undefined || !p || p.of !== workgroup()) return;
-        if (p.m.conversation === which) add(p.m);
+        if (which === NOTICES ? p.m.notice : p.m.conversation === which) add(p.m);
         // One pushed before it was known which conversation it is of.
         else if (!p.m.conversation) void revalidate("conversation");
       },
@@ -136,11 +145,43 @@ export function createTalk(workgroup: () => string, id: () => bigint | undefined
     return r && r.opening === opened()?.opening && r.workgroup === workgroup() ? r : undefined;
   });
   const messages = createSame(ConsoleMessageSchema, () => merged(now()?.messages ?? [], came()), (m) => m.id);
+  /** Whether more remain before what an opening has read back to. */
+  const [back, setBack] = createSignal<{ opening: number; more: boolean }>();
+  const more = () => (back() && back()?.opening === opened()?.opening ? back()?.more : now()?.more) ?? false;
+  const older = async () => {
+    const at = opened();
+    const first = messages()[0];
+    if (!at || !first) return;
+    const page = await api.console.listMessages({ workgroup: workgroup(), notices: true, before: first.id });
+    if (opened() !== at) return;
+    setCame((all) => merged(page.messages, all));
+    setBack({ opening: at.opening, more: page.more });
+  };
+  // All that is unread is read in before any of it counts as being on the screen.
+  const short = () => {
+    const r = now();
+    const first = messages()[0];
+    return !!r && r.id === NOTICES && !!more() && !!first && first.id > r.readTo + 1n;
+  };
+  const [lost, setLost] = createSignal<number>();
+  const next = createMemo(() => (short() ? messages()[0]?.id : undefined));
+  createEffect(
+    on(next, (first) => {
+      const at = opened()?.opening;
+      if (first !== undefined) older().catch(() => setLost(at));
+    }),
+  );
   return {
     messages,
+    /** Whether older notices remain; a conversation is read whole. */
+    more,
+    older,
     /** Show what was just sent, unless it was pushed already. */
     sent: add,
-    there: () => now() !== undefined,
+    /** Whether it was read, with all that is unread unless that could not be had. */
+    there: () => now() !== undefined && (!short() || lost() === opened()?.opening),
+    /** Whether what is held may be marked as read. */
+    whole: () => now() !== undefined && !now()?.error && !short(),
     /** Which opening it is, and how far the owner had read as it began. */
     opening: () => opened()?.opening,
     readTo: () => now()?.readTo,
@@ -160,4 +201,4 @@ export const SOURCES: { [source: string]: string } = {
   worker: "委託の終わり",
 };
 
-export const titleOf = (c: Conversation | undefined) => c?.title || "（題のない話）";
+export const titleOf = (c: Conversation | undefined) => c?.title || (c && SOURCES[c.source] ? `${SOURCES[c.source]}の知らせ` : "（題のない話）");

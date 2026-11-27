@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import AideIcon from "~/components/AideIcon";
-import { Button, EmptyState, ErrorState, Keyed, Loading, Tag } from "~/components/ui";
-import { type Conversation, Speaker } from "~/gen/famulen/v1/console_pb";
+import { Button, EmptyState, ErrorState, Icon, Keyed, Loading, Tag } from "~/components/ui";
+import { type Conversation, type ConversationNotices, Speaker } from "~/gen/famulen/v1/console_pb";
 import { clock, dayIn, shortTime, today } from "~/lib/dates";
 import * as icons from "~/lib/icons";
 import { excerptOf } from "~/lib/records";
@@ -68,6 +68,33 @@ function Row(props: { talk: Conversation; waits: Waits; aide: string; tz: string
   );
 }
 
+/** The one way into what was told unasked, however much of it there is. */
+function NoticesRow(props: { notices: ConversationNotices; tz: string; today: string }) {
+  const unread = () => props.notices.unread;
+  return (
+    <ul class="list">
+      <li class="item picks talk-row" classList={{ unread: unread() > 0 }} data-testid="notices-row">
+        <div class="item-main">
+          <div class="talk-line">
+            <button type="button" class="item-title item-pick talk-title" onClick={() => go({ kind: "notices" })}>
+              <Icon svg={icons.bell} size={14} /> 通知
+            </button>
+            <span class="talk-at">{at(props.notices.last?.at ?? 0n, props.tz, props.today)}</span>
+          </div>
+          <div class="talk-line">
+            <span class="talk-last">{excerptOf(props.notices.last?.text ?? "", 80)}</span>
+            <Show when={unread() > 0}>
+              <span class="talk-count" aria-label={`未読 ${unread()}`}>
+                {unread()}
+              </span>
+            </Show>
+          </div>
+        </div>
+      </li>
+    </ul>
+  );
+}
+
 /** A time of today, or the day before it. */
 const at = (when: bigint, tz: string, now: string) => (dayIn(when, tz) === now ? clock(when, tz) : shortTime(when, tz));
 
@@ -86,6 +113,14 @@ export default function TalkList(props: { talks: ReturnType<typeof createTalks>;
     busy: (c) => c.running || c.waiting,
   };
   const now = () => today(props.tz);
+  /** The notices, where a list narrowed to `k` holds them. */
+  const noticesIn = (k: Kept) => {
+    const told = props.talks.notices();
+    return told?.last && (k === "" || (k === "unread" && told.unread > 0)) ? told : undefined;
+  };
+  const notices = () => noticesIn(kept());
+  /** The rows a list narrowed to `k` shows. */
+  const rows = (k: Kept) => all().filter(is[k]).length + (noticesIn(k) ? 1 : 0);
   const FILTERS: [Kept, string][] = [
     ["", "すべて"],
     ["ask", "答え待ち"],
@@ -119,14 +154,15 @@ export default function TalkList(props: { talks: ReturnType<typeof createTalks>;
         <For each={FILTERS}>
           {([k, name]) => (
             <button type="button" class="tag label" aria-pressed={kept() === k} onClick={() => setKept(k)}>
-              {name} {all().filter(is[k]).length}
+              {name} {rows(k)}
             </button>
           )}
         </For>
       </div>
       <Show when={props.talks.failed()}>{(error) => <ErrorState error={error()} onRetry={props.talks.retry} />}</Show>
       <Show when={props.talks.there()} fallback={<Show when={!props.talks.failed()}><Loading /></Show>}>
-        <Show when={GROUPS.every((g) => groups()[g].length === 0)}>
+        <Show when={notices()}>{(told) => <NoticesRow notices={told()} tz={props.tz} today={now()} />}</Show>
+        <Show when={GROUPS.every((g) => groups()[g].length === 0) && !(kept() === "unread" && notices())}>
           <EmptyState>{all().length > 0 ? "当てはまる話はない" : `${props.aide} に頼みごとを書くと、話が始まる。右の画面で見ているものも一緒に渡る。`}</EmptyState>
         </Show>
         <For each={GROUPS}>

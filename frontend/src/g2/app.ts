@@ -6,7 +6,7 @@
  * tap goes back, and on the conversation asks whether to leave.
  */
 
-import { ApprovalAnswer, type Approval, type ApprovalGiven, type ConsoleEvent, type ConsoleMessage, type Conversation, Speaker } from "~/gen/famulen/v1/console_pb";
+import { ApprovalAnswer, type Approval, type ApprovalGiven, type ConsoleEvent, type ConsoleMessage, type Conversation, type ConversationNotices, Speaker } from "~/gen/famulen/v1/console_pb";
 import type { CalendarEvent } from "~/gen/famulen/v1/calendar_pb";
 import type { Record as Rec } from "~/gen/famulen/v1/records_pb";
 import { api } from "~/lib/api";
@@ -41,13 +41,18 @@ import { clip, EM, linesIn, measure, pad, wrap } from "./text";
 import { Listening, NOTHING_MS, RATE } from "./voice";
 
 const ALL = "all";
+/** What was told unasked is read as one conversation under this id. */
+const NOTICES = 0n;
 /** How long the dots wait for the secretary when nothing tells how long it works, as the console waits. */
 const THINKING_SECONDS = 30 * 60;
 /** Where what the owner says on the glasses tells the secretary it was said. */
 const VIEW = "Even G2";
 
+/** Where in the talk the owner is: pages are put before and after it as what is held changes. */
+type Place = { id: bigint; within: number };
+
 type Screen =
-  | { name: "talk"; page: number | undefined }
+  | { name: "talk"; place: Place | undefined }
   | { name: "menu"; selected: number }
   | { name: "talks"; selected: number }
   | { name: "today"; selected: number }
@@ -57,13 +62,14 @@ type Screen =
   | { name: "confirm"; id: bigint; selected: number; page: number; replies: string[] }
   | { name: "memos"; selected: number }
   | { name: "memo"; id: string; page: number }
-  | { name: "listen"; about?: string; heard: string; back: Screen };
+  | { name: "listen"; about?: string; replyTo?: bigint; heard: string; back: Screen };
 
 type Data = {
   aide: string;
   tz: string;
   workgroup: string;
   talks: Conversation[];
+  notices: ConversationNotices | undefined;
   messages: ConsoleMessage[];
   approvals: Approval[];
   events: CalendarEvent[];
@@ -123,9 +129,12 @@ export class G2 {
   #glasses: Glasses;
   #painter: Painter;
   #draw: Draw;
-  #screen: Screen = { name: "talk", page: undefined };
-  #data: Data = { aide: "秘書", tz: "Asia/Tokyo", workgroup: "すべて", talks: [], messages: [], approvals: [], events: [], tasks: [], memos: [] };
+  #screen: Screen = { name: "talk", place: undefined };
+  #data: Data = { aide: "秘書", tz: "Asia/Tokyo", workgroup: "すべて", talks: [], notices: undefined, messages: [], approvals: [], events: [], tasks: [], memos: [] };
   #talk: bigint | undefined;
+  /** Whose messages are held, and whether notices remain before the oldest of them. */
+  #held: bigint | undefined;
+  #more = false;
   /** The next thing said begins a conversation. */
   #fresh = false;
   #thinking = false;
@@ -194,7 +203,7 @@ export class G2 {
     const [persona, workgroups, talks, inbox] = await Promise.all([
       api.settings.getPersona({}),
       api.workgroups.listWorkgroups({}),
-      api.console.listConversations({ workgroup: ALL, limit: 12, also: this.#talk ?? 0n }),
+      api.console.listConversations({ workgroup: ALL, limit: 12, also: this.#talk ?? NOTICES }),
       api.console.getInbox({}),
     ]);
     const tz = persona.timezone || "Asia/Tokyo";
@@ -204,13 +213,14 @@ export class G2 {
       api.records.listRecords({ kind: "tasks", workgroup: ALL }),
       api.records.listRecords({ kind: "memos", workgroup: ALL }),
     ]);
-    if (this.#talk === undefined && !this.#fresh) this.#talk = talks.conversations[0]?.id;
+    if (this.#talk === undefined && !this.#fresh) this.#talk = talks.conversations[0]?.id ?? (talks.notices?.last ? NOTICES : undefined);
     if (asked !== this.#loads) return;
     this.#data = {
       aide: persona.name || "秘書",
       tz,
       workgroup: workgroups.workgroups.find((w) => w.id === ALL)?.name ?? "すべて",
       talks: talks.conversations,
+      notices: talks.notices,
       messages: this.#data.messages,
       approvals: inbox.approvals.filter((a) => a.status === "pending"),
       events: events.events.filter((e) => !e.allDay || localDate(e.start) <= day),
@@ -221,18 +231,43 @@ export class G2 {
   }
 
   async #loadMessages() {
-    if (this.#talk === undefined) {
+    const talk = this.#talk;
+    if (talk === undefined) {
       this.#data.messages = [];
+      this.#held = undefined;
       return;
     }
-    const talk = this.#talk;
-    const got = await api.console.listMessages({ workgroup: ALL, conversation: talk });
+    const notices = talk === NOTICES;
+    const got = await api.console.listMessages(notices ? { workgroup: ALL, notices } : { workgroup: ALL, conversation: talk });
+    let { messages, more } = got;
+    // All that is unread is read in before any of it is marked read, and what was gone back to stays.
+    const short = () => {
+      const first = messages[0];
+      const held = this.#held === talk ? this.#data.messages[0]?.id : undefined;
+      return notices && more && !!first && (first.id > got.readTo + 1n || (held !== undefined && first.id > held));
+    };
+    while (this.#talk === talk && short()) {
+      const page = await api.console.listMessages({ workgroup: ALL, notices, before: messages[0].id });
+      messages = [...page.messages, ...messages];
+      more = page.more;
+    }
     // The owner may have opened another conversation meanwhile.
     if (this.#talk !== talk) return;
-    this.#data.messages = got.messages;
+    this.#data.messages = messages;
+    this.#held = talk;
+    this.#more = notices && more;
     // What the glasses open on is read, as the console marks a conversation it opens.
-    const last = got.messages.at(-1);
-    if (last && last.id > got.readTo) await api.console.readConversation({ conversation: talk, message: last.id }).catch(() => undefined);
+    const last = messages.at(-1);
+    if (last && last.id > got.readTo) await api.console.readConversation({ conversation: talk, message: last.id, workgroup: ALL }).catch(() => undefined);
+  }
+
+  async #older() {
+    const first = this.#data.messages[0];
+    if (!first) return;
+    const page = await api.console.listMessages({ workgroup: ALL, notices: true, before: first.id });
+    if (this.#held !== NOTICES || this.#data.messages[0]?.id !== first.id) return;
+    this.#data.messages = [...page.messages, ...this.#data.messages];
+    this.#more = page.more;
   }
 
   /** Keep up with what the secretary says and what changes, until the page goes. */
@@ -260,9 +295,10 @@ export class G2 {
     if (event.case === "message") {
       const m = event.value;
       // With no conversation yet, the first one begun is the one to show, unless the owner asked for a new one.
-      if (this.#talk === undefined && !this.#fresh && m.conversation) this.#talk = m.conversation;
-      if (m.who === Speaker.AIDE && m.conversation === this.#talk) this.#think(false, 0);
-      if (m.conversation === this.#talk) await this.#loadMessages();
+      if (this.#talk === undefined && !this.#fresh && m.conversation) this.#talk = m.notice ? NOTICES : m.conversation;
+      const here = this.#talk === NOTICES ? m.notice !== "" : m.conversation === this.#talk;
+      if (m.who === Speaker.AIDE && here) this.#think(false, 0);
+      if (here) await this.#loadMessages();
     } else if (event.case === "working") {
       // Only what was said from here is waited on; the console tells how long it lasts unless told again.
       if (this.#awaiting) this.#think(event.value.text !== "", event.value.seconds);
@@ -340,31 +376,55 @@ export class G2 {
     return e.title || "予定あり";
   }
 
-  /** The conversation, broken into the pages the glasses show, oldest first, and where the newest exchange begins. */
-  #talkPages(): { all: Line[][]; newest: number } {
+  /**
+   * The conversation, broken into the pages the glasses show, oldest first, where
+   * the newest exchange begins, and the message each page's exchange begins with.
+   */
+  /** The page of the talk on screen; the newest one unless the owner went elsewhere. */
+  #at(place: Place | undefined, { of, newest }: { of: (ConsoleMessage | undefined)[]; newest: number }): number {
+    const first = place ? of.findIndex((m) => m?.id === place.id) : -1;
+    if (!place || first < 0) return newest;
+    return Math.min(first + place.within, of.findLastIndex((m) => m?.id === place.id));
+  }
+
+  #placeOf(at: number, { of }: { of: (ConsoleMessage | undefined)[] }): Place | undefined {
+    const id = of[at]?.id;
+    return id === undefined ? undefined : { id, within: at - of.findIndex((m) => m?.id === id) };
+  }
+
+  #talkPages(): {
+
+ all: Line[][]; newest: number; of: (ConsoleMessage | undefined)[] } {
     const exchanges: Line[][] = [];
+    const first: ConsoleMessage[] = [];
     for (const m of this.#data.messages) {
       const level: Level = m.who === Speaker.OWNER ? 2 : 4;
       const lines = wrap(plainText(m.text), TALK_WIDTH).map((text) => ({ text, level }));
-      if (m.who === Speaker.OWNER || exchanges.length === 0) exchanges.push(lines);
-      else exchanges[exchanges.length - 1].push({ text: "", level: 1 }, ...lines);
+      if (m.who === Speaker.OWNER || this.#talk === NOTICES || exchanges.length === 0) {
+        exchanges.push(lines);
+        first.push(m);
+      } else exchanges[exchanges.length - 1].push({ text: "", level: 1 }, ...lines);
     }
     if (exchanges.length === 0) exchanges.push([]);
     const last = exchanges[exchanges.length - 1];
     const next = this.#nextEvent();
     if (next) last.unshift({ text: clip(`次 ${hm(next.start)} ${this.#eventTitle(next)}（${this.#untilText(next)}）`, TALK_WIDTH), level: 2 });
     for (const a of this.#shownApprovals()) {
-      last.push({ text: "", level: 1 }, ...wrap(approvalText(a), TALK_WIDTH).map((text) => ({ text, level: 3 as Level })));
+      // On the notices, each is under what asked for it.
+      const under = this.#talk === NOTICES ? exchanges[first.findLastIndex((m) => m.conversation === a.conversation)] : last;
+      under.push({ text: "", level: 1 }, ...wrap(approvalText(a), TALK_WIDTH).map((text) => ({ text, level: 3 as Level })));
     }
     if (this.#thinking) last.push({ text: dots(this.#step), level: 4 });
     if (this.#notice) last.push({ text: "", level: 1 }, ...wrap(this.#notice, TALK_WIDTH).map((text) => ({ text, level: 2 as Level })));
-    const before = exchanges.slice(0, -1).flatMap((lines) => pages(lines, TALK_LINES));
-    return { all: [...before, ...pages(last, TALK_LINES)], newest: before.length };
+    const paged = exchanges.map((lines) => pages(lines, TALK_LINES));
+    const all = paged.flat();
+    return { all, newest: all.length - paged[paged.length - 1].length, of: paged.flatMap((p, i) => p.map(() => first[i])) };
   }
 
   /** Approvals asked in the conversation on screen. */
   #shownApprovals(): Approval[] {
-    return this.#data.approvals.filter((a) => a.conversation !== 0n && a.conversation === this.#talk);
+    const told = this.#talk === NOTICES ? new Set(this.#data.messages.map((m) => m.conversation)) : new Set([this.#talk]);
+    return this.#data.approvals.filter((a) => a.conversation !== 0n && told.has(a.conversation));
   }
 
   #page(): Page {
@@ -373,14 +433,15 @@ export class G2 {
     const art = this.#draw;
     switch (s.name) {
       case "talk": {
-        const { all, newest } = this.#talkPages();
-        const at = Math.min(s.page ?? newest, all.length - 1);
+        const pages = this.#talkPages();
+        const { all } = pages;
+        const at = this.#at(s.place, pages);
         return talkScreen(top, { lines: all[at], at, of: all.length }, art);
       }
       case "menu":
         return menuScreen(top, this.#menuItems(), s.selected, this.#card(MENU[s.selected].screen), art);
       case "talks": {
-        const rows: Row[] = [{ text: "新しい話", level: 2 }, ...this.#data.talks.map((c) => this.#talkRow(c))];
+        const rows: Row[] = [{ text: "新しい話", level: 2 }, ...this.#noticeRows(), ...this.#data.talks.map((c) => this.#talkRow(c))];
         return listScreen(top, { icon: "talk", title: "会話", note: `${this.#data.talks.length} 件` }, rows, s.selected, [], art);
       }
       case "today": {
@@ -451,7 +512,7 @@ export class G2 {
 
   /** Where a screen whose item is gone goes instead. */
   #back(): Page {
-    this.#screen = { name: "talk", page: undefined };
+    this.#screen = { name: "talk", place: undefined };
     return this.#page();
   }
 
@@ -461,6 +522,18 @@ export class G2 {
       label: m.label,
       count: m.screen === "tasks" ? this.#ownTasks().length : m.screen === "confirms" ? this.#data.approvals.length : undefined,
     }));
+  }
+
+  #noticeRows(): Row[] {
+    const told = this.#data.notices;
+    if (!told?.last) return [];
+    const unread = told.unread ? `  ${told.unread}` : "";
+    return [{ text: `通知${unread}`, level: this.#talk === NOTICES ? 3 : 2 }];
+  }
+
+  /** What the conversation list offers below 新しい話, in the order shown. */
+  #choices(): bigint[] {
+    return [...this.#noticeRows().map(() => NOTICES), ...this.#data.talks.map((c) => c.id)];
   }
 
   #talkRow(c: Conversation): Row {
@@ -555,7 +628,7 @@ export class G2 {
       case "menu":
         return MENU.length;
       case "talks":
-        return this.#data.talks.length + 1;
+        return this.#choices().length + 1;
       case "today":
         return this.#data.events.length;
       case "tasks":
@@ -606,7 +679,7 @@ export class G2 {
     const s = this.#screen;
     switch (s.name) {
       case "talk":
-        if (s.page !== undefined) this.#screen = { name: "talk", page: undefined };
+        if (s.place) this.#screen = { name: "talk", place: undefined };
         else return this.#glasses.leave();
         break;
       case "task":
@@ -619,7 +692,7 @@ export class G2 {
         this.#screen = { name: "memos", selected: Math.max(0, this.#data.memos.findIndex((m) => m.id === s.id)) };
         break;
       default:
-        this.#screen = { name: "talk", page: undefined };
+        this.#screen = { name: "talk", place: undefined };
     }
     return this.#paint();
   }
@@ -627,9 +700,18 @@ export class G2 {
   async #move(by: -1 | 1) {
     const s = this.#screen;
     if (s.name === "talk") {
-      const { all, newest } = this.#talkPages();
-      const next = Math.min(Math.max(0, (s.page ?? newest) + by), all.length - 1);
-      this.#screen = { name: "talk", page: next === newest ? undefined : next };
+      let pages = this.#talkPages();
+      let at = this.#at(s.place, pages);
+      // Going up past the oldest page held reads in what was told before it.
+      if (by < 0 && at === 0 && this.#talk === NOTICES && this.#more) {
+        const here = this.#placeOf(at, pages);
+        await this.#older();
+        if (this.#screen !== s) return;
+        pages = this.#talkPages();
+        at = this.#at(here, pages);
+      }
+      const next = Math.min(Math.max(0, at + by), pages.all.length - 1);
+      this.#screen = { name: "talk", place: next === pages.newest ? undefined : this.#placeOf(next, pages) };
     } else if (s.name === "memo") {
       const r = this.#data.memos.find((x) => x.id === s.id);
       const last = r ? memoPages(r).length - 1 : 0;
@@ -652,8 +734,11 @@ export class G2 {
   async #tap() {
     const s = this.#screen;
     switch (s.name) {
-      case "talk":
-        return this.#listen(undefined);
+      case "talk": {
+        const pages = this.#talkPages();
+        // On the notices, what is said answers the one on screen.
+        return this.#listen(undefined, this.#talk === NOTICES ? pages.of[this.#at(s.place, pages)]?.id : undefined);
+      }
       case "menu": {
         const to = MENU[s.selected].screen;
         const next = this.#nextEvent();
@@ -671,10 +756,10 @@ export class G2 {
           this.#talk = undefined;
         } else {
           this.#fresh = false;
-          this.#talk = this.#data.talks[s.selected - 1]?.id;
+          this.#talk = this.#choices()[s.selected - 1];
         }
         await this.#loadMessages();
-        this.#screen = { name: "talk", page: undefined };
+        this.#screen = { name: "talk", place: undefined };
         return this.#paint();
       }
       case "today": {
@@ -738,13 +823,13 @@ export class G2 {
       await api.console.answerApproval({ id: a.id, answer });
     }
     await this.#load();
-    this.#screen = this.#data.approvals.length ? { name: "confirms", selected: 0 } : { name: "talk", page: undefined };
+    this.#screen = this.#data.approvals.length ? { name: "confirms", selected: 0 } : { name: "talk", place: undefined };
     return this.#paint();
   }
 
-  async #listen(about: string | undefined) {
+  async #listen(about: string | undefined, replyTo?: bigint) {
     const back = this.#screen;
-    this.#screen = { name: "listen", about, heard: "", back };
+    this.#screen = { name: "listen", about, replyTo, heard: "", back };
     const listening = new Listening();
     this.#listening = listening;
     this.#hearing = true;
@@ -819,20 +904,22 @@ export class G2 {
         this.#screen = s.back;
         return this.#paint();
       }
-      this.#screen = { name: "talk", page: undefined };
-      await this.#say(text, s.about, s.back);
+      this.#screen = { name: "talk", place: undefined };
+      await this.#say(text, s.about, s.back, s.replyTo);
     } catch (e) {
       this.#hearing = false;
       this.#think(false, 0);
-      this.#screen = { name: "talk", page: undefined };
+      this.#screen = { name: "talk", place: undefined };
       this.#fail(e);
     } finally {
       this.#sending = false;
     }
   }
 
-  async #say(text: string, about: string | undefined, from: Screen) {
-    const shown = this.#shownApprovals();
+  async #say(text: string, about: string | undefined, from: Screen, replyTo = 0n) {
+    // On the notices, a spoken yes reaches only what the one replied to asked.
+    const told = this.#data.messages.find((m) => m.id === replyTo)?.conversation;
+    const shown = this.#shownApprovals().filter((a) => this.#talk !== NOTICES || a.conversation === told);
     // An approval that asks questions is answered by choosing, from the menu's 確認.
     const answer = !about && shown.length === 1 && shown[0].questions.length === 0 ? spokenAnswer(text) : undefined;
     // The words go to the secretary whether or not the answer could be given.
@@ -845,8 +932,9 @@ export class G2 {
       workgroup: ALL,
       view: from.name === "talk" ? VIEW : `${VIEW} · ${screenWord(from)}`,
       selection: about ?? "",
-      conversation: this.#talk ?? 0n,
-      newConversation: this.#talk === undefined,
+      replyTo,
+      conversation: this.#talk ?? NOTICES,
+      newConversation: !replyTo && !this.#talk,
       device: "g2",
     });
     this.#fresh = false;

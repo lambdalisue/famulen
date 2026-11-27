@@ -11,6 +11,7 @@ import * as icons from "~/lib/icons";
 import { hasLinks } from "~/lib/links";
 import { excerptOf } from "~/lib/records";
 import { tabNamed } from "~/lib/tabs";
+import { SOURCES } from "~/lib/talks";
 
 /** A line of the message that is replied to. */
 export function Quote(props: { of: Pick<RepliedTo, "who" | "text">; aide: string }) {
@@ -46,6 +47,7 @@ export default function Message(props: {
         </Show>
         <span>
           <b>{owner() ? "あなた" : props.aide}</b> · {shortTime(props.m.at, props.tz)}
+          {SOURCES[props.m.notice] ? ` · ${SOURCES[props.m.notice]}` : ""}
           {props.m.origin ? ` · ${props.m.origin}` : ""}
           {props.m.about ? ` · ${props.m.about}` : ""}
         </span>

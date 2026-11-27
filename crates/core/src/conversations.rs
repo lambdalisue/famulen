@@ -34,6 +34,25 @@ const LOOKED_AT: usize = 200;
 
 /// How often what comes back may have come back before.
 const MOST_STEPS: usize = 100;
+/// What stands for the notices where a conversation's id is asked for.
+pub const NOTICES: i64 = 0;
+// Of a conversation `c`: whether an input of it is something the owner said.
+const SPOKEN: &str = "EXISTS (SELECT 1 FROM conversation_keys k
+    JOIN inputs i ON i.id = CAST(substr(k.key, 7) AS INTEGER)
+    WHERE k.conversation = c.id AND k.key LIKE 'input:%'
+        AND json_extract(i.body, '$.source.kind') IN ('console', 'slack'))";
+
+/// What the secretary said, each with the conversation `c` it was said in.
+const SAID_IN: &str = "console_messages m
+    LEFT JOIN conversation_keys own ON own.key = 'message:' || m.id
+    LEFT JOIN conversation_keys turn ON turn.key = 'input:' || json_extract(m.meta, '$.input')
+    JOIN conversations c ON c.id = coalesce(own.conversation, turn.conversation)";
+
+/// The conversation `c` was begun by something other than what the owner said.
+const UNPROMPTED: &str = "(SELECT json_extract(i.body, '$.source.kind') FROM conversation_keys k
+    JOIN inputs i ON i.id = CAST(substr(k.key, 7) AS INTEGER)
+    WHERE k.conversation = c.id AND k.key LIKE 'input:%'
+    ORDER BY i.id LIMIT 1) NOT IN ('console', 'slack')";
 
 struct Bound {
     messages: usize,
@@ -465,9 +484,8 @@ impl Conversations {
             .optional()?)
     }
 
-    /// The conversations used last, those used before `before` when it is
-    /// given: the ones begun in what `workgroup` shows, every one when it is
-    /// empty.
+    /// The talks used last, those used before `before` when it is given: the
+    /// ones begun in what `workgroup` shows, every one when it is empty.
     pub fn recent(
         &self,
         workgroup: &str,
@@ -478,12 +496,157 @@ impl Conversations {
         let workgroup = if workgroup == ALL { "" } else { workgroup };
         let conn = self.store.conn();
         let mut stmt = conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM conversations WHERE (used_at, id) < (?1, ?2)
-                AND (?4 = '' OR workgroup IN ('', ?4, 'all'))
+            "SELECT {COLUMNS} FROM conversations c WHERE (used_at, id) < (?1, ?2)
+                AND (?4 = '' OR workgroup IN ('', ?4, 'all')) AND {SPOKEN}
              ORDER BY used_at DESC, id DESC LIMIT ?3"
         ))?;
         let rows = stmt.query_map(params![used_at, id, limit as i64, workgroup], conversation)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// What the secretary told without being asked, before the owner took
+    /// part: the latest of it older than `before` that `shown` says yes to,
+    /// oldest first; `0` starts from the newest.
+    pub fn notices(
+        &self,
+        log: &ConsoleLog,
+        before: i64,
+        limit: usize,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<Vec<Message>> {
+        // Only what could be a notice is read: the newest of them may be far back,
+        // and the list of conversations asks for it each time.
+        let candidates: Vec<i64> = {
+            let conn = self.store.conn();
+            let mut stmt = conn.prepare(&format!(
+                "SELECT m.id FROM {SAID_IN}
+                 WHERE m.who = ?1 AND m.id < ?2 AND {UNPROMPTED}
+                 ORDER BY m.id DESC"
+            ))?;
+            let from = if before == 0 { i64::MAX } else { before };
+            let rows = stmt.query_map(params![Who::Aide.as_str(), from], |r| r.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut found = Vec::new();
+        for id in candidates {
+            if found.len() == limit {
+                break;
+            }
+            if let Some(m) = log.get(id)?
+                && shown(&m)
+                && self.notice_of(log, &m)?.is_some()
+            {
+                found.push(m);
+            }
+        }
+        found.reverse();
+        Ok(found)
+    }
+
+    /// The notices `shown` says yes to that the owner has not read, newest
+    /// first, each with its conversation. A conversation they spoke in has none:
+    /// what they spoke after, they have.
+    fn unread_told(
+        &self,
+        log: &ConsoleLog,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<Vec<(Message, i64)>> {
+        let after_the_marks: Vec<(i64, i64)> = {
+            let conn = self.store.conn();
+            let mut stmt = conn.prepare(&format!(
+                "SELECT m.id, c.id FROM {SAID_IN}
+                 LEFT JOIN conversation_reads r ON r.conversation = c.id
+                 WHERE m.who = ?1 AND m.id > coalesce(r.message, 0) AND NOT {SPOKEN}
+                 ORDER BY m.id DESC"
+            ))?;
+            let rows = stmt.query_map([Who::Aide.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut found = Vec::new();
+        for (id, of) in after_the_marks {
+            if let Some(m) = log.get(id)?
+                && shown(&m)
+                && self.notice_of(log, &m)?.is_some()
+            {
+                found.push((m, of));
+            }
+        }
+        Ok(found)
+    }
+
+    /// How many of the notices `shown` says yes to the owner has not read, and
+    /// the newest of them all.
+    pub fn notice_summary(
+        &self,
+        log: &ConsoleLog,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<(usize, Option<Message>)> {
+        let unread = self.unread_told(log, &shown)?.len();
+        Ok((unread, self.notices(log, 0, 1, shown)?.pop()))
+    }
+
+    /// The message up to which the owner has read every notice `shown` says
+    /// yes to.
+    pub fn notices_read_to(
+        &self,
+        log: &ConsoleLog,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<i64> {
+        if let Some((oldest, _)) = self.unread_told(log, &shown)?.last() {
+            return Ok(oldest.id - 1);
+        }
+        Ok(self.notices(log, 0, 1, shown)?.pop().map_or(0, |m| m.id))
+    }
+
+    /// The owner was shown the notices `shown` says yes to, up to `message`.
+    /// Whether that was more than before is returned.
+    pub fn read_notices(
+        &self,
+        log: &ConsoleLog,
+        message: i64,
+        shown: impl Fn(&Message) -> bool,
+    ) -> anyhow::Result<bool> {
+        let mut changed = false;
+        for (m, of) in self.unread_told(log, shown)? {
+            if m.id <= message {
+                changed |= self.read(of, m.id)?;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// What the secretary was told by, when `m` is a notice: said in a
+    /// conversation the owner neither began nor had taken part in by then.
+    pub fn notice_of(&self, log: &ConsoleLog, m: &Message) -> anyhow::Result<Option<Source>> {
+        if m.who != Who::Aide {
+            return Ok(None);
+        }
+        let Some(of) = self.of_message(m)? else {
+            return Ok(None);
+        };
+        let Some(first) = self.first_input(of)? else {
+            return Ok(None);
+        };
+        if first.input.is_spoken() {
+            return Ok(None);
+        }
+        let said = self.messages(log, of)?;
+        let joined = said.iter().any(|x| x.who == Who::Owner && x.id < m.id);
+        Ok((!joined).then_some(first.input.source))
+    }
+
+    /// The newest message the owner was shown under `id`, or 0.
+    pub fn mark(&self, id: i64) -> anyhow::Result<i64> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT message FROM conversation_reads WHERE conversation = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default())
     }
 
     /// Whether an input of a conversation waits for its turn or is in it.
@@ -627,17 +790,9 @@ impl Conversations {
     /// The newest of `said` in a conversation the owner has read, or 0. What
     /// they spoke after, they have.
     pub fn read_to(&self, id: i64, said: &[Message]) -> anyhow::Result<i64> {
-        let read: Option<i64> = self
-            .store
-            .conn()
-            .query_row(
-                "SELECT message FROM conversation_reads WHERE conversation = ?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
+        let read = self.mark(id)?;
         let spoke = said.iter().rfind(|m| m.who == Who::Owner).map(|m| m.id);
-        Ok(read.max(spoke).unwrap_or_default())
+        Ok(read.max(spoke.unwrap_or_default()))
     }
 
     /// How many of `said` in a conversation the owner has not read.
