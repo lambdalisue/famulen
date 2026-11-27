@@ -63,10 +63,21 @@ fn a_run_works_in_a_workspace_of_its_own_named_as_delegated_worktrees_are() {
     assert_eq!(place.directory, place.workspace.join("api"));
 }
 
+/// Put at `jj` a program that runs `script`.
+///
+/// Not written as a program: a child forked by another test thread keeps the
+/// handle it is written through until it execs, and running it meanwhile fails
+/// with ETXTBSY.
+#[cfg(unix)]
+fn stand_in(jj: &Path, script: impl AsRef<[u8]>) {
+    let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workers/direct/jj_stand_in.sh");
+    std::os::unix::fs::symlink(program, jj).unwrap();
+    std::fs::write(jj.with_extension("sh"), script).unwrap();
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn the_workspace_is_made_by_jj_once_from_the_base_and_given_the_checkouts_build() {
-    use std::os::unix::fs::PermissionsExt as _;
     let dir = TempDir::new("direct-prepare");
     let checkout = checkout(&dir);
     std::fs::create_dir_all(checkout.join("target/debug")).unwrap();
@@ -74,15 +85,13 @@ async fn the_workspace_is_made_by_jj_once_from_the_base_and_given_the_checkouts_
     let jj = dir.path().join("jj");
     let told = dir.path().join("told");
     // Writes what it was asked, and makes the workspace as jj does.
-    std::fs::write(
+    stand_in(
         &jj,
         format!(
-            "#!/bin/sh\necho \"$@\" >> {}\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\n[ -d \"$(dirname \"$last\")\" ] || exit 1\nmkdir \"$last\" \"$last/.jj\"\ntouch \"$last/README.md\"\n",
+            "echo \"$@\" >> {}\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\n[ -d \"$(dirname \"$last\")\" ] || exit 1\nmkdir \"$last\" \"$last/.jj\"\ntouch \"$last/README.md\"\n",
             told.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&jj, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let direct = Direct {
         repository: checkout.clone(),
         jj: jj.display().to_string(),
@@ -280,16 +289,13 @@ fn a_run_that_begins_again_goes_on_in_the_workspace_the_run_cut_off_before_it_le
 #[cfg(unix)]
 #[tokio::test]
 async fn a_workspace_made_from_a_revision_that_holds_nothing_is_refused_and_names_the_base() {
-    use std::os::unix::fs::PermissionsExt as _;
     let dir = TempDir::new("direct-empty");
     let checkout = checkout(&dir);
     let jj = dir.path().join("jj");
-    std::fs::write(
+    stand_in(
         &jj,
-        "#!/bin/sh\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\nmkdir -p \"$last/.jj\"\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&jj, std::fs::Permissions::from_mode(0o755)).unwrap();
+        "case \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\nmkdir -p \"$last/.jj\"\n",
+    );
     let direct = Direct {
         repository: checkout.clone(),
         jj: jj.display().to_string(),
@@ -312,21 +318,18 @@ async fn a_workspace_made_from_a_revision_that_holds_nothing_is_refused_and_name
 #[cfg(unix)]
 #[tokio::test]
 async fn a_workspace_jj_failed_to_make_is_taken_away_so_that_the_next_start_makes_it_anew() {
-    use std::os::unix::fs::PermissionsExt as _;
     let dir = TempDir::new("direct-failed");
     let checkout = checkout(&dir);
     let jj = dir.path().join("jj");
     let told = dir.path().join("told");
     // Makes some of the workspace, then fails on the revision, as jj may.
-    std::fs::write(
+    stand_in(
         &jj,
         format!(
-            "#!/bin/sh\necho \"$@\" >> {}\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\nmkdir -p \"$last/.jj\"\necho 'no such revision' >&2\nexit 1\n",
+            "echo \"$@\" >> {}\ncase \"$*\" in *\"workspace add\"*) ;; *) exit 0 ;; esac\nfor last; do :; done\nmkdir -p \"$last/.jj\"\necho 'no such revision' >&2\nexit 1\n",
             told.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&jj, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let direct = Direct {
         repository: checkout.clone(),
         jj: jj.display().to_string(),
@@ -382,20 +385,17 @@ fn work_runs_directly_nowhere_the_sandbox_is_not_known_to_keep_it_from_what_it_m
 #[cfg(unix)]
 #[tokio::test]
 async fn a_workspace_jj_knows_by_the_name_already_is_neither_made_over_nor_forgotten() {
-    use std::os::unix::fs::PermissionsExt as _;
     let dir = TempDir::new("direct-known");
     let checkout = checkout(&dir);
     let jj = dir.path().join("jj");
     let told = dir.path().join("told");
-    std::fs::write(
+    stand_in(
         &jj,
         format!(
-            "#!/bin/sh\necho \"$@\" >> {}\ncase \"$*\" in *\"workspace list\"*) echo 'default: abc'; echo 'task-ab12cd-run1: def' ;; esac\n",
+            "echo \"$@\" >> {}\ncase \"$*\" in *\"workspace list\"*) echo 'default: abc'; echo 'task-ab12cd-run1: def' ;; esac\n",
             told.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&jj, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let direct = Direct {
         repository: checkout.clone(),
         jj: jj.display().to_string(),
