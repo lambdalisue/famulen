@@ -1044,11 +1044,14 @@ fn answers<S>(services: &Services<S>, audience: &Audience) -> bool {
             // turns is of none.
             Audience::Owner(id) => {
                 !guests
-                    && (row.is_none()
-                        || services
+                    // Asked of the row already read: read again, the turn
+                    // may have ended in between.
+                    && row.is_none_or(|r| {
+                        services
                             .conversations
-                            .running()
-                            .is_ok_and(|running| running == Some(*id)))
+                            .of_input(r.id)
+                            .is_ok_and(|of| of == Some(*id))
+                    })
             }
             Audience::Guest(guest) => row.is_some_and(|r| guests && r.id == guest.input),
         }
@@ -1472,6 +1475,27 @@ mod tests {
         on_inbound(ended(), &tx, &services, &guest);
         assert!(services.store.running().unwrap().is_none());
         assert_eq!(services.store.running().unwrap(), None);
+    }
+
+    #[test]
+    fn a_call_is_of_its_conversation_while_the_turn_ends_beside_it() {
+        let (services, audience) = in_turn(crate::input::Sender::Owner, slack(false));
+        let store = services.store.clone();
+        let id = store.running().unwrap().unwrap().input;
+        let done = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    store.interrupt_turn().unwrap();
+                    store.start_turn(id, "all").unwrap();
+                }
+            });
+            let refused = (0..20_000)
+                .filter(|_| !answers(&services, &audience))
+                .count();
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            assert_eq!(refused, 0);
+        });
     }
 
     #[test]
