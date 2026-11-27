@@ -34,7 +34,7 @@ pub enum Looked {
     /// It waits for the owner.
     Waiting,
     /// Its turn ended with tasks of its plan unfinished.
-    Idle,
+    Idle(Left),
     Done(String),
     Failed(String),
     /// It was closed before its plan was finished, saying this.
@@ -43,6 +43,32 @@ pub enum Looked {
     Stumbled(String),
     /// It is gone with the process that held it.
     Lost,
+}
+
+/// What a session that ended its turn left of its plan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Left {
+    /// How many steps of its plan are completed.
+    pub done: u32,
+    /// What its blocked steps say they wait on.
+    pub blocked: Vec<String>,
+    /// Whether steps remain that are not blocked, or it kept no plan.
+    pub open: bool,
+    /// The owner stopped its last turn.
+    pub interrupted: bool,
+    /// A message sent to it has not been taken in.
+    pub undelivered: bool,
+    /// Tells its last turn from the others.
+    pub turn: i64,
+}
+
+/// Why a session is asked to go on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum After {
+    /// A passing fault cut its turn off.
+    Fault,
+    /// It ended its turn with its plan unfinished, and nothing happened since.
+    Idle,
 }
 
 pub trait Runners: Send + Sync + 'static {
@@ -54,8 +80,8 @@ pub trait Runners: Send + Sync + 'static {
     /// Those of these ended runs whose sessions went on since, by their ids;
     /// with each, whether something was told of its session.
     fn went_on<'a>(&'a self, ended: &'a [(Run, bool)]) -> BoxFuture<'a, Vec<i64>>;
-    /// Ask a run's session to go on after a passing fault.
-    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>>;
+    /// Ask a run's session to go on.
+    fn go_on<'a>(&'a self, run: &'a Run, after: After) -> BoxFuture<'a, anyhow::Result<()>>;
     /// Stop what Famulen itself runs. An Adroit session is the owner's to end.
     fn stop(&self, run: &Run);
 }
@@ -273,10 +299,10 @@ impl Runners for Real {
         Box::pin(adroit::went_on(&self.app, ended, &self.read))
     }
 
-    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn go_on<'a>(&'a self, run: &'a Run, after: After) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
             match run.order.runner {
-                Runner::Adroit => adroit::go_on(&self.app, run).await,
+                Runner::Adroit => adroit::go_on(&self.app, run, after).await,
                 Runner::Agent | Runner::Direct => {
                     anyhow::bail!("an agent has no session to go on")
                 }

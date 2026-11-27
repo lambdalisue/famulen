@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::WORKER;
 use super::order::Order;
-use super::runners::{Began, Looked};
+use super::runners::{After, Began, Left, Looked};
 use super::runs::{Outcome as Ended, Run, State};
 use super::sight::Sight;
 use crate::app::App;
@@ -45,6 +45,19 @@ const TAKES_UP_SECS: i64 = 180;
 const WATCHED_TURNS: u32 = 20;
 /// How long one answer is waited for that tells whether ended runs went on.
 const LOOKS_BACK_FOR: Duration = Duration::from_secs(10);
+/// What a session is asked that stopped with its plan unfinished.
+const NUDGE: &str = "You ended your turn with steps of your plan not completed, and nothing has happened \
+since. Go on now with all that you can do. Being asked this approves nothing and decides nothing: \
+where a step waits on the owner's decision or approval, take neither it nor what depends on it, mark \
+it blocked with a note of what has to be decided, and do the rest. If the owner told you to pause \
+or to stop, stay stopped: mark what is left blocked, saying so. Mark what is done already as \
+completed. If you wait for something that will wake you by itself, leave it at that.";
+/// How Claude Code records a turn the owner stopped.
+const INTERRUPTED: &str = "[Request interrupted by user";
+/// How wide a session's name may be, in columns. Claude Code draws it into the
+/// top of its input box, and Adroit hands no message to a session whose box
+/// it cannot tell by that line.
+const NAME_COLUMNS: usize = 48;
 /// What a session is asked after a passing fault.
 const GO_ON: &str = "Your last turn was cut off by a passing fault of the model's service. \
 Go on with your work from where it stopped, and check what was done before you do it again. \
@@ -111,6 +124,27 @@ pub(super) fn bears(name: &str, token: &str) -> bool {
         .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
 }
 
+/// A run's token and as much of its task's title as the width leaves.
+fn session_name(token: &str, title: &str) -> String {
+    let width = |c: char| if c.is_ascii() { 1 } else { 2 };
+    // The character of the line the name is drawn into, and what breaks it.
+    let name = format!("{token} {title}").replace(['\n', '─'], " ");
+    if name.chars().map(width).sum::<usize>() <= NAME_COLUMNS {
+        return name;
+    }
+    let mut left = NAME_COLUMNS - width('…');
+    let mut cut: String = name
+        .chars()
+        .take_while(|&c| {
+            let fits = width(c) <= left;
+            left = left.saturating_sub(width(c));
+            fits
+        })
+        .collect();
+    cut.push('…');
+    cut
+}
+
 /// The call that starts a run's session. The same run makes the same call, so
 /// what the owner approved is what is started, and no other run may use it.
 fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
@@ -118,7 +152,7 @@ fn start_call(app: &App, run: &Run) -> anyhow::Result<Call> {
     let mut input = json!({
         "dir": order.directory,
         "prompt": super::finish::prompt(order),
-        "name": format!("{} {}", token(&order.code, run.id), order.title.replace('\n', " ")),
+        "name": session_name(&token(&order.code, run.id), &order.title),
     });
     if order.worktree {
         input["worktree"] = json!(true);
@@ -432,7 +466,11 @@ fn only_tells(prompt: &str) -> bool {
 
 /// Ask a run's session to go on. The owner let it work when it was started,
 /// so they are not asked again; what they forbid stays so.
-pub(super) async fn go_on(app: &App, run: &Run) -> anyhow::Result<()> {
+pub(super) async fn go_on(app: &App, run: &Run, after: After) -> anyhow::Result<()> {
+    let prompt = match after {
+        After::Fault => GO_ON,
+        After::Idle => NUDGE,
+    };
     let call = Call {
         waive: true,
         never_ask: true,
@@ -440,7 +478,7 @@ pub(super) async fn go_on(app: &App, run: &Run) -> anyhow::Result<()> {
             WORKER,
             connection(app, run)?,
             SEND,
-            json!({ "session": run.session, "prompt": GO_ON }),
+            json!({ "session": run.session, "prompt": prompt }),
         )
     };
     match app.gateway.call(&call).await? {
@@ -782,7 +820,18 @@ fn read_standing(session: &Value, age: i64, now: i64) -> Looked {
         "waiting" => Looked::Waiting,
         "done" | "idle" if takes_up => Looked::Working,
         "done" | "idle" | "ended" if unfinished.is_none() => Looked::Done(result),
-        "done" | "idle" => Looked::Idle,
+        "done" | "idle" => Looked::Idle(Left {
+            interrupted: turns(session)
+                .last()
+                .and_then(|t| t["prompt"].as_str())
+                .is_some_and(|p| p.starts_with(INTERRUPTED)),
+            undelivered,
+            turn: turns(session)
+                .last()
+                .and_then(|t| t["began_ms"].as_i64())
+                .unwrap_or_default(),
+            ..left_of(session)
+        }),
         "ended" => {
             let why = unfinished.unwrap_or_default();
             Looked::Unsure(if result.is_empty() {
@@ -804,24 +853,65 @@ fn read_standing(session: &Value, age: i64, now: i64) -> Looked {
     }
 }
 
-/// What keeps a session's plan from being finished, or nothing once every
-/// task of it is completed.
-fn unfinished(session: &Value) -> Option<String> {
+/// The steps of a session's plan: those no other step is part of.
+fn steps(session: &Value) -> Vec<&Value> {
     let plan = session["timeline"]
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default();
-    if plan.is_empty() {
+    // A task with steps under it is done by them, whatever it says itself.
+    plan.iter()
+        .filter(|t| !plan.iter().any(|s| s["parent"] == t["id"]))
+        .collect()
+}
+
+fn left_of(session: &Value) -> Left {
+    let steps = steps(session);
+    let mut left = Left {
+        open: steps.is_empty(),
+        ..Left::default()
+    };
+    for step in steps {
+        if step["status"] == "completed" {
+            left.done += 1;
+        } else if let Some(held) = held_by(session, step) {
+            let said = |key: &str| held[key].as_str().unwrap_or_default();
+            let waits = match said("note") {
+                "" => said("title").to_owned(),
+                note => format!("{}: {note}", said("title")),
+            };
+            if !left.blocked.contains(&waits) {
+                left.blocked.push(waits);
+            }
+        } else {
+            left.open = true;
+        }
+    }
+    left
+}
+
+/// The blocked task a step is, or is part of.
+fn held_by<'a>(session: &'a Value, step: &'a Value) -> Option<&'a Value> {
+    let plan = session["timeline"].as_array()?;
+    // Bounded, in case the parents form a ring.
+    std::iter::successors(Some(step), |task| {
+        let parent = task["parent"].as_str()?;
+        plan.iter().find(|t| t["id"] == parent)
+    })
+    .take(plan.len())
+    .find(|t| t["status"] == "blocked")
+}
+
+/// What keeps a session's plan from being finished, or nothing once every
+/// task of it is completed.
+fn unfinished(session: &Value) -> Option<String> {
+    let steps = steps(session);
+    if steps.is_empty() {
         return Some(
             "Its session was closed, and it kept no plan to tell by whether its work was finished."
                 .into(),
         );
     }
-    // A task with steps under it is done by them, whatever it says itself.
-    let steps: Vec<&Value> = plan
-        .iter()
-        .filter(|t| !plan.iter().any(|s| s["parent"] == t["id"]))
-        .collect();
     let left = steps.iter().filter(|t| t["status"] != "completed").count();
     (left > 0).then(|| {
         format!(
@@ -972,6 +1062,99 @@ mod tests {
         }
     }
 
+    fn idle(done: u32, blocked: &[&str], open: bool) -> Looked {
+        Looked::Idle(Left {
+            done,
+            blocked: blocked.iter().map(|b| b.to_string()).collect(),
+            open,
+            ..Left::default()
+        })
+    }
+
+    fn left(session: &Value) -> Left {
+        match read_standing(session, LONG, NOW) {
+            Looked::Idle(left) => left,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn what_is_under_a_blocked_task_waits_with_it() {
+        let mut session = shown(
+            "done",
+            Some("待ちます"),
+            &["blocked", "pending", "completed"],
+        );
+        session["timeline"][0]["id"] = json!("pr");
+        session["timeline"][0]["title"] = json!("PR");
+        session["timeline"][0]["note"] = json!("主人の承認待ち");
+        session["timeline"][1]["parent"] = json!("pr");
+        session["timeline"][1]["title"] = json!("マージ");
+        session["timeline"][2]["parent"] = json!("pr");
+
+        let left = left(&session);
+
+        assert_eq!(left.blocked, ["PR: 主人の承認待ち"]);
+        assert!(!left.open);
+        assert_eq!(left.done, 1);
+    }
+
+    #[test]
+    fn a_session_left_idle_is_told_apart_by_its_last_turn() {
+        let mut session = shown("done", Some("待ちます"), &["pending"]);
+        session["turns"] = json!([{ "began_ms": 1 }, { "began_ms": 7000, "reply": "待ちます" }]);
+        assert_eq!(left(&session).turn, 7000);
+    }
+
+    #[test]
+    fn a_blocked_step_says_what_it_waits_on() {
+        let mut session = shown("done", Some("待ちます"), &["blocked", "blocked"]);
+        session["timeline"][0]["title"] = json!("マージ");
+        session["timeline"][0]["note"] = json!("入れてよいか");
+        session["timeline"][1]["title"] = json!("反映");
+        assert_eq!(left(&session).blocked, ["マージ: 入れてよいか", "反映"]);
+    }
+
+    #[test]
+    fn a_turn_the_owner_stopped_is_told_by_what_claude_code_records_of_it() {
+        let mut session = shown("done", None, &["pending"]);
+        assert!(!left(&session).interrupted);
+        for prompt in [
+            "[Request interrupted by user]",
+            "[Request interrupted by user for tool use]",
+        ] {
+            session["turns"] = json!([{ "prompt": prompt, "reply": null }]);
+            assert!(left(&session).interrupted, "{prompt}");
+        }
+    }
+
+    #[test]
+    fn a_message_not_taken_in_for_long_is_left_with_the_plan() {
+        let mut session = shown("done", Some("ok"), &["pending"]);
+        assert!(!left(&session).undelivered);
+        session["undelivered"] = json!(1);
+        assert!(left(&session).undelivered);
+    }
+
+    #[test]
+    fn a_sessions_name_keeps_its_token_and_stays_narrow() {
+        assert_eq!(
+            session_name("task-ab12cd-run7", "直す"),
+            "task-ab12cd-run7 直す"
+        );
+        assert_eq!(
+            session_name("task-ab12cd-run7", "a\n─b"),
+            "task-ab12cd-run7 a  b"
+        );
+        for title in ["長い題名".repeat(20), "long title ".repeat(20)] {
+            let name = session_name("task-ab12cd-run7", &title);
+            let columns: usize = name.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum();
+            assert!((46..=48).contains(&columns), "{columns} {name}");
+            assert!(bears(&name, "task-ab12cd-run7"), "{name}");
+            assert!(name.ends_with('…'), "{name}");
+        }
+    }
+
     /// A session as Adroit shows it an hour after it was last active, with a
     /// plan whose tasks stand so.
     fn shown(state: &str, reply: Option<&str>, plan: &[&str]) -> Value {
@@ -1009,23 +1192,23 @@ mod tests {
                 Some("一時停止：未完了です"),
                 &["completed", "in_progress"],
                 LONG,
-                Looked::Idle,
+                idle(1, &[], true),
             ),
             (
                 "idle",
                 Some("動かし直します。"),
                 &["completed", "pending"],
                 LONG,
-                Looked::Idle,
+                idle(1, &[], true),
             ),
             (
                 "done",
                 Some("待ちます。"),
                 &["completed", "blocked"],
                 LONG,
-                Looked::Idle,
+                idle(1, &[""], false),
             ),
-            ("done", Some("済みました。"), &[], LONG, Looked::Idle),
+            ("done", Some("済みました。"), &[], LONG, idle(0, &[], true)),
         ] {
             assert_eq!(
                 read_standing(&shown(state, reply, plan), age, NOW),
@@ -1097,7 +1280,7 @@ mod tests {
             Looked::Done("済んだ".into())
         );
         session["timeline"][2]["status"] = json!("pending");
-        assert_eq!(read_standing(&session, LONG, NOW), Looked::Idle);
+        assert_eq!(read_standing(&session, LONG, NOW), idle(1, &[], true));
     }
 
     #[test]

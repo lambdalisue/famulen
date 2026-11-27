@@ -271,6 +271,7 @@ fn a_wake_up_an_approval_and_the_end_of_a_task_come_back_to_where_they_were_made
         outcome: "done".into(),
         workgroup: "work".into(),
         again: 0,
+        notice: 0,
     };
     assert_eq!(b.settle(&b.input(Sender::System, ended, "x")).id, of);
 
