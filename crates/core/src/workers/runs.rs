@@ -135,6 +135,25 @@ pub struct Run {
     pub ended_at: Option<i64>,
 }
 
+/// What is kept of a run whose session ends turns with its plan unfinished.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Idle {
+    /// When it is seen to, unless it goes on by itself; 0 when not waiting.
+    pub due_at: i64,
+    /// How often in a row it was asked to go on without its plan moving.
+    pub asked: u32,
+    /// How many steps were completed when it was asked last.
+    pub done_then: u32,
+    /// What the secretary was last told its blocked steps wait on.
+    pub told_blocked: String,
+    /// Why the secretary was last told it is not asked any more.
+    pub told_stop: String,
+    /// How often the secretary was told.
+    pub notices: u32,
+    /// The last turn of its session when it began to wait.
+    pub turn: i64,
+}
+
 /// What became of a run after a turn of its session ended.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Again {
@@ -456,6 +475,57 @@ impl Runs {
              ON CONFLICT (run) DO UPDATE SET due_at = ?2 WHERE due_at != ?2",
             [id, at],
         )?;
+        Ok(())
+    }
+
+    pub fn idle(&self, id: i64) -> anyhow::Result<Idle> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT due_at, asked, done_then, told_blocked, told_stop, notices, turn
+                 FROM worker_idle WHERE run = ?1",
+                [id],
+                |r| {
+                    Ok(Idle {
+                        due_at: r.get(0)?,
+                        asked: r.get(1)?,
+                        done_then: r.get(2)?,
+                        told_blocked: r.get(3)?,
+                        told_stop: r.get(4)?,
+                        notices: r.get(5)?,
+                        turn: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
+    pub fn keep_idle(&self, id: i64, idle: &Idle) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            "INSERT OR REPLACE INTO worker_idle
+                 (run, due_at, asked, done_then, told_blocked, told_stop, notices, turn)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                idle.due_at,
+                idle.asked,
+                idle.done_then,
+                idle.told_blocked,
+                idle.told_stop,
+                idle.notices,
+                idle.turn
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// It is not idle: how long it has been counts anew when it is again.
+    pub fn stirred(&self, id: i64) -> anyhow::Result<()> {
+        self.store
+            .conn()
+            .execute("UPDATE worker_idle SET due_at = 0 WHERE run = ?1", [id])?;
         Ok(())
     }
 

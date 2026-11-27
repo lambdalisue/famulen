@@ -10,6 +10,7 @@ use crate::notebook::testing::TempDir;
 use crate::paths::at;
 use crate::records::{Patch, log_lines};
 use crate::workers::order::tests::delegated;
+use crate::workers::runners::{After, Left};
 use crate::workers::{Finish, Order, Settings, WORKER};
 
 type Meanwhile = Box<dyn FnOnce(&App) + Send>;
@@ -34,6 +35,8 @@ struct Fake {
     went_on: Mutex<Vec<String>>,
     /// The titles of those asked to go on.
     asked_on: Mutex<Vec<String>>,
+    /// What each was asked to go on after.
+    after: Mutex<Vec<After>>,
 }
 
 impl Fake {
@@ -115,8 +118,9 @@ impl Runners for Fake {
         })
     }
 
-    fn go_on<'a>(&'a self, run: &'a Run) -> BoxFuture<'a, anyhow::Result<()>> {
+    fn go_on<'a>(&'a self, run: &'a Run, after: After) -> BoxFuture<'a, anyhow::Result<()>> {
         Box::pin(async move {
+            self.after.lock().unwrap().push(after);
             self.asked_on.lock().unwrap().push(run.order.title.clone());
             anyhow::ensure!(
                 !self.fails.load(std::sync::atomic::Ordering::SeqCst),
@@ -209,6 +213,27 @@ impl Bench {
         *self.pool.looked_back.lock().unwrap() = None;
         self.pool.tick().await.unwrap();
         self.fake.went_on.lock().unwrap().clear();
+    }
+
+    /// What was to wait until a session was idle for long has waited.
+    async fn idle_over(&self) {
+        self.app
+            .store
+            .conn()
+            .execute("UPDATE worker_idle SET due_at = 1 WHERE due_at != 0", [])
+            .unwrap();
+        self.pool.looked.lock().unwrap().clear();
+        self.pool.tick().await.unwrap();
+    }
+
+    /// Its session ends its turn so, and nothing happens for long.
+    async fn stays_idle(&self, left: Left) {
+        self.turn_ends("s1", "直す", Looked::Idle(left)).await;
+        self.idle_over().await;
+    }
+
+    fn asked_on(&self) -> usize {
+        self.fake.asked_on.lock().unwrap().len()
     }
 
     /// What was to wait until now has waited.
@@ -311,7 +336,8 @@ async fn a_turn_that_ends_with_its_plan_unfinished_neither_ends_the_task_nor_hol
     b.pool.tick().await.unwrap();
     assert_eq!(b.fake.begun(), ["直す"]);
 
-    b.turn_ends("s1", "直す", Looked::Idle).await;
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
     assert_eq!(b.runs()[0].state, State::Idle);
     assert_eq!(b.status(&id), "in_progress");
     assert!(b.told().is_empty());
@@ -2581,4 +2607,203 @@ async fn work_that_read_others_words_reads_no_more_of_the_notebook_and_sends_not
     );
     assert!(got["send"].as_str().unwrap().contains("approval"), "{got}");
     assert_eq!(got["web"], "deny", "{got}");
+}
+
+fn waits_on(decision: &str, open: bool) -> Left {
+    Left {
+        open,
+        blocked: vec![decision.into()],
+        ..Left::default()
+    }
+}
+
+async fn delegated_to_adroit(name: &str) -> (Bench, String) {
+    let b = bench(name, Fake::default());
+    let id = b.adroit("直す");
+    b.pool.tick().await.unwrap();
+    (b, id)
+}
+
+#[tokio::test]
+async fn a_session_left_idle_is_asked_to_go_on_only_after_a_while() {
+    let (b, id) = delegated_to_adroit("pool-nudge").await;
+
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
+    assert_eq!(b.asked_on(), 0);
+
+    b.idle_over().await;
+    assert_eq!(b.asked_on(), 1);
+    assert_eq!(*b.fake.after.lock().unwrap(), [After::Idle]);
+    assert!(b.log(&id).iter().any(|l| l.contains("続けるよう伝えた")));
+    assert!(b.told().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_that_goes_on_by_itself_is_waited_for_anew() {
+    let (b, _) = delegated_to_adroit("pool-nudge-anew").await;
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
+    b.turn_ends("s1", "直す", Looked::Working).await;
+    b.idle_over().await;
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
+    assert_eq!(b.asked_on(), 0);
+}
+
+#[tokio::test]
+async fn a_session_that_waits_or_that_the_owner_stopped_is_not_asked_to_go_on() {
+    let stopped = Left {
+        interrupted: true,
+        ..Left::default()
+    };
+    for (name, looked) in [
+        ("pool-nudge-waiting", Looked::Waiting),
+        ("pool-nudge-working", Looked::Working),
+        ("pool-nudge-stopped", Looked::Idle(stopped)),
+    ] {
+        let (b, _) = delegated_to_adroit(name).await;
+        b.turn_ends("s1", "直す", looked).await;
+        b.idle_over().await;
+        b.idle_over().await;
+        assert_eq!(b.asked_on(), 0, "{name}");
+        assert!(b.told().is_empty(), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn nothing_is_asked_to_go_on_while_delegation_is_paused() {
+    let (b, _) = delegated_to_adroit("pool-nudge-paused").await;
+    b.pause(true);
+    b.stays_idle(Left::default()).await;
+    b.idle_over().await;
+    assert_eq!(b.asked_on(), 0);
+
+    b.pause(false);
+    b.stays_idle(Left::default()).await;
+    assert_eq!(b.asked_on(), 1);
+}
+
+#[tokio::test]
+async fn a_plan_that_only_waits_on_decisions_is_told_to_the_secretary_once() {
+    let (b, id) = delegated_to_adroit("pool-nudge-blocked").await;
+    b.stays_idle(waits_on("マージ: 直さずに入れるか", false))
+        .await;
+    b.idle_over().await;
+    b.stays_idle(waits_on("マージ: 直さずに入れるか", false))
+        .await;
+
+    assert_eq!(b.asked_on(), 0);
+    let told = b.told();
+    assert_eq!(told.len(), 1);
+    assert!(
+        told[0].text.contains("直さずに入れるか"),
+        "{}",
+        told[0].text
+    );
+    assert_eq!(b.status(&id), "in_progress");
+    assert_eq!(b.runs()[0].state, State::Idle);
+}
+
+#[tokio::test]
+async fn steps_that_wait_on_no_decision_are_gone_on_with() {
+    let (b, _) = delegated_to_adroit("pool-nudge-partly").await;
+    b.stays_idle(waits_on("マージ: 入れるか", true)).await;
+    assert_eq!(b.asked_on(), 1);
+    assert_eq!(b.told().len(), 1);
+}
+
+#[tokio::test]
+async fn asking_without_progress_is_given_up_and_the_secretary_told() {
+    let (b, id) = delegated_to_adroit("pool-nudge-cap").await;
+    for _ in 0..6 {
+        b.stays_idle(Left::default()).await;
+        b.turn_ends("s1", "直す", Looked::Working).await;
+    }
+    assert_eq!(b.asked_on(), 3);
+    assert_eq!(b.told().len(), 1);
+    assert_eq!(b.status(&id), "in_progress");
+}
+
+#[tokio::test]
+async fn progress_of_the_plan_counts_anew() {
+    let (b, _) = delegated_to_adroit("pool-nudge-progress").await;
+    for done in 0..5 {
+        b.stays_idle(Left {
+            done,
+            ..Left::default()
+        })
+        .await;
+        b.turn_ends("s1", "直す", Looked::Working).await;
+    }
+    assert_eq!(b.asked_on(), 5);
+    assert!(b.told().is_empty());
+}
+
+#[tokio::test]
+async fn a_message_not_taken_in_is_not_followed_by_another_and_is_told() {
+    let (b, _) = delegated_to_adroit("pool-nudge-undelivered").await;
+    b.stays_idle(Left::default()).await;
+    let left = Left {
+        undelivered: true,
+        ..Left::default()
+    };
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left).await;
+
+    assert_eq!(b.asked_on(), 1);
+    assert_eq!(b.told().len(), 1);
+}
+
+#[tokio::test]
+async fn a_message_not_taken_in_is_told_once_though_the_plan_moved() {
+    let (b, _) = delegated_to_adroit("pool-nudge-moved-undelivered").await;
+    b.stays_idle(Left::default()).await;
+    let left = Left {
+        done: 1,
+        undelivered: true,
+        ..Left::default()
+    };
+    for _ in 0..3 {
+        b.stays_idle(left.clone()).await;
+    }
+    assert_eq!(b.told().len(), 1);
+}
+
+#[tokio::test]
+async fn a_turn_not_seen_going_by_is_waited_for_anew() {
+    let (b, _) = delegated_to_adroit("pool-nudge-new-turn").await;
+    b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+        .await;
+    b.app
+        .store
+        .conn()
+        .execute("UPDATE worker_idle SET due_at = 1", [])
+        .unwrap();
+    let next = Left {
+        turn: 2,
+        ..Left::default()
+    };
+    b.turn_ends("s1", "直す", Looked::Idle(next)).await;
+    assert_eq!(b.asked_on(), 0);
+}
+
+#[tokio::test]
+async fn a_restart_keeps_the_count_and_asks_nothing_twice() {
+    let (mut b, _) = delegated_to_adroit("pool-nudge-restart").await;
+    for _ in 0..2 {
+        b.stays_idle(Left::default()).await;
+        b.pool = Pool::new(b.app.clone(), b.fake.clone());
+        b.turn_ends("s1", "直す", Looked::Idle(Left::default()))
+            .await;
+    }
+    assert_eq!(b.asked_on(), 2);
+    for _ in 0..4 {
+        b.pool = Pool::new(b.app.clone(), b.fake.clone());
+        b.stays_idle(Left::default()).await;
+    }
+    assert_eq!(b.asked_on(), 3);
+    assert_eq!(b.told().len(), 1);
 }

@@ -160,12 +160,16 @@ pub enum Source {
         run: i64,
         /// The task's code.
         task: String,
-        /// How it ended: done, failed or refused.
+        /// How it ended: done, failed, unsure or refused; stalled when it has
+        /// not.
         outcome: String,
         workgroup: String,
         /// How often the run had gone on after an end before this one.
         #[serde(default, skip_serializing_if = "is_first")]
         again: u32,
+        /// Which notice this is of a run that has not ended, or 0 of an end.
+        #[serde(default, skip_serializing_if = "is_first")]
+        notice: u32,
     },
 }
 
@@ -234,8 +238,21 @@ impl Input {
             } => format!("arrival:{connection}:{receiver}:{id}"),
             Source::Lookout { item, .. } => format!("lookout:{item}"),
             Source::Asked { request, .. } => format!("asked:{request}"),
-            Source::Worker { run, again: 0, .. } => format!("worker:{run}"),
-            Source::Worker { run, again, .. } => format!("worker:{run}:{again}"),
+            Source::Worker {
+                run,
+                again: 0,
+                notice: 0,
+                ..
+            } => format!("worker:{run}"),
+            Source::Worker {
+                run,
+                again,
+                notice: 0,
+                ..
+            } => format!("worker:{run}:{again}"),
+            Source::Worker {
+                run, again, notice, ..
+            } => format!("worker:{run}:{again}:{notice}"),
         }
     }
 
@@ -550,6 +567,7 @@ mod tests {
                 outcome: "done".into(),
                 workgroup: "work".into(),
                 again: 0,
+                notice: 0,
             },
             text: "fixed".into(),
         };
@@ -571,6 +589,7 @@ mod tests {
                     outcome: "done".into(),
                     workgroup: "all".into(),
                     again,
+                    notice: 0,
                 },
                 text: String::new(),
             };

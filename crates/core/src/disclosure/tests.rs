@@ -449,6 +449,7 @@ async fn what_a_turn_read_goes_with_what_it_leaves_for_later() {
             outcome: "done".into(),
             workgroup: "all".into(),
             again: 0,
+            notice: 0,
         },
         "x",
     );
@@ -493,6 +494,7 @@ async fn what_a_handed_file_holds_goes_with_the_task() {
         outcome: "done".into(),
         workgroup: "all".into(),
         again: 0,
+        notice: 0,
     };
     world.turn(done, "x");
     assert!(world.asks(PUBLIC).await.is_some());
@@ -1174,6 +1176,7 @@ fn worker_ended(run: i64) -> Source {
         outcome: "done".into(),
         workgroup: "all".into(),
         again: 0,
+        notice: 0,
     }
 }
 

@@ -490,6 +490,22 @@ CREATE TABLE IF NOT EXISTS worker_again (
     continued_at INTEGER NOT NULL DEFAULT 0,
     due_at       INTEGER NOT NULL DEFAULT 0
 );
+-- A session that ended its turn with its plan unfinished.
+CREATE TABLE IF NOT EXISTS worker_idle (
+    run          INTEGER PRIMARY KEY,
+    -- when it is seen to, unless it goes on by itself
+    due_at       INTEGER NOT NULL DEFAULT 0,
+    -- how often in a row it was asked to go on without its plan moving, and
+    -- how many steps were completed when last
+    asked        INTEGER NOT NULL DEFAULT 0,
+    done_then    INTEGER NOT NULL DEFAULT 0,
+    -- what the secretary was told last, and how often
+    told_blocked TEXT NOT NULL DEFAULT '',
+    told_stop    TEXT NOT NULL DEFAULT '',
+    notices      INTEGER NOT NULL DEFAULT 0,
+    -- the last turn of its session when it began to wait
+    turn         INTEGER NOT NULL DEFAULT 0
+);
 -- Who delegated a task, in which workgroup, and what it ordered then. Kept
 -- here, where a hand on the notebook does not reach.
 CREATE TABLE IF NOT EXISTS delegations (
