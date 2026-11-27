@@ -34,7 +34,7 @@ pub use defined::*;
 pub use judge::*;
 pub use keeping::{DELETE_SECRET, DESCRIBE_SECRET, Holder, PUT_SECRET, VAULT};
 pub use model_keys::model_key_name;
-pub use public::{PublicPage, Wanted, is_local_name, is_public};
+pub use public::{Downloaded, PublicPage, Wanted, is_local_name, is_public};
 pub use push::{Pushed, Subscription};
 pub use receive::{Arrival, Destination, Receipt};
 pub use redefining::{CHANGE_DEFINITION, DEFINITIONS, DefinitionChange};

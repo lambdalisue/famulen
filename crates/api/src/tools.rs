@@ -306,6 +306,10 @@ mod tests {
         );
         for console_only in [
             "list_link_previews",
+            "get_speech_models",
+            "download_speech_model",
+            "use_speech_model",
+            "delete_speech_model",
             "send",
             "transcribe",
             "subscribe_events",

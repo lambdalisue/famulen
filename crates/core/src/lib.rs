@@ -43,6 +43,7 @@ pub mod schedule;
 pub mod sealed;
 pub mod settings;
 pub mod slack;
+pub mod speech;
 pub mod store;
 pub mod tidying;
 pub mod told;

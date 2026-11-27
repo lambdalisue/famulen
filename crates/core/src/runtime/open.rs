@@ -19,6 +19,7 @@ use crate::models::Models;
 use crate::permissions::Permissions;
 use crate::records::Records;
 use crate::settings::Settings;
+use crate::speech::{Catalog, Host, Speech};
 use crate::store::Store;
 use crate::workers::Kept;
 use crate::workgroups::Workgroups;
@@ -29,8 +30,8 @@ pub fn open_app(config: &Config) -> anyhow::Result<App> {
     Ok(open(config.clone())?.1)
 }
 
-/// Where no tool of the secretary's may reach: the gateway's own data and
-/// the file the secrets are started from.
+/// Where no tool of the secretary's may reach: the gateway's own data, what
+/// Famulen runs to hear, and the file the secrets are started from.
 pub(super) fn sealed_places(config: &Config) -> anyhow::Result<Vec<PathBuf>> {
     Ok(sealed_places_from(config, &std::env::current_dir()?))
 }
@@ -40,6 +41,7 @@ fn sealed_places_from(config: &Config, dir: &std::path::Path) -> Vec<PathBuf> {
     vec![
         config.gateway_dir(),
         executors_dir(config),
+        speech_dir(config),
         dir.join(".env"),
     ]
 }
@@ -93,6 +95,10 @@ fn hosts_kept_from_workers(config: &Config) -> Vec<String> {
     let mut seen = std::collections::BTreeSet::new();
     hosts.retain(|h| seen.insert(h.clone()));
     hosts
+}
+
+fn speech_dir(config: &Config) -> PathBuf {
+    config.data_dir.join("whisper")
 }
 
 /// Where the processes agents run under keep what they keep and are asked.
@@ -209,6 +215,17 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         .with_memory_dir(config.memory_dir())
         .with_notebook_dir(config.notebook_dir())
         .with_sealed(sealed_places(config)?, config.workdir());
+    let (models, speech) = {
+        let models = Models::new(store.clone()).with_gateway(gateway.clone());
+        let speech = Speech::new(
+            speech_dir(config),
+            Catalog::pinned(),
+            Host::current(),
+            Arc::new(gateway.clone()),
+            models.clone(),
+        );
+        (models.with_speech(speech.clone()), speech)
+    };
     let app = App {
         store: store.clone(),
         records: records.clone(),
@@ -234,7 +251,8 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
         ),
         notices: crate::notices::Notices::new(store.clone(), permissions.clone()),
         permissions,
-        models: Models::new(store.clone()).with_gateway(gateway.clone()),
+        models,
+        speech,
         workers: crate::workers::Workers::new(
             store.clone(),
             config.data_dir.join("workers"),
@@ -351,6 +369,7 @@ mod tests {
             config.notebook_dir(),
             config.database_path(),
             super::executors_dir(&config),
+            super::speech_dir(&config),
             std::path::Path::new("/run").join(".env"),
             clone,
         ] {

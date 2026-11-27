@@ -76,6 +76,10 @@ pub async fn run(config: Config, surface: Arc<dyn Surface>) -> anyhow::Result<En
     tokio::spawn(chores::keep_pictures(app.clone()));
     tokio::spawn(chores::keep_holding_pictures(app.clone()));
     tokio::spawn(chores::keep_finding_models(app.clone()));
+    tokio::spawn({
+        let speech = app.speech.clone();
+        async move { speech.run().await }
+    });
     tokio::spawn(crate::workers::run(app.clone()));
     tokio::spawn(crate::workers::keep_tidy(app.clone()));
     tokio::spawn(crate::workers::keep_counting(app.clone()));

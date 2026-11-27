@@ -471,8 +471,87 @@ message Usage {
   repeated RunUsage runs = 10;
 }
 
+enum SpeechModelState {
+  SPEECH_MODEL_STATE_UNSPECIFIED = 0;
+  SPEECH_MODEL_STATE_ABSENT = 1;
+  SPEECH_MODEL_STATE_DOWNLOADING = 2;
+  // The last download failed.
+  SPEECH_MODEL_STATE_FAILED = 3;
+  SPEECH_MODEL_STATE_DOWNLOADED = 4;
+}
+
+// What a download is at.
+enum SpeechStep {
+  SPEECH_STEP_UNSPECIFIED = 0;
+  // Downloading whisper.cpp itself.
+  SPEECH_STEP_ENGINE = 1;
+  // Building whisper.cpp on this machine.
+  SPEECH_STEP_BUILDING = 2;
+  SPEECH_STEP_MODEL = 3;
+}
+
+// A model that hears Japanese on this machine.
+message SpeechModel {
+  string id = 1;
+  // How fast and how well it hears, beside the others.
+  string speed = 2;
+  string accuracy = 3;
+  int64 bytes = 4;
+  SpeechModelState state = 5;
+  // While downloading: what is at hand, and how much of it is here.
+  SpeechStep step = 6;
+  int64 done = 7;
+  int64 total = 8;
+  // Why the last download failed.
+  string failure = 9;
+  // Whether the voice hears with it.
+  bool used = 10;
+}
+
+// The server that hears with the model in use.
+enum SpeechServerState {
+  SPEECH_SERVER_STATE_UNSPECIFIED = 0;
+  SPEECH_SERVER_STATE_STOPPED = 1;
+  SPEECH_SERVER_STATE_STARTING = 2;
+  SPEECH_SERVER_STATE_READY = 3;
+  SPEECH_SERVER_STATE_FAILED = 4;
+}
+
+message SpeechModels {
+  repeated SpeechModel models = 1;
+  // What is downloaded for whisper.cpp itself with the next model; nothing
+  // once it is here.
+  int64 engine_bytes = 2;
+  // Whether whisper.cpp is built on this machine, for want of a build of it.
+  bool builds = 3;
+  // Whether models can be brought in on this OS at all.
+  bool supported = 4;
+  SpeechServerState server = 5;
+  // Why the server did not start.
+  string server_failure = 6;
+}
+
 // The models Famulen runs on and what each does.
 service ModelService {
+  // The models that can be brought in to hear on this machine, and how each
+  // stands.
+  rpc GetSpeechModels(Empty) returns (SpeechModels) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (console_only) = true;
+  }
+  // Download a model, and whisper.cpp if it is not here. It goes on after the
+  // answer.
+  rpc DownloadSpeechModel(ByName) returns (SpeechModels) {
+    option (console_only) = true;
+  }
+  // Have the voice hear with a downloaded model.
+  rpc UseSpeechModel(ByName) returns (SpeechModels) {
+    option (console_only) = true;
+  }
+  // Delete a model, ending its download, to give its space back.
+  rpc DeleteSpeechModel(ByName) returns (SpeechModels) {
+    option (console_only) = true;
+  }
   rpc GetModels(Empty) returns (Models) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

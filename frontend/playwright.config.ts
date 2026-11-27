@@ -13,6 +13,7 @@ const adroit = join(data, "adroit");
 mkdirSync(adroit);
 // Set here, as the workers that run the tests take it over.
 process.env.E2E_GATES ??= join(data, "gates");
+process.env.E2E_DATA ??= join(data, "data");
 mkdirSync(process.env.E2E_GATES, { recursive: true });
 
 const api = "127.0.0.1:17790";

@@ -20,6 +20,7 @@ mod pictures;
 mod records;
 mod roles;
 mod sharing;
+mod speech;
 mod status;
 mod support;
 mod tools;

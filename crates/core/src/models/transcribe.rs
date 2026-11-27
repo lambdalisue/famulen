@@ -76,10 +76,14 @@ pub async fn transcribe(
     if let Some(language) = language {
         form = form.text("language", language.to_owned());
     }
-    let request = reqwest::Client::new()
-        .post(&url)
-        .timeout(TIMEOUT)
-        .multipart(form);
+    // A proxy named in the environment would be handed what was said, even
+    // to a model on this machine.
+    let client = if on_this_machine(&url) {
+        reqwest::Client::builder().no_proxy().build()?
+    } else {
+        reqwest::Client::new()
+    };
+    let request = client.post(&url).timeout(TIMEOUT).multipart(form);
     let response = match via {
         Some(via) => {
             via.gateway
@@ -112,6 +116,19 @@ pub async fn transcribe(
             output_tokens: None,
             calls: 1,
         },
+    })
+}
+
+fn on_this_machine(url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    url.host_str().is_some_and(|host| {
+        host == "localhost"
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
     })
 }
 
@@ -218,6 +235,52 @@ mod tests {
 
         assert!(error.to_string().contains("401"), "{error}");
         assert!(error.to_string().contains("bad key"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn sound_for_a_model_on_this_machine_does_not_go_through_a_proxy() {
+        // The proxy is read from the environment, which a test can only have
+        // to itself in a process of its own.
+        const BEHIND: &str = "FAMULEN_TEST_BEHIND_PROXY";
+        if std::env::var_os(BEHIND).is_none() {
+            let name = "models::transcribe::tests::sound_for_a_model_on_this_machine_does_not_go_through_a_proxy";
+            let ran = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name])
+                .env(BEHIND, "1")
+                .env("HTTP_PROXY", "http://127.0.0.1:9")
+                .env_remove("NO_PROXY")
+                .env_remove("no_proxy")
+                .output()
+                .unwrap();
+            let said = String::from_utf8_lossy(&ran.stdout);
+            assert!(ran.status.success() && said.contains("1 passed"), "{said}");
+            return;
+        }
+        let (endpoint, _) = serve(StatusCode::OK, json!({ "text": "hi" })).await;
+        for endpoint in [endpoint.clone(), endpoint.replace("127.0.0.1", "localhost")] {
+            let heard = transcribe(&spec(&endpoint), &sound(), None, None)
+                .await
+                .unwrap();
+            assert_eq!(heard.text, "hi");
+        }
+    }
+
+    #[test]
+    fn only_loopback_endpoints_are_on_this_machine() {
+        for url in [
+            "http://127.0.0.1:8/v1",
+            "http://[::1]/v1",
+            "http://localhost/v1",
+        ] {
+            assert!(on_this_machine(url), "{url}");
+        }
+        for url in [
+            "https://api.openai.com/v1",
+            "http://192.168.1.2/v1",
+            "nonsense",
+        ] {
+            assert!(!on_this_machine(url), "{url}");
+        }
     }
 
     #[tokio::test]

@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM node:24-trixie-slim
 ARG CLAUDE_CODE_VERSION=2.1.330
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git tini bubblewrap socat \
+ && apt-get install -y --no-install-recommends ca-certificates git tini bubblewrap socat libgomp1 \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && mkdir -p /data /home/node/.claude \
