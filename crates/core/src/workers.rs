@@ -3,7 +3,7 @@
 //! is a plain program; no model decides what runs next.
 
 pub mod adroit;
-mod agent;
+pub(crate) mod agent;
 mod bounds;
 mod direct;
 mod dispatch;

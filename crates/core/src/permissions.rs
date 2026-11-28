@@ -67,6 +67,10 @@ pub enum Caller {
     Subagent,
 }
 
+/// Part of the reason a call is asked about for a connection of another
+/// workgroup.
+pub(crate) const OUTSIDE_WORKGROUP: &str = "is outside the workgroup";
+
 /// What a turn adds to the permission of a call made in it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bound {
@@ -539,7 +543,7 @@ impl Permissions {
             )
             .optional()?
             .is_some();
-        Ok((!inside).then(|| format!("{connection} is outside the workgroup {workgroup}")))
+        Ok((!inside).then(|| format!("{connection} {OUTSIDE_WORKGROUP} {workgroup}")))
     }
 
     fn marks_of_builtin(&self, tool_name: &str, input: &Value) -> Marks {

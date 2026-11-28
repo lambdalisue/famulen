@@ -122,7 +122,7 @@ pub enum Verdict {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome<T> {
     Done(T),
-    Held(Ticket),
+    Held(Box<Ticket>),
 }
 
 fn unasked(why: &str) -> Verdict {

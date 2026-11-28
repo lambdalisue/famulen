@@ -413,7 +413,7 @@ impl Gateway {
         let connection = self.sealed().require(&call.connection)?;
         let reason = match self.judge_assessed(call).await? {
             Verdict::Allow { reason } => reason,
-            Verdict::Hold(ticket) => return Ok(Outcome::Held(ticket)),
+            Verdict::Hold(ticket) => return Ok(Outcome::Held(Box::new(ticket))),
             Verdict::Deny { reason } => return Err(Refused(reason).into()),
         };
         let started = std::time::Instant::now();

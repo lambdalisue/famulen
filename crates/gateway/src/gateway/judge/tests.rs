@@ -224,6 +224,41 @@ fn an_allowed_tool_outside_the_workgroup_is_asked() {
 }
 
 #[tokio::test]
+async fn always_allowing_does_not_stop_a_call_its_caller_asks_about() {
+    let g = gateway();
+    let asked = Call {
+        ask: Some("outside the workgroup".into()),
+        ..call("search_threads")
+    };
+    let Verdict::Hold(first) = g.judge(&asked).unwrap() else {
+        panic!("should be held");
+    };
+    g.answer_ticket(first.id, Answer::AlwaysAllow)
+        .await
+        .unwrap();
+
+    // Another input, which the one pass the answer gave does not cover.
+    let next = Call {
+        input: json!({ "to": "b@example.com" }),
+        ..asked
+    };
+    let Verdict::Hold(again) = g.judge(&next).unwrap() else {
+        panic!("should be held");
+    };
+    let kept = g.ticket(again.id).unwrap().unwrap();
+    assert_eq!(kept.ask.as_deref(), Some("outside the workgroup"));
+}
+
+#[test]
+fn a_call_held_for_its_permission_alone_keeps_no_ask() {
+    let g = gateway();
+    let Verdict::Hold(ticket) = g.judge(&call("send_message")).unwrap() else {
+        panic!("should be held");
+    };
+    assert_eq!(g.ticket(ticket.id).unwrap().unwrap().ask, None);
+}
+
+#[tokio::test]
 async fn approval_lets_the_same_call_by_the_same_caller_through_once() {
     let g = gateway();
     let Verdict::Hold(ticket) = g.judge(&call("send_message")).unwrap() else {

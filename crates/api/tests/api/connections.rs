@@ -1,7 +1,10 @@
 //! Connections: the permissions of their tools, and calls of an HTTP API.
 
 use famulen_api::{Api, tools::ApiTools};
+use famulen_core::approvals::Approvals;
 use famulen_core::hub::OwnTools;
+use famulen_core::permissions::{Bound, Caller, Decision};
+use famulen_core::slack::web::GatewaySlack;
 use serde_json::{Value, json};
 
 use crate::support::{call, open, temp};
@@ -188,4 +191,47 @@ async fn an_api_call_is_made_only_as_its_tools_permission_lets_it() {
         let refused = post().await;
         assert!(refused.contains(refusal), "{permission}: {refused}");
     }
+}
+
+#[tokio::test]
+async fn a_call_allowing_would_not_stop_is_shown_as_asked_once_with_why() {
+    let dir = temp();
+    let api = open(&dir);
+    let lookout = Bound {
+        ask: Some("this turn is about what others wrote".to_owned()),
+        waive: false,
+    };
+    let decision = api
+        .app()
+        .permissions
+        .decide_bound(
+            Caller::Secretary,
+            "Bash",
+            &json!({ "command": "ls" }),
+            lookout,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(decision, Decision::Held(_)));
+
+    let app = api.app();
+    Approvals::<GatewaySlack>::new(
+        None,
+        app.store.clone(),
+        app.permissions.clone(),
+        Default::default(),
+    )
+    .present_held()
+    .await
+    .unwrap();
+    let inbox = call(&api, "ConsoleService/GetInbox", json!({})).await;
+
+    let held = &inbox["approvals"][0];
+    assert_eq!(held["once"], true, "{inbox}");
+    assert!(
+        held["stillAsked"]
+            .as_str()
+            .is_some_and(|why| why.contains("許可にしていても聞きます")),
+        "{inbox}"
+    );
 }
