@@ -45,7 +45,7 @@ AI に Famulen を操作させることもできる。コンソールと秘書�
 
 ## 開発
 
-`nix develop` で開発用のシェルに入る（または `.envrc.sample` を `.envrc` にコピーして `direnv allow`）。そのうえで:
+`nix develop` で開発用のシェルに入る（または `.envrc.sample` を `.envrc` にコピーして `direnv allow`）。`.env` を自分で読むのは本体だけなので、`FAMULEN_CONSOLE_URL` などをコンソールにも渡すには direnv を使う（`.envrc` が `.env` を読み込む）。そのうえで:
 
 ```sh
 just dev   # 本体とコンソールを手元で動かす（http://127.0.0.1:3000/）

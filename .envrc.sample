@@ -1,2 +1,5 @@
 # Copy to .envrc and run `direnv allow` to enter the Nix dev shell automatically.
 use flake
+# `just dev` runs the console beside the backend, and only the backend reads
+# .env by itself; exporting it here gives both the same settings.
+dotenv_if_exists
