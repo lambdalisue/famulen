@@ -1,6 +1,7 @@
 //! The runs of delegated tasks. A run's row is written before the run
 //! starts, so a restart neither loses nor doubles it.
 
+use famulen_gateway::Ticket;
 use rusqlite::{OptionalExtension, Row, params};
 
 use super::order::Order;
@@ -144,13 +145,17 @@ pub struct Idle {
     pub asked: u32,
     /// How many steps were completed when it was asked last.
     pub done_then: u32,
-    /// What the secretary was last told its blocked steps wait on.
-    pub told_blocked: String,
-    /// Why the secretary was last told it is not asked any more.
-    pub told_stop: String,
-    /// How often the secretary was told.
-    pub notices: u32,
     /// The last turn of its session when it began to wait.
+    pub turn: i64,
+}
+
+/// The question put to the owner on a run that stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Halted {
+    pub ticket: i64,
+    /// What the owner answered; empty until then.
+    pub word: String,
+    /// The turn of its session it was put on.
     pub turn: i64,
 }
 
@@ -483,7 +488,7 @@ impl Runs {
             .store
             .conn()
             .query_row(
-                "SELECT due_at, asked, done_then, told_blocked, told_stop, notices, turn
+                "SELECT due_at, asked, done_then, turn
                  FROM worker_idle WHERE run = ?1",
                 [id],
                 |r| {
@@ -491,10 +496,7 @@ impl Runs {
                         due_at: r.get(0)?,
                         asked: r.get(1)?,
                         done_then: r.get(2)?,
-                        told_blocked: r.get(3)?,
-                        told_stop: r.get(4)?,
-                        notices: r.get(5)?,
-                        turn: r.get(6)?,
+                        turn: r.get(3)?,
                     })
                 },
             )
@@ -504,20 +506,69 @@ impl Runs {
 
     pub fn keep_idle(&self, id: i64, idle: &Idle) -> anyhow::Result<()> {
         self.store.conn().execute(
-            "INSERT OR REPLACE INTO worker_idle
-                 (run, due_at, asked, done_then, told_blocked, told_stop, notices, turn)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                id,
-                idle.due_at,
-                idle.asked,
-                idle.done_then,
-                idle.told_blocked,
-                idle.told_stop,
-                idle.notices,
-                idle.turn
-            ],
+            "INSERT OR REPLACE INTO worker_idle (run, due_at, asked, done_then, turn)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, idle.due_at, idle.asked, idle.done_then, idle.turn],
         )?;
+        Ok(())
+    }
+
+    pub fn stall(&self, id: i64) -> anyhow::Result<Option<Halted>> {
+        Ok(self
+            .store
+            .conn()
+            .query_row(
+                "SELECT ticket, word, turn FROM worker_stall WHERE run = ?1",
+                [id],
+                |r| {
+                    Ok(Halted {
+                        ticket: r.get(0)?,
+                        word: r.get(1)?,
+                        turn: r.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn keep_stall(&self, id: i64, ticket: i64, turn: i64) -> anyhow::Result<()> {
+        self.store.conn().execute(
+            // An answer that came first stays.
+            "INSERT INTO worker_stall (run, ticket, turn) VALUES (?1, ?2, ?3)
+             ON CONFLICT (run) DO UPDATE SET ticket = ?2, turn = ?3, word = ''
+             WHERE ticket != ?2",
+            [id, ticket, turn],
+        )?;
+        Ok(())
+    }
+
+    pub fn drop_stall(&self, id: i64) -> anyhow::Result<()> {
+        self.store
+            .conn()
+            .execute("DELETE FROM worker_stall WHERE run = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Keep the owner's answer to this question, which may come before its
+    /// run is tied to it.
+    pub(crate) fn answer_stall(store: &Store, ticket: &Ticket, word: &str) -> anyhow::Result<()> {
+        let (Some(run), Some(turn)) = (ticket.shown["run"].as_i64(), ticket.shown["turn"].as_i64())
+        else {
+            anyhow::bail!("question #{} does not say what it is on", ticket.id);
+        };
+        store.conn().execute(
+            "INSERT INTO worker_stall (run, ticket, turn, word) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (run) DO UPDATE SET word = ?4 WHERE ticket = ?2",
+            params![run, ticket.id, turn, word],
+        )?;
+        Ok(())
+    }
+
+    /// Forget the question of this ticket, taken back as it was answered.
+    pub(crate) fn withdrawn_stall(store: &Store, ticket: i64) -> anyhow::Result<()> {
+        store
+            .conn()
+            .execute("DELETE FROM worker_stall WHERE ticket = ?1", [ticket])?;
         Ok(())
     }
 

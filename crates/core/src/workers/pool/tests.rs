@@ -4,11 +4,13 @@ use futures_util::future::BoxFuture;
 use serde_json::json;
 
 use super::*;
+use crate::approvals::Approvals;
 use crate::gateway::{Answer, Call, Outcome as CallOutcome};
 use crate::notebook::Writer;
 use crate::notebook::testing::TempDir;
 use crate::paths::at;
 use crate::records::{Patch, log_lines};
+use crate::slack::web::GatewaySlack;
 use crate::workers::order::tests::delegated;
 use crate::workers::runners::{After, Left};
 use crate::workers::{Finish, Order, Settings, WORKER};
@@ -284,6 +286,71 @@ impl Bench {
             .map(|(stored, _)| stored.input)
             .filter(|i| matches!(i.source, Source::Worker { .. }))
             .collect()
+    }
+
+    /// The requests that wait for the owner on stopped work.
+    fn held(&self) -> Vec<i64> {
+        let held = self.app.gateway.held_tickets().unwrap();
+        held.iter()
+            .filter(|t| t.tool == "ask_stalled")
+            .map(|t| t.id)
+            .collect()
+    }
+
+    fn questions(&self) -> Vec<famulen_gateway::Question> {
+        self.held()
+            .into_iter()
+            .flat_map(|id| {
+                let ticket = self.app.gateway.ticket(id).unwrap().unwrap();
+                let tool = "mcp__famulen__ask_stalled";
+                crate::approvals::questions(&self.app.permissions, tool, &ticket.shown)
+            })
+            .collect()
+    }
+
+    fn labels(&self) -> Vec<String> {
+        let questions = self.questions();
+        questions[0]
+            .options
+            .iter()
+            .map(|c| c.label.clone())
+            .collect()
+    }
+
+    /// The inbox with the question on stopped work in it.
+    async fn inbox(&self) -> (Approvals<GatewaySlack>, i64) {
+        let approvals = Approvals::<GatewaySlack>::new(
+            None,
+            self.app.store.clone(),
+            self.app.permissions.clone(),
+            Default::default(),
+        );
+        let id = self.held()[0];
+        let ticket = self.app.gateway.ticket(id).unwrap().unwrap();
+        approvals.present(&ticket).await.unwrap();
+        (approvals, id)
+    }
+
+    async fn reply(&self, words: &str) {
+        let (approvals, id) = self.inbox().await;
+        let told = approvals.fill_by_id(id, vec![words.into()]).await.unwrap();
+        assert!(told.is_none());
+    }
+
+    async fn press(&self, answer: crate::approvals::Answer) {
+        let (approvals, id) = self.inbox().await;
+        assert!(approvals.answer_by_id(id, answer).await.unwrap().is_none());
+    }
+
+    /// Its session stays idle so until the owner is asked of it.
+    async fn stalls(&self, left: Left) {
+        for _ in 0..5 {
+            if !self.held().is_empty() {
+                return;
+            }
+            self.stays_idle(left.clone()).await;
+        }
+        panic!("the owner was not asked");
     }
 
     fn runs(&self) -> Vec<Run> {
@@ -2670,7 +2737,7 @@ async fn a_session_that_waits_or_that_the_owner_stopped_is_not_asked_to_go_on() 
         b.idle_over().await;
         b.idle_over().await;
         assert_eq!(b.asked_on(), 0, "{name}");
-        assert!(b.told().is_empty(), "{name}");
+        assert!(b.questions().is_empty(), "{name}");
     }
 }
 
@@ -2688,22 +2755,26 @@ async fn nothing_is_asked_to_go_on_while_delegation_is_paused() {
 }
 
 #[tokio::test]
-async fn a_plan_that_only_waits_on_decisions_is_told_to_the_secretary_once() {
+async fn a_plan_that_only_waits_on_decisions_is_asked_once_to_put_them_then_famulen_asks() {
     let (b, id) = delegated_to_adroit("pool-nudge-blocked").await;
-    b.stays_idle(waits_on("マージ: 直さずに入れるか", false))
-        .await;
-    b.idle_over().await;
-    b.stays_idle(waits_on("マージ: 直さずに入れるか", false))
-        .await;
+    let left = waits_on("マージ: 直さずに入れるか", false);
+    b.stays_idle(left.clone()).await;
+    assert_eq!(b.asked_on(), 1);
+    assert!(b.questions().is_empty());
 
-    assert_eq!(b.asked_on(), 0);
-    let told = b.told();
-    assert_eq!(told.len(), 1);
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left).await;
+
+    assert_eq!(b.asked_on(), 1);
+    let questions = b.questions();
+    assert_eq!(questions.len(), 1);
     assert!(
-        told[0].text.contains("直さずに入れるか"),
+        questions[0].question.contains("直さずに入れるか"),
         "{}",
-        told[0].text
+        questions[0].question
     );
+    assert_eq!(b.labels(), ["続ける", "やめる"]);
+    assert!(b.told().is_empty());
     assert_eq!(b.status(&id), "in_progress");
     assert_eq!(b.runs()[0].state, State::Idle);
 }
@@ -2713,19 +2784,33 @@ async fn steps_that_wait_on_no_decision_are_gone_on_with() {
     let (b, _) = delegated_to_adroit("pool-nudge-partly").await;
     b.stays_idle(waits_on("マージ: 入れるか", true)).await;
     assert_eq!(b.asked_on(), 1);
-    assert_eq!(b.told().len(), 1);
+    assert!(b.questions().is_empty());
 }
 
 #[tokio::test]
-async fn asking_without_progress_is_given_up_and_the_secretary_told() {
+async fn asking_without_progress_ends_in_a_question_to_the_owner() {
     let (b, id) = delegated_to_adroit("pool-nudge-cap").await;
     for _ in 0..6 {
         b.stays_idle(Left::default()).await;
-        b.turn_ends("s1", "直す", Looked::Working).await;
     }
     assert_eq!(b.asked_on(), 3);
-    assert_eq!(b.told().len(), 1);
+    assert_eq!(b.questions().len(), 1);
+    assert_eq!(b.labels(), ["続ける", "やめる"]);
+    assert!(b.log(&id).iter().any(|l| l.contains("受け箱で尋ねた")));
     assert_eq!(b.status(&id), "in_progress");
+}
+
+#[tokio::test]
+async fn a_nudge_that_cannot_be_sent_ends_in_a_question_to_the_owner() {
+    let (b, _) = delegated_to_adroit("pool-nudge-unsent").await;
+    b.fake
+        .fails
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..6 {
+        b.stays_idle(Left::default()).await;
+    }
+    assert_eq!(b.asked_on(), 3);
+    assert_eq!(b.questions().len(), 1);
 }
 
 #[tokio::test]
@@ -2740,27 +2825,12 @@ async fn progress_of_the_plan_counts_anew() {
         b.turn_ends("s1", "直す", Looked::Working).await;
     }
     assert_eq!(b.asked_on(), 5);
-    assert!(b.told().is_empty());
+    assert!(b.questions().is_empty());
 }
 
 #[tokio::test]
-async fn a_message_not_taken_in_is_not_followed_by_another_and_is_told() {
+async fn a_message_not_taken_in_is_not_followed_by_another_and_the_owner_is_asked() {
     let (b, _) = delegated_to_adroit("pool-nudge-undelivered").await;
-    b.stays_idle(Left::default()).await;
-    let left = Left {
-        undelivered: true,
-        ..Left::default()
-    };
-    b.stays_idle(left.clone()).await;
-    b.stays_idle(left).await;
-
-    assert_eq!(b.asked_on(), 1);
-    assert_eq!(b.told().len(), 1);
-}
-
-#[tokio::test]
-async fn a_message_not_taken_in_is_told_once_though_the_plan_moved() {
-    let (b, _) = delegated_to_adroit("pool-nudge-moved-undelivered").await;
     b.stays_idle(Left::default()).await;
     let left = Left {
         done: 1,
@@ -2770,7 +2840,10 @@ async fn a_message_not_taken_in_is_told_once_though_the_plan_moved() {
     for _ in 0..3 {
         b.stays_idle(left.clone()).await;
     }
-    assert_eq!(b.told().len(), 1);
+
+    assert_eq!(b.asked_on(), 1);
+    assert_eq!(b.questions().len(), 1);
+    assert_eq!(b.labels(), ["やり直す", "やめる"]);
 }
 
 #[tokio::test]
@@ -2806,5 +2879,270 @@ async fn a_restart_keeps_the_count_and_asks_nothing_twice() {
         b.stays_idle(Left::default()).await;
     }
     assert_eq!(b.asked_on(), 3);
-    assert_eq!(b.told().len(), 1);
+    assert_eq!(b.questions().len(), 1);
+}
+
+fn undelivered() -> Left {
+    Left {
+        undelivered: true,
+        ..Left::default()
+    }
+}
+
+#[tokio::test]
+async fn the_owner_who_says_go_on_has_the_same_session_told_to() {
+    let (b, id) = delegated_to_adroit("pool-stall-go-on").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+
+    b.reply("続ける").await;
+    b.stays_idle(left.clone()).await;
+
+    assert_eq!(
+        b.fake.after.lock().unwrap().last(),
+        Some(&After::Owner(None))
+    );
+    assert!(b.log(&id).iter().any(|l| l.contains("主人の答え")));
+    assert!(b.questions().is_empty());
+    // Counted anew.
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left).await;
+    assert_eq!(b.questions().len(), 1);
+}
+
+#[tokio::test]
+async fn words_the_owner_writes_reach_the_session() {
+    let (b, _) = delegated_to_adroit("pool-stall-words").await;
+    b.stalls(waits_on("マージ: 入れるか", false)).await;
+
+    b.reply("直してから入れて").await;
+    b.stays_idle(waits_on("マージ: 入れるか", false)).await;
+
+    assert_eq!(
+        b.fake.after.lock().unwrap().last(),
+        Some(&After::Owner(Some("直してから入れて".into())))
+    );
+}
+
+#[tokio::test]
+async fn an_answer_that_comes_second_does_not_replace_the_one_taken() {
+    let (b, _) = delegated_to_adroit("pool-stall-second").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+    let (approvals, id) = b.inbox().await;
+    // As read by an answer given elsewhere at the same time.
+    let before = b.app.gateway.ticket(id).unwrap().unwrap();
+
+    b.reply("直してから入れて").await;
+    approvals
+        .settle_stall(
+            before,
+            crate::approvals::Answer::Reject,
+            Some("やめる".into()),
+        )
+        .await
+        .unwrap();
+    b.stays_idle(left).await;
+
+    assert_eq!(
+        b.fake.after.lock().unwrap().last(),
+        Some(&After::Owner(Some("直してから入れて".into())))
+    );
+}
+
+/// As it stands between the question being shown and the run being tied to it.
+fn forget_stall(b: &Bench) {
+    b.app
+        .store
+        .conn()
+        .execute("DELETE FROM worker_stall", [])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_answer_given_before_the_run_is_tied_to_its_question_is_not_lost() {
+    let (b, _) = delegated_to_adroit("pool-stall-early").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+    let run = b.runs()[0].id;
+    let id = b.held()[0];
+    forget_stall(&b);
+
+    b.reply("直してから入れて").await;
+    b.app.workers.runs.keep_stall(run, id, left.turn).unwrap();
+    b.stays_idle(left).await;
+
+    assert_eq!(
+        b.fake.after.lock().unwrap().last(),
+        Some(&After::Owner(Some("直してから入れて".into())))
+    );
+}
+
+#[tokio::test]
+async fn a_question_cut_off_before_it_was_tied_to_its_run_is_not_asked_twice() {
+    let (b, _) = delegated_to_adroit("pool-stall-cut").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+    forget_stall(&b);
+
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left).await;
+
+    assert_eq!(b.questions().len(), 1);
+}
+
+#[tokio::test]
+async fn a_question_not_tied_to_its_run_is_taken_back_once_the_session_works() {
+    let (b, _) = delegated_to_adroit("pool-stall-orphan").await;
+    b.stalls(waits_on("マージ: 入れるか", false)).await;
+    forget_stall(&b);
+
+    b.turn_ends("s1", "直す", Looked::Working).await;
+
+    assert!(b.questions().is_empty());
+}
+
+#[tokio::test]
+async fn a_turn_the_owner_stopped_after_answering_stands_over_the_answer() {
+    let (mut b, _) = delegated_to_adroit("pool-stall-interrupted").await;
+    b.stalls(waits_on("マージ: 入れるか", false)).await;
+
+    b.reply("続ける").await;
+    b.pool = Pool::new(b.app.clone(), b.fake.clone());
+    let stopped = Left {
+        interrupted: true,
+        turn: 1,
+        ..waits_on("マージ: 入れるか", false)
+    };
+    b.stays_idle(stopped.clone()).await;
+    b.stays_idle(stopped).await;
+
+    assert!(
+        !b.fake
+            .after
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|a| matches!(a, After::Owner(_)))
+    );
+    assert!(b.questions().is_empty());
+}
+
+#[tokio::test]
+async fn an_answer_that_cannot_be_sent_is_asked_again() {
+    let (b, _) = delegated_to_adroit("pool-stall-unsent").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+    let first = b.held()[0];
+
+    b.reply("続ける").await;
+    b.fake
+        .fails
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left).await;
+
+    let held = b.held();
+    assert_eq!(held.len(), 1);
+    assert_ne!(held[0], first);
+}
+
+#[tokio::test]
+async fn work_the_owner_drops_is_cancelled_and_leaves_the_list_of_stopped_ones() {
+    let (b, id) = delegated_to_adroit("pool-stall-drop").await;
+    b.stalls(undelivered()).await;
+
+    b.reply("やめる").await;
+    b.stays_idle(undelivered()).await;
+    b.pool.tick().await.unwrap();
+
+    assert_eq!(b.status(&id), "cancelled");
+    assert!(b.app.workers.runs.open().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn work_to_be_done_again_goes_to_a_new_session() {
+    let (b, id) = delegated_to_adroit("pool-stall-redo").await;
+    b.stalls(undelivered()).await;
+
+    b.reply("やり直す").await;
+    b.stays_idle(undelivered()).await;
+    b.turn_ends("s2", "直す", Looked::Working).await;
+
+    let runs = b.runs();
+    assert_eq!(runs.len(), 2);
+    assert_eq!(b.fake.begun().len(), 2);
+    assert_eq!(b.status(&id), "in_progress");
+    assert_eq!(b.app.workers.runs.open().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_question_left_to_stand_is_not_asked_again_until_the_session_moves() {
+    let (b, _) = delegated_to_adroit("pool-stall-leave").await;
+    let left = waits_on("マージ: 入れるか", false);
+    b.stalls(left.clone()).await;
+
+    b.press(crate::approvals::Answer::Reject).await;
+    b.stays_idle(left.clone()).await;
+    b.stays_idle(left.clone()).await;
+    assert!(b.questions().is_empty());
+
+    b.turn_ends("s1", "直す", Looked::Working).await;
+    b.stalls(left).await;
+    assert_eq!(b.questions().len(), 1);
+}
+
+#[tokio::test]
+async fn a_question_is_taken_back_once_there_is_nothing_to_ask() {
+    for (name, looked) in [
+        ("pool-stall-works", Looked::Working),
+        ("pool-stall-asks", Looked::Waiting),
+        (
+            "pool-stall-new-turn",
+            Looked::Idle(Left {
+                turn: 2,
+                ..Left::default()
+            }),
+        ),
+        (
+            "pool-stall-interrupted",
+            Looked::Idle(Left {
+                interrupted: true,
+                ..Left::default()
+            }),
+        ),
+        ("pool-stall-ended", Looked::Done("done".into())),
+    ] {
+        let (b, _) = delegated_to_adroit(name).await;
+        b.stalls(undelivered()).await;
+
+        b.turn_ends("s1", "直す", looked).await;
+
+        assert!(b.questions().is_empty(), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_question_not_answered_in_time_is_asked_again() {
+    let (b, _) = delegated_to_adroit("pool-stall-lapsed").await;
+    b.stalls(undelivered()).await;
+    let first = b.held()[0];
+    assert!(b.app.gateway.withdraw_ticket(first).unwrap());
+
+    b.stays_idle(undelivered()).await;
+
+    let held = b.held();
+    assert_eq!(held.len(), 1);
+    assert_ne!(held[0], first);
+}
+
+#[tokio::test]
+async fn a_restart_asks_no_second_question() {
+    let (mut b, _) = delegated_to_adroit("pool-stall-restart").await;
+    b.stalls(undelivered()).await;
+
+    b.pool = Pool::new(b.app.clone(), b.fake.clone());
+    b.stays_idle(undelivered()).await;
+
+    assert_eq!(b.held().len(), 1);
 }

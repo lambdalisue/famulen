@@ -499,11 +499,15 @@ CREATE TABLE IF NOT EXISTS worker_idle (
     -- how many steps were completed when last
     asked        INTEGER NOT NULL DEFAULT 0,
     done_then    INTEGER NOT NULL DEFAULT 0,
-    -- what the secretary was told last, and how often
-    told_blocked TEXT NOT NULL DEFAULT '',
-    told_stop    TEXT NOT NULL DEFAULT '',
-    notices      INTEGER NOT NULL DEFAULT 0,
     -- the last turn of its session when it began to wait
+    turn         INTEGER NOT NULL DEFAULT 0
+);
+-- The question put to the owner on a run that stopped, by its ticket, with
+-- the turn it was put on and what was answered.
+CREATE TABLE IF NOT EXISTS worker_stall (
+    run          INTEGER PRIMARY KEY,
+    ticket       INTEGER NOT NULL,
+    word         TEXT NOT NULL DEFAULT '',
     turn         INTEGER NOT NULL DEFAULT 0
 );
 -- Who delegated a task, in which workgroup, and what it ordered then. Kept
