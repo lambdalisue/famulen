@@ -668,13 +668,17 @@ test("an account's limits fit the narrow layout, one under another", async ({ pa
   const limits = page.getByRole("group", { name: "アカウントの利用上限" });
   await expect(limits.getByRole("meter")).toHaveCount(3);
   const width = page.viewportSize()?.width ?? 0;
-  for (const limit of await limits.locator(".model-limit").all()) {
-    const box = await limit.boundingBox();
-    expect(box && box.x >= 0 && box.x + box.width <= width, "within the screen's width").toBe(true);
+  // Measured at once: limits read again draw the gauges anew, and one
+  // measured apart from the others may be gone by then.
+  const boxes = await limits
+    .locator(".model-limit")
+    .evaluateAll((all) => all.map((e) => e.getBoundingClientRect()).map(({ x, y, width, height }) => ({ x, y, width, height })));
+  expect(boxes).toHaveLength(3);
+  for (const box of boxes) {
+    expect(box.x >= 0 && box.x + box.width <= width, "within the screen's width").toBe(true);
   }
-  const [first, second] = await limits.locator(".model-limit").all();
-  const [a, b] = [await first.boundingBox(), await second.boundingBox()];
-  expect(b && a && b.y >= a.y + a.height, "the second under the first").toBe(true);
+  const [a, b] = boxes;
+  expect(b.y >= a.y + a.height, "the second under the first").toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
