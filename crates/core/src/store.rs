@@ -818,12 +818,8 @@ CREATE TABLE IF NOT EXISTS purchases (
     name      TEXT NOT NULL,
     bought_on TEXT NOT NULL
 );
--- the holdings the owner was asked whether they are one
-CREATE TABLE IF NOT EXISTS holding_pairs_asked (
-    first  TEXT NOT NULL,
-    second TEXT NOT NULL,
-    PRIMARY KEY (first, second)
-);
+-- the dream reads what may be one thing itself and no longer asks the owner
+DROP TABLE IF EXISTS holding_pairs_asked;
 -- what each mail settled
 CREATE TABLE IF NOT EXISTS purchase_settled (
     mail    INTEGER NOT NULL,

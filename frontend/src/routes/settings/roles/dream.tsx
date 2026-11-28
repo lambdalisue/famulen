@@ -93,7 +93,7 @@ function Reach(props: { plan: DreamSettings; save: (c: Change) => void }) {
         min={1}
         max={1000}
         onSave={(coreLines) => props.save({ coreLines })}
-        hint="新しい会話にも、この行数までを渡す。一晩で半分より減らすことはしないので、大きく縮めたときは幾晩かかけて収まる。"
+        hint="新しい会話にも、この行数までを渡す。"
       />
     </Section>
   );
@@ -103,7 +103,7 @@ function Records(props: { plan: DreamSettings; save: (c: Change) => void }) {
   return (
     <Section
       title="記録を整える"
-      note="夢のあとに、することを書いたメモをタスクにし、古くなったかもしれない記録に印を付けて、確かめるタスクを足す。一晩に見るのは少しずつで、書いてあることは変えず、消さない。"
+      note="夢のあとに、だれが書いた記録も整える。同じことの記録はまとめ、誤りは直し、何も言っていない記録は消し、することを書いたメモはタスクにする。どう直せばよいか分からない記録にだけ印を付け、確かめるタスクを足す。前の版は手帳の Git の履歴に残る。"
     >
       <Switch checked={props.plan.tidyRecords ?? true} onChange={(tidyRecords) => props.save({ tidyRecords })}>
         記録も整える

@@ -371,7 +371,7 @@ impl Records {
         }
         self.apply(writer, &mut record, patch)?;
         if kind == PARTIES {
-            self.refuse_same_party(writer, &record, None)?;
+            self.refuse_same_party(writer, &record, None, &[])?;
         }
         Ok(record)
     }
@@ -690,6 +690,50 @@ impl Held<'_> {
         id: &str,
         patch: Patch,
     ) -> anyhow::Result<Record> {
+        self.change_besides(writer, kind, id, patch, &[])
+    }
+
+    /// Change it as though the records of `besides` were not there: they are
+    /// being put into it.
+    pub(crate) fn change_besides(
+        &self,
+        writer: Writer,
+        kind: &str,
+        id: &str,
+        patch: Patch,
+        besides: &[&str],
+    ) -> anyhow::Result<Record> {
+        let r = self.records;
+        let (before, record) = self.changed(writer, kind, id, patch, besides)?;
+        if record != before {
+            let subject = format!("{} を直した", record.title());
+            r.notebook.write(&writer.signature(), &record, &subject)?;
+        }
+        r.need(kind, &record.id)
+    }
+
+    /// Whether the change would be made, writing nothing.
+    pub(crate) fn may_change_to(
+        &self,
+        writer: Writer,
+        kind: &str,
+        id: &str,
+        patch: Patch,
+        besides: &[&str],
+    ) -> anyhow::Result<()> {
+        let (_, record) = self.changed(writer, kind, id, patch, besides)?;
+        self.records.notebook.verify(&record)
+    }
+
+    /// The record before and after the change.
+    fn changed(
+        &self,
+        writer: Writer,
+        kind: &str,
+        id: &str,
+        patch: Patch,
+        besides: &[&str],
+    ) -> anyhow::Result<(Record, Record)> {
         writer.may_write()?;
         let r = self.records;
         let mut record = r.need(kind, id)?;
@@ -698,13 +742,9 @@ impl Held<'_> {
         let before = record.clone();
         r.apply(writer, &mut record, patch)?;
         if kind == PARTIES {
-            r.refuse_same_party(writer, &record, Some(&before))?;
+            r.refuse_same_party(writer, &record, Some(&before), besides)?;
         }
-        if record != before {
-            let subject = format!("{} を直した", record.title());
-            r.notebook.write(&writer.signature(), &record, &subject)?;
-        }
-        r.need(kind, &record.id)
+        Ok((before, record))
     }
 
     pub(crate) fn remove(&self, writer: Writer, kind: &str, id: &str) -> anyhow::Result<()> {

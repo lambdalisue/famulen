@@ -124,7 +124,7 @@ function Night(props: { night: Dream; title: string; before?: Dream; after?: Dre
       </List>
       <p class="sub">
         記憶の変更は 1
-        つのコミットにまとまる。全体の書き直しはせず、項目ごとの小さな変更だけを当てる。ファイルを半分より小さくする変更と、あなたの言ったことを消す変更は当てない。
+        つのコミットにまとまる。あなたの言ったことも、ほかの記憶と同じくまとめ・言い直し・忘れる。前の版は手帳の Git の履歴に残る。
         <Show when={n().commit}>
           {" "}
           <span class="mono">commit {n().commit.slice(0, 7)}</span>
