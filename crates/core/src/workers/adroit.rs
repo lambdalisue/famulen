@@ -49,9 +49,16 @@ const LOOKS_BACK_FOR: Duration = Duration::from_secs(10);
 const NUDGE: &str = "You ended your turn with steps of your plan not completed, and nothing has happened \
 since. Go on now with all that you can do. Being asked this approves nothing and decides nothing: \
 where a step waits on the owner's decision or approval, take neither it nor what depends on it, mark \
-it blocked with a note of what has to be decided, and do the rest. If the owner told you to pause \
+it blocked with a note of what has to be decided, and do the rest. Then put what has to be decided \
+to the owner with your tool for asking the user (AskUserQuestion), if you have one, and wait for the \
+answer: never end your turn with the question only in your answer. If the owner told you to pause \
 or to stop, stay stopped: mark what is left blocked, saying so. Mark what is done already as \
 completed. If you wait for something that will wake you by itself, leave it at that.";
+/// What a session is asked when the owner answered that it goes on.
+const OWNER_GOES_ON: &str = "The owner was asked what to do about the steps of your plan not \
+completed, and answered that you go on with your work. This approves nothing in particular: where \
+something needs a decision or an approval of theirs, ask for it with your tool for asking the user \
+(AskUserQuestion), if you have one, and wait. Mark each step completed once it is.";
 /// How Claude Code records a turn the owner stopped.
 const INTERRUPTED: &str = "[Request interrupted by user";
 /// How wide a session's name may be, in columns. Claude Code draws it into the
@@ -464,12 +471,22 @@ fn only_tells(prompt: &str) -> bool {
             .any(|l| l.starts_with("[request]") || l.starts_with("[user]"))
 }
 
+fn owners(words: Option<&str>) -> String {
+    match words {
+        None => OWNER_GOES_ON.to_owned(),
+        Some(words) => format!(
+            "{OWNER_GOES_ON}\nThe owner's words on what is left of your work:\n---\n{words}"
+        ),
+    }
+}
+
 /// Ask a run's session to go on. The owner let it work when it was started,
 /// so they are not asked again; what they forbid stays so.
 pub(super) async fn go_on(app: &App, run: &Run, after: After) -> anyhow::Result<()> {
     let prompt = match after {
-        After::Fault => GO_ON,
-        After::Idle => NUDGE,
+        After::Fault => GO_ON.to_owned(),
+        After::Idle => NUDGE.to_owned(),
+        After::Owner(words) => owners(words.as_deref()),
     };
     let call = Call {
         waive: true,
@@ -939,6 +956,15 @@ async fn read(app: &App, connection: &str, tool: &str, input: Value) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_told_to_go_on_by_the_owner_gets_their_words_and_no_approval() {
+        let prompt = owners(Some("Merge it as it is."));
+        assert!(prompt.contains("approves nothing"), "{prompt}");
+        assert!(prompt.ends_with("\nMerge it as it is."), "{prompt}");
+        assert!(owners(None).contains("AskUserQuestion"));
+        assert!(NUDGE.contains("AskUserQuestion"));
+    }
 
     #[test]
     fn a_request_left_unanswered_is_found_again_and_one_granted_is_not() {

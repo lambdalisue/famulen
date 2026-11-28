@@ -24,6 +24,7 @@ use crate::wording;
 
 pub(crate) mod asked;
 mod exposure;
+pub(crate) mod stalled;
 
 const ACTION_PREFIX: &str = "famulen.approval.";
 /// Slack rejects a section longer than 3000 characters.
@@ -468,6 +469,9 @@ impl<S: Slack> Approvals<S> {
         if let Some(ticket) = self.asked(id)? {
             return self.settle_asked(ticket, Answer::Approve, Some(said)).await;
         }
+        if let Some(ticket) = self.stall(id)? {
+            return self.settle_stall(ticket, Answer::Approve, Some(said)).await;
+        }
         let Some(answered) = self.permissions.gateway().fill_ticket(id, replies).await? else {
             return Ok(None);
         };
@@ -480,6 +484,9 @@ impl<S: Slack> Approvals<S> {
     pub async fn answer_by_id(&self, id: i64, answer: Answer) -> anyhow::Result<Option<Input>> {
         if let Some(ticket) = self.asked(id)? {
             return self.settle_asked(ticket, answer, None).await;
+        }
+        if let Some(ticket) = self.stall(id)? {
+            return self.settle_stall(ticket, answer, None).await;
         }
         let before = self.permissions.gateway().ticket(id)?;
         let answer = match answer {
@@ -525,6 +532,53 @@ impl<S: Slack> Approvals<S> {
             tracing::warn!(%error, id = ticket.id, "could not show the answer");
         }
         asked::outcome(&self.store, &ticket, word)
+    }
+
+    /// The request `id`, when it asks what to do with stopped work.
+    fn stall(&self, id: i64) -> anyhow::Result<Option<Ticket>> {
+        let ticket = self.permissions.gateway().ticket(id)?;
+        Ok(ticket.filter(stalled::is_stall))
+    }
+
+    /// Keep the owner's word on stopped work, for the pool to act on.
+    pub(crate) async fn settle_stall(
+        &self,
+        ticket: Ticket,
+        answer: Answer,
+        said: Option<String>,
+    ) -> anyhow::Result<Option<Input>> {
+        // What is kept is what the ticket takes: the console and Slack answer
+        // one at a time.
+        static ANSWERING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let answering = ANSWERING.lock().await;
+        let held = self.permissions.gateway().ticket(ticket.id)?;
+        if held.is_none_or(|t| t.status != "held") {
+            return Ok(None);
+        }
+        let approved = answer != Answer::Reject;
+        let word = stalled::Word::of(&ticket.shown, approved, said.as_deref());
+        // Kept before the ticket is answered, so that an answered one is never
+        // found without it.
+        crate::workers::Runs::answer_stall(&self.store, &ticket, &word.kept())?;
+        let answer = if approved {
+            Answer::Approve
+        } else {
+            Answer::Reject
+        };
+        let gateway = self.permissions.gateway();
+        let Some(answered) = gateway.answer_ticket(ticket.id, answer.into()).await? else {
+            // Taken back in between.
+            crate::workers::Runs::withdrawn_stall(&self.store, ticket.id)?;
+            return Ok(None);
+        };
+        drop(answering);
+        // It lets no call run.
+        gateway.drop_pass(ticket.id)?;
+        // A message that cannot be changed does not take the word back.
+        if let Err(error) = self.settle(ticket.id, answer, answered, said).await {
+            tracing::warn!(%error, id = ticket.id, "could not show the answer");
+        }
+        Ok(None)
     }
 
     /// Show a request as answered, and tell the session.
@@ -755,6 +809,7 @@ struct Claimed {
 /// run from now on.
 pub fn once(permissions: &Permissions, tool: &str) -> bool {
     tool == asked::TOOL
+        || tool == stalled::TOOL
         || famulen_gateway::permissions::split_tool(tool).is_some_and(|(connection, tool)| {
             permissions
                 .gateway()
@@ -790,6 +845,9 @@ pub fn asks_questions(permissions: &Permissions, ticket: &Ticket) -> bool {
 pub fn questions(permissions: &Permissions, tool: &str, shown: &Value) -> Vec<Question> {
     if tool == asked::TOOL {
         return vec![asked::question(shown)];
+    }
+    if tool == stalled::TOOL {
+        return vec![stalled::question(shown)];
     }
     famulen_gateway::permissions::split_tool(tool)
         .and_then(|(connection, tool)| {
@@ -853,6 +911,8 @@ fn heading(id: i64, what: &str, summary: Option<&str>) -> Vec<Value> {
 fn question_message(id: i64, tool: &str, summary: Option<&str>, asked: &[Question]) -> Outgoing {
     let what = if tool == asked::TOOL {
         "ほかの人からの質問"
+    } else if tool == stalled::TOOL {
+        "止まった委託"
     } else {
         "セッションからの質問"
     };

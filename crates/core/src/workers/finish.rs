@@ -155,7 +155,7 @@ pub(super) fn repository_name(address: &str) -> Option<String> {
 
 /// What a session is told of how its end is read. What it answers when a turn
 /// ends is no sign: a pause, a step on the way and the last word look alike.
-const DONE_BY_PLAN: &str = "Keep the plan of this work on your timeline with `timeline_tasks`, and mark each task completed once it is. Famulen takes the work for done only when your turn has ended and every task on it is completed; until then it is taken for unfinished, whatever your answer says. When you stop short of that, to pause, to wait or because the work was called off, leave what is not done as it stands, blocked with a note where you cannot go on.";
+const DONE_BY_PLAN: &str = "Keep the plan of this work on your timeline with `timeline_tasks`, and mark each task completed once it is. Famulen takes the work for done only when your turn has ended and every task on it is completed; until then it is taken for unfinished, whatever your answer says. When you stop short of that, to pause, to wait or because the work was called off, leave what is not done as it stands, blocked with a note where you cannot go on. Where what is left waits on a decision or an approval of the owner's, put it to them with your tool for asking the user (AskUserQuestion), if you have one, and wait, rather than ending your turn with the question only in your answer.";
 
 /// What a session is asked: the request, how its end is read, then how it is
 /// finished.
@@ -359,6 +359,7 @@ mod tests {
             let prompt = prompt(&order);
             assert!(prompt.starts_with("Do it.\n"), "{prompt}");
             assert!(prompt.contains("timeline_tasks"), "{prompt}");
+            assert!(prompt.contains("AskUserQuestion"), "{prompt}");
         }
     }
 

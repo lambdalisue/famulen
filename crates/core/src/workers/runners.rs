@@ -64,12 +64,14 @@ pub struct Left {
 }
 
 /// Why a session is asked to go on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum After {
     /// A passing fault cut its turn off.
     Fault,
     /// It ended its turn with its plan unfinished, and nothing happened since.
     Idle,
+    /// The owner answered that it goes on, in these words when any.
+    Owner(Option<String>),
 }
 
 pub trait Runners: Send + Sync + 'static {
