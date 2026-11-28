@@ -134,6 +134,28 @@ fn claudes() -> Option<PathBuf> {
 /// Where Claude Code keeps what was said, in its own directory.
 const SAID: &[&str] = &["projects", "history.jsonl", "file-history", "todos"];
 
+/// Where the keys to the owner's repositories are kept, under `home` and
+/// wherever `env` says besides.
+fn credentials_in(home: &std::path::Path, env: impl Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let mut places: Vec<PathBuf> = [
+        ".ssh",
+        ".config/gh",
+        ".config/git/credentials",
+        ".git-credentials",
+        ".netrc",
+        "Library/Keychains",
+    ]
+    .iter()
+    .map(|place| home.join(place))
+    .collect();
+    places.extend(env("GH_CONFIG_DIR").map(PathBuf::from));
+    if let Some(config) = env("XDG_CONFIG_HOME").map(PathBuf::from) {
+        places.extend(["gh", "git/credentials"].map(|place| config.join(place)));
+    }
+    places.retain(|place| place.is_absolute());
+    places
+}
+
 /// Where no tool of an agent doing a delegated task may reach, on top of
 /// that: the notebook, of which it reads only what it was handed, and what
 /// Famulen keeps of the secretary.
@@ -142,6 +164,9 @@ fn sealed_from_workers(config: &Config, dir: &std::path::Path) -> anyhow::Result
     places.push(config.notebook_dir());
     places.push(config.workdir());
     places.extend(config.workers_sealed.iter().cloned());
+    if let Some(home) = crate::sealed::home() {
+        places.extend(credentials_in(&home, |name| std::env::var(name).ok()));
+    }
     let database = config.database_path();
     for suffix in ["", "-wal", "-shm"] {
         let mut path = database.clone().into_os_string();
@@ -264,7 +289,9 @@ fn open_app_on(config: &Config, store: Store) -> anyhow::Result<App> {
                 .workers_direct
                 .clone()
                 .map(crate::workers::Direct::new),
-        ),
+        )
+        .with_finishing(config.workers_finishing.clone())
+        .with_direct_by_default(config.workers_direct_by_default),
         lookout: lookout.clone(),
         triage: crate::triage::Triage::new(store.clone()),
         journal: Journal::new(store.clone()),
@@ -346,6 +373,35 @@ mod tests {
                 "{said}"
             );
         }
+    }
+
+    #[test]
+    fn the_credentials_of_the_owners_repositories_are_sealed_from_workers() {
+        let at = |path: &str| std::path::PathBuf::from(crate::paths::at(path));
+        let env = |name: &str| match name {
+            "GH_CONFIG_DIR" => Some(crate::paths::at("/elsewhere/gh")),
+            "XDG_CONFIG_HOME" => Some(crate::paths::at("/xdg")),
+            _ => None,
+        };
+        let places = super::credentials_in(&at("/home/me"), env);
+        for place in [
+            "/home/me/.ssh",
+            "/home/me/.config/gh",
+            "/home/me/.config/git/credentials",
+            "/home/me/.git-credentials",
+            "/home/me/.netrc",
+            "/home/me/Library/Keychains",
+            "/elsewhere/gh",
+            "/xdg/gh",
+            "/xdg/git/credentials",
+        ] {
+            assert!(places.contains(&at(place)), "{place}");
+        }
+        let dir = TempDir::new("sealed-credentials");
+        let app = crate::runtime::testing::app(dir.path());
+        let home = crate::sealed::home().unwrap();
+        assert!(app.workers.kept.places.contains(&home.join(".ssh")));
+        assert!(app.workers.kept.places.contains(&home.join(".config/gh")));
     }
 
     #[test]

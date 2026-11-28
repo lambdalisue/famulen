@@ -12,6 +12,7 @@ use super::adroit;
 use super::agent::{self, Finish, Job, ask_start};
 use super::order::Runner;
 use super::runs::{Run, State};
+use super::{Driving, Finishing, Next as FinishingNext, Seen, Stage};
 use crate::app::App;
 
 /// How often an end is tried, and how long after one that failed.
@@ -96,6 +97,8 @@ struct Working {
 pub(super) struct Real {
     app: App,
     agents: Mutex<HashMap<i64, Working>>,
+    /// Runs whose agent's turn is over and which Famulen is finishing.
+    finishings: Mutex<HashMap<i64, Driving>>,
     /// What an ended run's session was like when it was last read.
     read: Mutex<HashMap<i64, adroit::Trace>>,
 }
@@ -105,12 +108,86 @@ impl Real {
         Self {
             app,
             agents: Mutex::default(),
+            finishings: Mutex::default(),
             read: Mutex::default(),
         }
     }
 
     fn agents(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Working>> {
         self.agents.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn finishings(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Driving>> {
+        self.finishings.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// A run run directly in a repository the owner lets be finished: its
+    /// agent's word that it is done begins the finishing, not the end.
+    async fn look_at_work(&self, run: &Run) -> anyhow::Result<Looked> {
+        let finishing = match run.order.runner {
+            Runner::Direct => Finishing::load(&self.app.store, run.id)?,
+            _ => None,
+        };
+        let Some(finishing) = finishing else {
+            return self.look_at_agent(run).await;
+        };
+        if !finishing.with_agent() {
+            return self.look_at_finishing(run, finishing).await;
+        }
+        match self.look_at_agent(run).await? {
+            Looked::Done(report) => {
+                let mut finishing = finishing;
+                finishing.report = report;
+                finishing.turned();
+                finishing.save(&self.app.store, run.id)?;
+                self.agents().remove(&run.id);
+                self.look_at_finishing(run, finishing).await
+            }
+            looked => Ok(looked),
+        }
+    }
+
+    async fn look_at_finishing(&self, run: &Run, finishing: Finishing) -> anyhow::Result<Looked> {
+        match finishing.stage {
+            Stage::Done => return Ok(Looked::Done(finishing.result())),
+            Stage::Stopped => return Ok(Looked::Failed(finishing.result())),
+            _ => {}
+        }
+        let seen = self.finishings().get(&run.id).map(Driving::seen);
+        let Some(seen) = seen else {
+            // A request to merge is the run's own, and taking back what the
+            // agent was let call would withdraw it. The agent was ended
+            // before it was made.
+            if finishing.ticket.is_none() {
+                agent::end_turn(&self.app, run.id).await?;
+            }
+            let hands = agent::own_hands(&self.app, run)?;
+            let workers = self.app.workers.clone();
+            let driving = Driving::start(finishing, hands, move || workers.poke());
+            self.finishings().insert(run.id, driving);
+            return Ok(Looked::Working);
+        };
+        match seen {
+            Seen::Working => Ok(Looked::Working),
+            Seen::Waiting => Ok(Looked::Waiting),
+            Seen::Trouble(trouble) => anyhow::bail!(trouble),
+            Seen::Over(next) => {
+                self.finishings().remove(&run.id);
+                if let FinishingNext::Turn(message) = next {
+                    match Job::turn(&self.app, run, &message).await {
+                        Ok(job) => self.attend(run.id, job),
+                        Err(error) => {
+                            return Ok(Looked::Failed(format!(
+                                "It could not be handed back to the agent: {error:#}\n\n{message}"
+                            )));
+                        }
+                    }
+                }
+                // How it ended is read from what is kept, at the next look.
+                self.app.workers.poke();
+                Ok(Looked::Working)
+            }
+        }
     }
 
     /// See to a run that was started, until it ends.
@@ -139,6 +216,16 @@ impl Real {
     async fn find_agent(&self, run: &Run) -> anyhow::Result<Option<Began>> {
         if let Some(trouble) = self.agents().get(&run.id).and_then(|w| w.job.trouble()) {
             anyhow::bail!(trouble);
+        }
+        // While it is finished no agent runs, and none is to be started.
+        if run.order.runner == Runner::Direct
+            && Finishing::load(&self.app.store, run.id)?.is_some_and(|f| !f.with_agent())
+        {
+            if let Some(Seen::Trouble(trouble)) = self.finishings().get(&run.id).map(Driving::seen)
+            {
+                anyhow::bail!(trouble);
+            }
+            return Ok(Some(Began::Running(String::new())));
         }
         Ok(match agent::executor(&self.app, run.id).standing().await? {
             Standing::None => None,
@@ -290,7 +377,7 @@ impl Runners for Real {
         Box::pin(async move {
             match run.order.runner {
                 Runner::Adroit => adroit::look(&self.app, run).await,
-                Runner::Agent | Runner::Direct => self.look_at_agent(run).await,
+                Runner::Agent | Runner::Direct => self.look_at_work(run).await,
             }
         })
     }
@@ -314,6 +401,8 @@ impl Runners for Real {
         if !run.order.runner.runs_here() {
             return;
         }
+        // Dropped, so that nothing more is done to the outside.
+        self.finishings().remove(&run.id);
         let working = self.agents().remove(&run.id);
         // Its turn is over when its finish was read. One nobody attends to is
         // not known to be in a turn, and is not waited for.

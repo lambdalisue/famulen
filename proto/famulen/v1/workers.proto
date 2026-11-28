@@ -17,11 +17,14 @@ message DelegateTaskRequest {
   // themselves: do not write how to finish, unless the owner asked otherwise
   // for this work, and then say that they did.
   string request = 2;
+  // Leave it empty for work on code unless the owner asked for one of these:
+  // Famulen then picks direct where the owner made that the default, else
+  // adroit.
   // adroit: a session in the owner's Adroit, for code and for anything the
   // owner may want to watch or steer. Its start is asked of the owner.
   // agent: a session of its own that uses only the tools and files handed to
   // it, and asks the owner nothing unless it is told to wait.
-  // direct: on trial, and only when the owner asks for it: Claude Code that
+  // direct: on trial; name it only when the owner asks for it: Claude Code that
   // Famulen starts itself to work on code, in a jj workspace it makes in the
   // one repository the owner set; it asks the owner what needs their answer
   // and waits. It needs a Directory in that repository, and is refused
@@ -127,6 +130,14 @@ message WorkerRun {
   // adroit (the session's timeline) or notes (read from the agent's own
   // notes); empty without a plan.
   string plan_from = 19;
+  // Where Famulen is in finishing the work: implementing, checking,
+  // reviewing, publishing, ci, merging, deploying, tidying, done or stopped;
+  // empty when it is not Famulen's to finish.
+  string stage = 20;
+  // What failed last in finishing it, or why that stopped.
+  string stage_note = 21;
+  // The pull request made of it, once there is one.
+  string pull_request = 22;
 }
 
 // What an Adroit session waits on the owner for.
@@ -137,6 +148,11 @@ message RunQuestion {
   Approval approval = 2;
   // It is not told whole, so it can be answered only in Adroit.
   bool truncated = 3;
+}
+
+message TellRunRequest {
+  int64 run = 1;
+  string text = 2;
 }
 
 message AnswerRunRequest {
@@ -421,6 +437,11 @@ service WorkerService {
   rpc CancelDelegated(ByName) returns (Record);
   // Give a run's session the owner's answer to what it waits on them for.
   rpc AnswerRun(AnswerRunRequest) returns (Empty) {
+    option (console_only) = true;
+  }
+  // Say something more to a run that is at work and run directly: it joins
+  // the turn under way.
+  rpc TellRun(TellRunRequest) returns (Empty) {
     option (console_only) = true;
   }
   // Put what a run's session waits for to the owner anew, as a request.

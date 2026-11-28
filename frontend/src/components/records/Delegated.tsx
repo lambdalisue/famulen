@@ -41,6 +41,7 @@ import {
 import { workgroup } from "~/lib/workgroup";
 import RecordsFrame from "./RecordsFrame";
 import RunAsk from "./RunAsk";
+import RunMore, { RunStage } from "./RunMore";
 import { ProgressLine, RunSteps } from "./RunProgress";
 
 const retry = (id: string) => act(() => api.workers.retryDelegated({ id }), "並びに戻した");
@@ -354,6 +355,8 @@ export function Delegation(props: { task: Rec }) {
         <Show when={!!seen()}>
           <RunAsk run={run()!} />
           <ProgressLine run={run()!} />
+          <RunStage run={run()!} />
+          <RunMore run={run()!} />
           <Show when={run()!.steps.length > 0}>
             <RunSteps run={run()!} />
           </Show>

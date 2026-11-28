@@ -2293,6 +2293,7 @@ async fn a_session_whose_start_was_not_told_is_found_however_many_sessions_ended
 mod again;
 #[cfg(unix)]
 mod direct;
+mod finishing;
 
 /// Sends in its first turn; makes the same call twice in a turn it is told
 /// of an approval; reports once it is told of a rejection, or was not held.

@@ -590,7 +590,7 @@ async fn the_secretary_neither_reads_the_question_there_nor_answers_for_the_owne
     use famulen_core::hub::OwnTools;
     let dir = temp();
     let tools = famulen_api::tools::ApiTools::new(open(&dir)).unwrap();
-    for tool in ["answer_run", "ask_run_again"] {
+    for tool in ["answer_run", "ask_run_again", "tell_run"] {
         assert!(!tools.list().iter().any(|t| t.name == tool), "{tool}");
     }
 }
@@ -708,4 +708,16 @@ async fn a_run_is_watched_from_what_it_did_to_what_it_is_writing() {
     );
     assert_eq!(told[2]["part"]["text"], "書");
     assert_eq!(told[3]["entry"]["said"]["text"], "書いた");
+}
+
+#[tokio::test]
+async fn only_a_run_run_directly_can_be_told_more() {
+    let dir = temp();
+    let api = open(&dir);
+    let run = agent_run(&api).await;
+    let more = json!({ "run": run, "text": "もう一つ" });
+
+    let (status, body) = try_call(&api, "WorkerService/TellRun", more).await;
+    assert_eq!(status.as_u16(), 400, "{body}");
+    assert!(body.to_string().contains("run directly"), "{body}");
 }

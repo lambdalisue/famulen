@@ -1,15 +1,58 @@
 //! Processes by their number.
 
-/// End a process that leads a group, and every process in the group.
-pub(crate) fn end_group(pid: u32, at_once: bool) {
+/// End a process that leads a group, every process in the group, and what
+/// descends from it though it left the group. `left` keeps those from one
+/// time to the next: once their parent has ended, nothing tells they were
+/// its own. One whose parent ended before any look is not found.
+pub(crate) fn end_group(pid: u32, at_once: bool, left: &mut Vec<(u32, String)>) {
     #[cfg(unix)]
     if let Some(group) = rustix::process::Pid::from_raw(pid as i32) {
-        use rustix::process::Signal;
+        use rustix::process::{Pid, Signal};
         let signal = if at_once { Signal::KILL } else { Signal::TERM };
+        // Looked for before any signal, which could take their parents away.
+        for found in descendants(pid) {
+            if left.iter().all(|(seen, _)| *seen != found)
+                && let Some(born) = born(found)
+            {
+                left.push((found, born));
+            }
+        }
         rustix::process::kill_process_group(group, signal).ok();
+        for (one, when) in left.iter() {
+            // The number may have gone to another since.
+            if born(*one).as_ref() == Some(when)
+                && let Some(one) = Pid::from_raw(*one as i32)
+            {
+                rustix::process::kill_process(one, signal).ok();
+            }
+        }
     }
     #[cfg(not(unix))]
-    let _ = (pid, at_once);
+    let _ = (pid, at_once, left);
+}
+
+/// The processes that descend from one that is there.
+#[cfg(unix)]
+fn descendants(pid: u32) -> Vec<u32> {
+    let listing = told("/bin/ps", &["-A", "-o", "pid=,ppid="]).unwrap_or_default();
+    let pairs: Vec<(u32, u32)> = listing
+        .lines()
+        .filter_map(|line| {
+            let mut numbers = line.split_whitespace().map(str::parse);
+            Some((numbers.next()?.ok()?, numbers.next()?.ok()?))
+        })
+        .collect();
+    let mut found = vec![pid];
+    let mut at = 0;
+    while let Some(&parent) = found.get(at) {
+        for &(child, of) in &pairs {
+            if of == parent && !found.contains(&child) {
+                found.push(child);
+            }
+        }
+        at += 1;
+    }
+    found.split_off(1)
 }
 
 /// Ask a process to end.

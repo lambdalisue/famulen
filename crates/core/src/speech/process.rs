@@ -33,7 +33,7 @@ wait "$child"
 const ENVIRONMENT: &[&str] = &["PATH", "HOME", "TMPDIR", "DEVELOPER_DIR", "SDKROOT", "LANG"];
 
 /// A running program. Dropping it ends it.
-pub(super) struct Kept {
+pub(crate) struct Kept {
     child: Child,
     input: Option<ChildStdin>,
     group: Option<Pid>,

@@ -69,7 +69,7 @@ fn a_run_works_in_a_workspace_of_its_own_named_as_delegated_worktrees_are() {
 /// handle it is written through until it execs, and running it meanwhile fails
 /// with ETXTBSY.
 #[cfg(unix)]
-fn stand_in(jj: &Path, script: impl AsRef<[u8]>) {
+pub(in crate::workers) fn stand_in(jj: &Path, script: impl AsRef<[u8]>) {
     let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workers/direct/jj_stand_in.sh");
     std::os::unix::fs::symlink(program, jj).unwrap();
     std::fs::write(jj.with_extension("sh"), script).unwrap();
@@ -177,6 +177,8 @@ fn its_shell_writes_what_jj_and_git_keep_of_the_repository_but_nothing_the_owner
         src.join(".jj/repo/config.toml"),
         src.join(".jj/repo/store/git_target"),
         src.join(".jj/repo/store/git/config"),
+        src.join(".jj/repo/store/git/config.worktree"),
+        src.join(".jj/repo/store/git/commondir"),
         src.join(".git/config"),
         src.join(".git/hooks"),
         src.join(".git/info"),

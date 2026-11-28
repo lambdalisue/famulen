@@ -133,7 +133,7 @@ async fn run(spec: Spec) -> anyhow::Result<()> {
         meta: spec.meta.clone(),
     });
     if begun.is_err() {
-        kill(&mut child, pid, true);
+        kill(&mut child, pid, true, &mut Vec::new());
         anyhow::bail!("could not write to {}", spec.dir.display());
     }
     made.0 = None;
@@ -181,6 +181,7 @@ async fn run(spec: Spec) -> anyhow::Result<()> {
     });
 
     let mut ending = shared.ending.subscribe();
+    let mut left = Vec::new();
     let (why, code) = tokio::select! {
         status = child.wait() => (Why::Ended, status.ok().and_then(|s| s.code())),
         why = async {
@@ -197,14 +198,14 @@ async fn run(spec: Spec) -> anyhow::Result<()> {
         } => {
             let (why, grace) = why;
             if !grace.is_zero() {
-                kill(&mut child, pid, false);
+                kill(&mut child, pid, false, &mut left);
                 tokio::time::timeout(grace, child.wait()).await.ok();
             }
             (why, None)
         }
     };
     // Whatever it started ends with it, even when it ended by itself.
-    kill(&mut child, pid, true);
+    kill(&mut child, pid, true, &mut left);
     let code = match code {
         Some(code) => Some(code),
         None => child.wait().await.ok().and_then(|s| s.code()),
@@ -253,8 +254,8 @@ async fn lost(dir: &std::path::Path) {
 }
 
 /// End the program and every process it started, at once or as it likes.
-fn kill(child: &mut Child, pid: u32, at_once: bool) {
-    process::end_group(pid, at_once);
+fn kill(child: &mut Child, pid: u32, at_once: bool, left: &mut Vec<(u32, String)>) {
+    process::end_group(pid, at_once, left);
     if at_once {
         child.start_kill().ok();
     }

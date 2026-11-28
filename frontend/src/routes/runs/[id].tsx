@@ -1,5 +1,6 @@
 import { createAsync, useParams } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show } from "solid-js";
+import RunMore, { RunStage } from "~/components/records/RunMore";
 import { ProgressLine } from "~/components/records/RunProgress";
 import RunBlock from "~/components/runs/RunBlocks";
 import RunPlan from "~/components/runs/RunPlan";
@@ -125,6 +126,7 @@ function RunOf(props: { id: string }) {
           <div class="run-progress-row">
             <ProgressLine run={r()} />
           </div>
+          <RunStage run={r()} />
           <Segmented
             class="run-panes"
             label="見るもの"
@@ -171,6 +173,7 @@ function RunOf(props: { id: string }) {
               </ol>
             </section>
           </div>
+          <RunMore run={r()} />
         </div>
       )}
     </Show>

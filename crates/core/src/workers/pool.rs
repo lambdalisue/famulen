@@ -993,10 +993,12 @@ fn told(
         }
         Outcome::Stopped | Outcome::Interrupted => return None,
     };
-    let finish = if outcome == Outcome::Done && !run.order.finish.is_empty() {
-        " The owner's steps to finish it were handed over with the request: check that each was taken, and name to the owner any that was not."
-    } else {
+    let finish = if outcome != Outcome::Done || run.order.finish.is_empty() {
         ""
+    } else if run.order.runner == Runner::Direct {
+        " The owner's steps to finish it were handed over with the request, for the worker to take as far as its workspace goes. What was pushed or merged is Famulen's own doing, said at the end of what it left. Name to the owner any step neither took."
+    } else {
+        " The owner's steps to finish it were handed over with the request: check that each was taken, and name to the owner any that was not."
     };
     let title = task.map_or_else(|| run.order.title.clone(), Record::title);
     let session = if run.session.is_empty() {

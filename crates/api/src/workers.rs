@@ -131,6 +131,25 @@ impl Api {
 
     /// A run with what its session asks the owner, for the owner alone.
     fn asking(&self, run: Run, sight: &Sight) -> anyhow::Result<WorkerRun> {
+        let id = run.id;
+        Ok(self.staged(id, self.with_question(run, sight)?))
+    }
+
+    /// A run with where Famulen is in finishing its work.
+    fn staged(&self, id: i64, mut run: WorkerRun) -> WorkerRun {
+        match workers::Finishing::load(&self.app.store, id) {
+            Ok(Some(finishing)) => {
+                run.stage = finishing.stage.as_str().into();
+                run.stage_note = finishing.note.unwrap_or_default();
+                run.pull_request = finishing.pull.map(|p| p.url).unwrap_or_default();
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(run = id, ?error, "its finishing cannot be read"),
+        }
+        run
+    }
+
+    fn with_question(&self, run: Run, sight: &Sight) -> anyhow::Result<WorkerRun> {
         if run.order.runner == Runner::Direct {
             return Ok(match workers::direct_question(&self.app, &run) {
                 Some(q) => self.asking_directly(run, sight, q),
@@ -245,8 +264,13 @@ impl WorkerService for Api {
         if r.title.trim().is_empty() {
             return Err(fail("a record needs a title"));
         }
-        let runner = Runner::parse(r.runner.trim())
-            .ok_or_else(|| fail("a runner is adroit, agent or direct"))?;
+        let named = r.runner.trim();
+        let runner = match named {
+            "" => Runner::Adroit,
+            named => {
+                Runner::parse(named).ok_or_else(|| fail("a runner is adroit, agent or direct"))?
+            }
+        };
         let trimmed = |text: &str| text.trim().to_owned();
         let order = Order {
             title: trimmed(&r.title),
@@ -269,6 +293,11 @@ impl WorkerService for Api {
             },
             search: r.search,
             ..Order::default()
+        };
+        let order = if named.is_empty() {
+            workers::with_default_runner(&self.app, order)
+        } else {
+            order
         };
         order.check().or_fail()?;
         workers::fit(&self.app, &order).or_fail()?;
@@ -342,7 +371,7 @@ impl WorkerService for Api {
                         if actor(&ctx) == OWNER {
                             self.asking(r, &sight)
                         } else {
-                            Ok(seen(r, &sight))
+                            Ok(self.staged(r.id, seen(r, &sight)))
                         }
                     })
                     .transpose()?;
@@ -485,6 +514,19 @@ impl WorkerService for Api {
             return Response::ok(Empty::default());
         }
         workers::adroit::answer(&self.app, r.run, &r.question, answer, r.replies)
+            .await
+            .or_fail()?;
+        changed(self);
+        Response::ok(Empty::default())
+    }
+
+    async fn tell_run(
+        &self,
+        _ctx: RequestContext,
+        request: ServiceRequest<'_, TellRunRequest>,
+    ) -> ServiceResult<Empty> {
+        let r = request.to_owned_message();
+        workers::tell_direct(&self.app, r.run, &r.text)
             .await
             .or_fail()?;
         changed(self);

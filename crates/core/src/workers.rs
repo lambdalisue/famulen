@@ -8,6 +8,7 @@ mod bounds;
 mod direct;
 mod dispatch;
 mod finish;
+mod finishing;
 mod ledger;
 mod notebook;
 mod order;
@@ -24,6 +25,7 @@ pub(crate) use agent::executor_program;
 pub use direct::*;
 pub use dispatch::*;
 pub use finish::*;
+pub use finishing::*;
 pub use ledger::*;
 pub use order::*;
 pub use pool::{Pool, run};
@@ -114,6 +116,11 @@ pub struct Workers {
     pub(crate) kept: Kept,
     /// Where work may run directly, when the owner set it.
     pub(crate) direct: Option<Direct>,
+    /// How work run directly may be finished, for each repository named.
+    pub(crate) finishing: Vec<Rule>,
+    /// Whether work that could be run directly and finished is run so when no
+    /// runner is named.
+    pub(crate) direct_by_default: bool,
     poke: Arc<Notify>,
     /// Adroit sessions something was told of, to be looked at at once.
     heard: Arc<Mutex<HashSet<String>>>,
@@ -134,6 +141,8 @@ impl Workers {
             executors,
             kept,
             direct: None,
+            finishing: Vec::new(),
+            direct_by_default: false,
             poke: Arc::default(),
             heard: Arc::default(),
             closed: Arc::default(),
@@ -145,6 +154,22 @@ impl Workers {
     /// Let work run directly where `direct` says.
     pub fn with_direct(self, direct: Option<Direct>) -> Self {
         Self { direct, ..self }
+    }
+
+    /// Finish work run directly as `rules` allow.
+    pub fn with_finishing(self, rules: Vec<Rule>) -> Self {
+        Self {
+            finishing: rules,
+            ..self
+        }
+    }
+
+    /// Run what could be run directly and finished so, when no runner is named.
+    pub fn with_direct_by_default(self, direct_by_default: bool) -> Self {
+        Self {
+            direct_by_default,
+            ..self
+        }
     }
 
     /// Have the pool look at its tasks now.

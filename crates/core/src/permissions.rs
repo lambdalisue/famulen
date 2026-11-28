@@ -379,14 +379,39 @@ impl Permissions {
         why: impl Into<String>,
         until: i64,
     ) -> anyhow::Result<Decision> {
-        const START: &str = "start_work";
+        self.ask_for_run(run, "start_work", input, why.into(), until)
+            .await
+    }
+
+    /// Ask the owner whether what a run published may be merged. An approval
+    /// holds once, for what `input` describes, until `until`.
+    pub async fn decide_merge(
+        &self,
+        run: i64,
+        input: &Value,
+        why: impl Into<String>,
+        until: i64,
+    ) -> anyhow::Result<Decision> {
+        self.ask_for_run(run, "merge_work", input, why.into(), until)
+            .await
+    }
+
+    /// Ask the owner about something Famulen itself does for a run.
+    async fn ask_for_run(
+        &self,
+        run: i64,
+        what: &str,
+        input: &Value,
+        why: String,
+        until: i64,
+    ) -> anyhow::Result<Decision> {
         let actor = job_actor(run);
-        self.gateway.grant(&actor, "", START)?;
+        self.gateway.grant(&actor, "", what)?;
         self.gateway.expire(&actor, until)?;
         let call = Call {
-            marks: Some(builtin_marks(START)),
-            ask: Some(why.into()),
-            ..Call::new(actor, "", START, input.clone())
+            marks: Some(builtin_marks(what)),
+            ask: Some(why),
+            ..Call::new(actor, "", what, input.clone())
         };
         Ok(match self.gateway.judge_assessed(&call).await? {
             Verdict::Allow { .. } => Decision::Allow,
