@@ -379,6 +379,7 @@ impl Api {
             .app
             .conversations
             .of_request(r.id, session, |request| self.app.request_made_in(request));
+        let still_asked = ticket.as_ref().and_then(approvals::still_asked);
         Approval {
             conversation: conversation.ok().flatten().unwrap_or_default(),
             deed: wording::deed(&r.tool, connection.as_ref()),
@@ -389,7 +390,9 @@ impl Api {
                 .map(approval_given)
                 .collect(),
             once: approvals::once(&self.app.permissions, &r.tool)
-                || ticket.as_ref().is_some_and(approvals::answered_once),
+                || ticket.as_ref().is_some_and(approvals::answered_once)
+                || still_asked.is_some(),
+            still_asked: still_asked.unwrap_or_default().to_owned(),
             questions: approvals::questions(&self.app.permissions, &r.tool, &shown)
                 .into_iter()
                 .map(|q| pb::ApprovalQuestion {

@@ -35,6 +35,10 @@ use crate::hub::{Hub, SERVER_NAME, failed};
 use crate::models::{ModelSpec, Role, Usage};
 use crate::permissions::{DELEGATE_INSTEAD, Decision, LAUNCHERS, Pass, job_actor, split_tool};
 
+/// Why a worker holding the notebook is asked about what goes out.
+pub(crate) const NOTEBOOK_THEN_OTHERS: &str =
+    "it was given the notebook and has since read what others wrote";
+
 /// How long one run may take.
 const TIME_LIMIT: Duration = Duration::from_secs(2 * 60 * 60);
 /// How much may be kept of what a run writes and is written.
@@ -542,7 +546,7 @@ impl Job {
             ),
             None => notebook::web(tool),
         };
-        outward.then(|| "it was given the notebook and has since read what others wrote".to_owned())
+        outward.then(|| NOTEBOOK_THEN_OTHERS.to_owned())
     }
 
     /// `answer` to a use of `tool`, kept first when it lets the web be read.

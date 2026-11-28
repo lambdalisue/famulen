@@ -85,7 +85,7 @@ impl Gateway {
         );
         let input = json!({ "name": name, "value": value.as_ref(), "purpose": purpose });
         if let Some(ticket) = self.judge_vault(actor, PUT_SECRET, input, &["value"])? {
-            return Ok(Outcome::Held(ticket));
+            return Ok(Outcome::Held(Box::new(ticket)));
         }
         self.put_now(actor, name, value.as_ref(), purpose)
             .map(Outcome::Done)
@@ -113,7 +113,7 @@ impl Gateway {
         );
         let input = json!({ "name": name, "description": description });
         if let Some(ticket) = self.judge_vault(actor, DESCRIBE_SECRET, input, &[])? {
-            return Ok(Outcome::Held(ticket));
+            return Ok(Outcome::Held(Box::new(ticket)));
         }
         self.describe_now(actor, name, description)
             .map(Outcome::Done)
@@ -257,7 +257,7 @@ impl Gateway {
         if let Some(ticket) =
             self.judge_vault(actor, DELETE_SECRET, json!({ "name": name }), &[])?
         {
-            return Ok(Outcome::Held(ticket));
+            return Ok(Outcome::Held(Box::new(ticket)));
         }
         self.delete_now(actor, name).map(Outcome::Done)
     }

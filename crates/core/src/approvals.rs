@@ -12,15 +12,17 @@ use serde_json::{Value, json};
 use famulen_gateway::{Question, Ticket};
 
 use crate::asking;
+use crate::claude::session::OUTWARD;
 use crate::disclosure;
 use crate::input::{Input, Reach, Sender, Source};
-use crate::permissions::Permissions;
+use crate::permissions::{OUTSIDE_WORKGROUP, Permissions};
 use crate::slack::clients::SlackClients;
 use crate::slack::events::Action;
 use crate::slack::mrkdwn::escape;
 use crate::slack::web::{Outgoing, Room, Slack};
 use crate::store::{Store, now};
 use crate::wording;
+use crate::workers::agent::NOTEBOOK_THEN_OTHERS;
 
 pub(crate) mod asked;
 mod exposure;
@@ -423,7 +425,8 @@ impl<S: Slack> Approvals<S> {
             let asked = Asked::of(&self.permissions, tool);
             let once = once(&self.permissions, tool) || answered_once(ticket);
             let summary = summary(ticket);
-            return request_message(id, &asked, input, summary, None, once);
+            let still_asked = still_asked(ticket).filter(|_| !once);
+            return request_message(id, &asked, input, summary, None, once, still_asked);
         }
         question_message(id, tool, summary(ticket), &questions)
     }
@@ -490,7 +493,13 @@ impl<S: Slack> Approvals<S> {
         }
         let before = self.permissions.gateway().ticket(id)?;
         let answer = match answer {
-            Answer::AlwaysAllow if before.as_ref().is_some_and(answered_once) => Answer::Approve,
+            Answer::AlwaysAllow
+                if before
+                    .as_ref()
+                    .is_some_and(|t| answered_once(t) || still_asked(t).is_some()) =>
+            {
+                Answer::Approve
+            }
             answer => answer,
         };
         let Some(answered) = self
@@ -619,7 +628,9 @@ impl<S: Slack> Approvals<S> {
                     let note = failed.or(said.map(|said| format!("「{said}」と答えました")));
                     let message = match note {
                         Some(note) => noted_message(id, &asked, summary, &note),
-                        None => request_message(id, &asked, &input, summary, Some(answer), false),
+                        None => {
+                            request_message(id, &asked, &input, summary, Some(answer), false, None)
+                        }
                     };
                     slack.update(&channel, &ts, message).await?;
                 }
@@ -836,6 +847,29 @@ pub fn answered_once(ticket: &Ticket) -> bool {
     discloses(ticket) || crate::permissions::is_job_actor(&ticket.actor)
 }
 
+/// Why allowing the tool would not stop calls like the one `ticket` holds,
+/// so the owner is not offered to.
+pub fn still_asked(ticket: &Ticket) -> Option<&'static str> {
+    // A ticket held without the ask kept apart still begins its reason with it.
+    let ask = ticket.ask.as_deref().or_else(|| {
+        ticket.reason.lines().next().filter(|line| {
+            *line == OUTWARD || *line == NOTEBOOK_THEN_OTHERS || line.contains(OUTSIDE_WORKGROUP)
+        })
+    })?;
+    if answered_once(ticket) {
+        return None;
+    }
+    Some(if ask == OUTWARD {
+        "見張りが拾ったものを扱っているので、外へ出すものは許可にしていても聞きます"
+    } else if ask == NOTEBOOK_THEN_OTHERS {
+        "手帳を渡した手代が他人の書いたものを読んだので、許可にしていても聞きます"
+    } else if ask.contains(OUTSIDE_WORKGROUP) {
+        "このつなぎ先はワークグループの外なので、許可にしていても聞きます"
+    } else {
+        "この場では、道具を許可にしていても聞きます"
+    })
+}
+
 /// Whether the owner answers questions in a request instead of approving it.
 pub fn asks_questions(permissions: &Permissions, ticket: &Ticket) -> bool {
     !questions(permissions, &ticket_tool(ticket), &ticket.shown).is_empty()
@@ -952,6 +986,7 @@ fn request_message(
     summary: Option<&str>,
     answered: Option<Answer>,
     once: bool,
+    still_asked: Option<&str>,
 ) -> Outgoing {
     let mut blocks = heading(id, &format!("{}を許しますか？", asked.mrkdwn()), summary);
     // What is decided is shown as it is, without the secretary's own words.
@@ -969,7 +1004,9 @@ fn request_message(
                 buttons.push(button("承認", Answer::Approve, id, Some("primary")));
             }
             buttons.push(button("却下", Answer::Reject, id, Some("danger")));
-            if !once {
+            if let Some(why) = still_asked {
+                blocks.push(context(why));
+            } else if !once {
                 buttons.push(button("今後は常に許可", Answer::AlwaysAllow, id, None));
             }
             blocks.push(json!({ "type": "actions", "elements": buttons }));
@@ -1037,7 +1074,7 @@ fn outcome_text(id: i64, tool: &str, input: &Value, answer: Answer) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permissions::{Decision, Permission};
+    use crate::permissions::{Bound, Caller, Decision, Permission};
     use crate::slack::fake::FakeSlack;
 
     const OWNER: &str = "U1";
@@ -1471,6 +1508,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_call_allowing_would_not_stop_says_why_and_offers_no_from_now_on() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let first = request(&approvals, &permissions).await;
+        approvals
+            .answer(&press(Answer::AlwaysAllow, first, OWNER))
+            .await
+            .unwrap();
+
+        let outside = Bound {
+            ask: permissions.ask_in("mail", "work").unwrap(),
+            waive: false,
+        };
+        let Decision::Held(id) = permissions
+            .decide_bound(Caller::Secretary, TOOL, &json!({ "other": 1 }), outside)
+            .await
+            .unwrap()
+        else {
+            panic!("an allowed tool is still held outside the workgroup");
+        };
+        approvals.present_held().await.unwrap();
+
+        let blocks = slack.posts().last().unwrap().1.blocks.clone().unwrap();
+        let blocks = blocks.as_array().unwrap();
+        let buttons: Vec<&str> = blocks
+            .iter()
+            .filter(|b| b["type"] == "actions")
+            .flat_map(|b| b["elements"].as_array().unwrap())
+            .map(|b| b["text"]["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(buttons, ["承認", "却下"]);
+        let ticket = permissions.gateway().ticket(id).unwrap().unwrap();
+        let why = still_asked(&ticket).unwrap();
+        assert!(why.contains("ワークグループの外"));
+        assert!(
+            blocks
+                .iter()
+                .any(|b| b["elements"][0]["text"].as_str() == Some(why))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_from_now_on_press_leaves_the_permission_of_such_a_call() {
+        let slack = FakeSlack::default();
+        let (approvals, permissions) = setup(&slack);
+        let before = permissions.permission(TOOL).unwrap();
+        let lookout = Bound {
+            ask: Some(crate::claude::session::OUTWARD.to_owned()),
+            waive: false,
+        };
+        let Decision::Held(id) = permissions
+            .decide_bound(Caller::Secretary, TOOL, &input(), lookout)
+            .await
+            .unwrap()
+        else {
+            panic!("held");
+        };
+        approvals.present_held().await.unwrap();
+
+        approvals
+            .answer(&press(Answer::AlwaysAllow, id, OWNER))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(permissions.permission(TOOL).unwrap(), before);
+        let ticket = permissions.gateway().ticket(id).unwrap().unwrap();
+        assert_eq!(ticket.status, "approved");
+    }
+
+    #[test]
+    fn a_ticket_that_kept_its_ask_only_in_its_reason_is_still_known_to_be_asked() {
+        let mut ticket = Ticket {
+            id: 1,
+            actor: "secretary".into(),
+            connection: String::new(),
+            tool: TOOL.into(),
+            shown: json!({}),
+            reason: format!("{OUTWARD}\nit sends"),
+            ask: None,
+            origin: None,
+            status: "held".into(),
+            created_at: 0,
+        };
+        assert!(still_asked(&ticket).is_some());
+
+        ticket.reason = "it sends".into();
+        assert!(still_asked(&ticket).is_none());
+    }
+
+    #[tokio::test]
     async fn the_answered_message_loses_its_buttons() {
         let slack = FakeSlack::default();
         let (approvals, permissions) = setup(&slack);
@@ -1562,7 +1690,7 @@ mod tests {
             place: "どこか".into(),
         };
         let buttons = |input: &Value, once: bool| -> Vec<String> {
-            let blocks = request_message(1, &asked, input, None, None, once)
+            let blocks = request_message(1, &asked, input, None, None, once, None)
                 .blocks
                 .unwrap();
             blocks

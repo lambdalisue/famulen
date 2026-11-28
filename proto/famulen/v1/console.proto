@@ -229,6 +229,8 @@ message Approval {
   int64 created_at = 5;
   // The owner is asked of every such call: it cannot be allowed from now on.
   bool once = 6;
+  // Why, where allowing the tool would not stop the owner being asked.
+  string still_asked = 24;
   // What the owner answers instead of approving, if anything.
   repeated ApprovalQuestion questions = 7;
   // What the secretary says of it, beside what is asked.

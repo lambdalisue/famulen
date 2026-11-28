@@ -109,7 +109,7 @@ impl Gateway {
                 self.apply_definition(actor, &input).await?;
                 Ok(Outcome::Done(()))
             }
-            Verdict::Hold(ticket) => Ok(Outcome::Held(ticket)),
+            Verdict::Hold(ticket) => Ok(Outcome::Held(Box::new(ticket))),
             Verdict::Deny { reason } => anyhow::bail!("{reason}"),
         }
     }

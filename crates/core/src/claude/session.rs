@@ -1167,7 +1167,8 @@ fn pin_thread(message: &mut Value, place: &Place) {
 
 /// Why the owner is asked before what is said or done outside in this turn:
 /// its material is others' words, and the notebook is at hand.
-const OUTWARD: &str = "this turn is about what others wrote, so nothing goes out without the owner";
+pub(crate) const OUTWARD: &str =
+    "this turn is about what others wrote, so nothing goes out without the owner";
 
 /// What such a turn changes without asking, beside what only reads: it stays
 /// in the notebook or goes to the owner, and has nobody act later. A tool not

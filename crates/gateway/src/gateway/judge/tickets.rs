@@ -41,6 +41,9 @@ pub struct Ticket {
     /// The input as it may be shown: secret fields read `…`.
     pub shown: Value,
     pub reason: String,
+    /// Why the caller had it asked about whatever its permission: allowing
+    /// the tool does not stop such a call from being held.
+    pub ask: Option<String>,
     /// What the caller said it makes the call for.
     pub origin: Option<String>,
     /// `held`, `approved`, `rejected`, `always_allowed` or `lapsed`.
@@ -110,6 +113,12 @@ impl Gateway {
                     params![id, origin],
                 )?;
             }
+            if let Some(ask) = &call.ask {
+                conn.execute(
+                    "INSERT INTO ticket_asks (ticket, ask) VALUES (?1, ?2)",
+                    params![id, ask],
+                )?;
+            }
             id
         };
         if let Some(vault) = sealing {
@@ -132,6 +141,7 @@ impl Gateway {
             tool: call.tool.clone(),
             shown,
             reason: reason.to_owned(),
+            ask: call.ask.clone(),
             origin: call.origin.clone(),
             status: "held".into(),
             created_at,
@@ -222,8 +232,11 @@ impl Gateway {
     fn tickets_where(&self, filter: &str) -> anyhow::Result<Vec<Ticket>> {
         let conn = self.store.conn();
         let mut statement = conn.prepare(&format!(
-            "SELECT id, actor, connection, tool, shown, reason, status, created_at, origin
-             FROM tickets LEFT JOIN ticket_origins ON ticket = id WHERE {filter} ORDER BY id"
+            "SELECT id, actor, connection, tool, shown, reason, status, created_at, origin, ask
+             FROM tickets
+             LEFT JOIN ticket_origins ON ticket_origins.ticket = id
+             LEFT JOIN ticket_asks ON ticket_asks.ticket = id
+             WHERE {filter} ORDER BY id"
         ))?;
         let rows = statement.query_map([], |row| {
             Ok((
@@ -237,6 +250,7 @@ impl Gateway {
                     status: row.get(6)?,
                     created_at: row.get(7)?,
                     origin: row.get(8)?,
+                    ask: row.get(9)?,
                 },
                 row.get::<_, String>(4)?,
             ))

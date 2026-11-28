@@ -154,6 +154,7 @@ export default function ApprovalCard(props: { approval: Approval; hidden?: boole
               </div>
             )}
           </Show>
+          <Show when={r().stillAsked}>{(why) => <p class="sub">{why()}</p>}</Show>
           <Show
             when={change()}
             fallback={

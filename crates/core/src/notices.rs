@@ -376,6 +376,7 @@ mod tests {
             origin: None,
             status: "held".into(),
             created_at: 0,
+            ask: None,
         }
     }
 
