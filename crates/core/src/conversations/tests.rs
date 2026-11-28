@@ -492,7 +492,9 @@ fn what_each_conversation_used_in_a_period_is_summed() {
 #[test]
 fn the_conversations_used_last_come_first_a_page_at_a_time() {
     let b = bench();
-    let ids: Vec<i64> = (0..3).map(|n| b.turn(&b.lookout(n), || {})).collect();
+    let ids: Vec<i64> = ["1", "2", "3"]
+        .map(|ts| b.turn(&b.on_slack(ts, Some(ts), Sender::Owner), || {}))
+        .into();
     let page = b.all.recent("work", None, 2).unwrap();
     let listed: Vec<_> = page.iter().map(|c| c.id).collect();
     assert_eq!(listed, [ids[2], ids[1]]);
@@ -673,4 +675,141 @@ fn a_request_is_of_the_conversation_it_was_made_in_or_that_ordered_its_task() {
     assert_eq!(b.all.of_request(3, None, made_in).unwrap(), Some(of));
     assert_eq!(b.all.of_request(4, Some("s1"), made_in).unwrap(), Some(of));
     assert_eq!(b.all.of_request(5, Some("s2"), made_in).unwrap(), None);
+}
+
+#[test]
+fn what_the_secretary_told_by_itself_is_no_talk_until_the_owner_answers_it() {
+    let b = bench();
+    let (_, row) = b.says("頼み", None);
+    let talk = b.turn(&row, || {
+        b.answers("引き受けた");
+    });
+    let of = b.turn(&b.lookout(1), || {});
+    let listed = || -> Vec<i64> {
+        let found = b.all.recent("work", None, 9).unwrap();
+        found.into_iter().map(|c| c.id).collect()
+    };
+    assert_eq!(listed(), [talk]);
+    assert_ne!(of, talk);
+
+    let next = b.lookout(2);
+    let noticed = b.settle(&next).id;
+    assert!(b.store.start_turn(next.id, "work").unwrap());
+    b.all.began(noticed, &next.input, "work").unwrap();
+    let told = b.answers("届いた知らせ");
+    b.all.ended(noticed, &next).unwrap();
+    b.store.end_turn().unwrap();
+    let (_, reply) = b.says("それは何？", Some(&told));
+    assert_eq!(b.turn(&reply, || {}), noticed);
+    assert_eq!(listed(), [noticed, talk]);
+}
+
+#[test]
+fn notices_hold_what_was_told_before_the_owner_took_part() {
+    let b = bench();
+    b.turn(&b.says("頼み", None).1, || {
+        b.answers("引き受けた");
+    });
+    let of = b.turn(&b.lookout(1), || {
+        b.answers("一件目");
+    });
+    b.turn(&b.lookout(2), || {
+        b.answers("二件目");
+    });
+    let texts = || -> Vec<String> {
+        let found = b.all.notices(&b.log, 0, 9, |_| true).unwrap();
+        found.into_iter().map(|m| m.text).collect()
+    };
+    assert_eq!(texts(), ["一件目", "二件目"]);
+    let newest = b.all.notices(&b.log, 0, 1, |_| true).unwrap().remove(0);
+    assert_eq!(newest.text, "二件目");
+    let older = b.all.notices(&b.log, newest.id, 9, |_| true).unwrap();
+    assert_eq!(
+        older.into_iter().map(|m| m.text).collect::<Vec<_>>(),
+        ["一件目"]
+    );
+
+    let first = b.all.messages(&b.log, of).unwrap().remove(0);
+    let (_, reply) = b.says("詳しく", Some(&first));
+    b.turn(&reply, || {
+        b.answers("詳しい話");
+    });
+    assert_eq!(texts(), ["一件目", "二件目"]);
+}
+
+#[test]
+fn notices_are_unread_until_they_or_their_conversation_were_shown() {
+    let b = bench();
+    let of = b.turn(&b.lookout(1), || {
+        b.answers("一件目");
+    });
+    b.turn(&b.lookout(2), || {
+        b.answers("二件目");
+    });
+    let unread = || b.all.notice_summary(&b.log, |_| true).unwrap().0;
+    assert_eq!(unread(), 2);
+
+    let said = b.all.messages(&b.log, of).unwrap();
+    b.all.read(of, said[0].id).unwrap();
+    assert_eq!(unread(), 1);
+
+    let newest = b.all.notices(&b.log, 0, 1, |_| true).unwrap()[0].id;
+    assert!(b.all.read_notices(&b.log, newest, |_| true).unwrap());
+    assert_eq!(unread(), 0);
+    assert_eq!(b.all.unread(of, &said).unwrap(), 0);
+}
+
+#[test]
+fn reading_the_notices_of_one_workgroup_leaves_the_others_unread() {
+    let b = bench();
+    b.turn(&b.lookout(1), || {
+        b.answers("個人の知らせ");
+    });
+    b.turn(&b.lookout(2), || {
+        b.answers("仕事の知らせ");
+    });
+    let work = |m: &Message| m.text == "仕事の知らせ";
+    let newest = b.all.notices(&b.log, 0, 1, work).unwrap()[0].id;
+    assert!(b.all.read_notices(&b.log, newest, work).unwrap());
+
+    assert_eq!(b.all.notice_summary(&b.log, |_| true).unwrap().0, 1);
+    let first = b.all.notices(&b.log, 0, 9, |_| true).unwrap()[0].id;
+    assert_eq!(b.all.notices_read_to(&b.log, |_| true).unwrap(), first - 1);
+    assert_eq!(b.all.notices_read_to(&b.log, work).unwrap(), newest);
+}
+
+#[test]
+fn notices_stay_unread_however_much_is_said_after_them() {
+    let b = bench();
+    b.turn(&b.lookout(1), || {
+        b.answers("知らせ");
+    });
+    for _ in 0..1_000 {
+        b.log.add(Who::Owner, "話", json!({})).unwrap();
+    }
+    let (unread, last) = b.all.notice_summary(&b.log, |_| true).unwrap();
+    let told = last.unwrap();
+    assert_eq!((unread, told.text.as_str()), (1, "知らせ"));
+    assert_eq!(
+        b.all.notices_read_to(&b.log, |_| true).unwrap(),
+        told.id - 1
+    );
+
+    assert!(b.all.read_notices(&b.log, told.id, |_| true).unwrap());
+    assert_eq!(b.all.notice_summary(&b.log, |_| true).unwrap().0, 0);
+    assert_eq!(b.all.notices_read_to(&b.log, |_| true).unwrap(), told.id);
+}
+
+#[test]
+fn a_notice_replied_to_is_not_counted_among_the_unread() {
+    let b = bench();
+    let of = b.turn(&b.lookout(1), || {
+        b.answers("知らせ");
+    });
+    let told = b.all.messages(&b.log, of).unwrap().remove(0);
+    let (_, reply) = b.says("それは何？", Some(&told));
+    b.turn(&reply, || {
+        b.answers("答え");
+    });
+    assert_eq!(b.all.notice_summary(&b.log, |_| true).unwrap().0, 0);
 }

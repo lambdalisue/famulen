@@ -55,6 +55,9 @@ message ConsoleMessage {
   // The secretary's conversation it is in; 0 when that is not known, as of one
   // not taken up yet.
   int64 conversation = 12;
+  // Of what the secretary told without being asked, before the owner took
+  // part: what it was told by, such as lookout or schedule. Empty otherwise.
+  string notice = 13;
 }
 
 message ListMessagesRequest {
@@ -68,6 +71,8 @@ message ListMessagesRequest {
   // Only this conversation's, and not a page of it, however many threads it
   // ran through, on Slack as well. 0 is every one.
   int64 conversation = 5;
+  // Only the notices, a page at a time.
+  bool notices = 6;
 }
 
 message ListMessagesResponse {
@@ -75,7 +80,8 @@ message ListMessagesResponse {
   repeated ConsoleMessage messages = 1;
   // Whether older messages remain.
   bool more = 2;
-  // Of a conversation's, the newest message the owner has read; 0 is none.
+  // Of a conversation's or of the notices, the newest message the owner has
+  // read; 0 is none.
   int64 read_to = 3;
 }
 
@@ -144,9 +150,12 @@ message Conversation {
 }
 
 message ReadConversationRequest {
+  // 0 is the notices.
   int64 conversation = 1;
   // The newest of its messages that was shown to the owner.
   int64 message = 2;
+  // Of the notices: the workgroup they were shown in.
+  string workgroup = 3;
 }
 
 message ListConversationsRequest {
@@ -165,6 +174,15 @@ message ListConversationsResponse {
   repeated Conversation conversations = 1;
   // Whether more remain.
   bool more = 2;
+  // What the secretary told without being asked, which none of the above is.
+  ConversationNotices notices = 3;
+}
+
+message ConversationNotices {
+  // How many of them the owner has not read.
+  int32 unread = 1;
+  // The newest of them.
+  ConsoleMessage last = 2;
 }
 
 message SendRequest {

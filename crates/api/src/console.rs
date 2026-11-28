@@ -84,6 +84,10 @@ fn message(
             .into(),
         thread: m.thread().unwrap_or_default(),
         conversation: conversations.of_message(m)?.unwrap_or_default(),
+        notice: conversations
+            .notice_of(log, m)?
+            .map(|source| source_of(&source).0.into())
+            .unwrap_or_default(),
         text: m.text.clone(),
         workgroup: meta("workgroup"),
         origin: meta("origin"),
@@ -169,6 +173,22 @@ fn source_of(source: &Source) -> (&'static str, String) {
         Source::Asked { request, .. } => ("approval", format!("#{request}")),
         Source::Worker { task, .. } => ("worker", task.clone()),
     }
+}
+
+/// What stands for an input where the owner is told of it: what someone wrote,
+/// or, of what the system words itself, what kind of thing it is.
+fn headline(input: &Input) -> String {
+    let kind = match input.source {
+        Source::Console { .. }
+        | Source::Slack { .. }
+        | Source::Schedule { .. }
+        | Source::Wake { .. } => return input.gist(),
+        Source::Approval { .. } | Source::Asked { .. } => "確認の答え",
+        Source::Arrival { .. } => "つなぎ先の知らせ",
+        Source::Lookout { .. } => "見張りの知らせ",
+        Source::Worker { .. } => "委託の終わり",
+    };
+    kind.into()
 }
 
 fn input_item(stored: StoredInput, at: i64) -> InputItem {
@@ -303,11 +323,16 @@ impl Api {
             .as_ref()
             .map(|row| source_of(&row.input.source))
             .unwrap_or_default();
-        let title = first
-            .map(|row| excerpt(&row.input.gist(), TITLE))
-            .unwrap_or_default();
         let mut said = all.messages(&self.app.console, c.id)?;
         said.retain(|m| m.shown_in(workgroup));
+        let title = match first {
+            Some(row) if row.input.is_spoken() => excerpt(&row.input.gist(), TITLE),
+            _ => said
+                .iter()
+                .find(|m| m.who == Who::Aide)
+                .map(|m| excerpt(&m.text, TITLE))
+                .unwrap_or_default(),
+        };
         Ok(pb::Conversation {
             unread: all.unread(c.id, &said)? as i32,
             running: all.running()? == Some(c.id),
@@ -408,7 +433,7 @@ impl Api {
             .map(|h| {
                 Ok(HeldInput {
                     id: h.id,
-                    text: h.input.gist(),
+                    text: headline(&h.input),
                     at: self.arrived_at(h.id)?,
                     conversation: self.app.conversations.of_input(h.id)?.unwrap_or_default(),
                     ..Default::default()
@@ -458,7 +483,7 @@ impl Api {
                 .app
                 .store
                 .get(turn.input)?
-                .map(|i| i.input.gist().chars().take(60).collect())
+                .map(|i| headline(&i.input).chars().take(TITLE).collect())
                 .unwrap_or_default(),
             None => String::new(),
         };
@@ -520,12 +545,17 @@ impl ConsoleService for Api {
             n if n > 0 => (n as usize).min(MOST_MESSAGES),
             _ => 120,
         };
+        let (log, all) = (&self.app.console, &self.app.conversations);
+        let shown = |m: &console_log::Message| m.shown_in(&r.workgroup);
         // One past the limit tells whether more remain.
-        let mut found = self
-            .app
-            .console
-            .before(r.before, limit + 1, |m| m.shown_in(&r.workgroup))
-            .or_fail()?;
+        let (mut found, read_to) = if r.notices {
+            (
+                all.notices(log, r.before, limit + 1, shown).or_fail()?,
+                all.notices_read_to(log, shown).or_fail()?,
+            )
+        } else {
+            (log.before(r.before, limit + 1, shown).or_fail()?, 0)
+        };
         let more = found.len() > limit;
         if more {
             found.remove(0);
@@ -533,6 +563,7 @@ impl ConsoleService for Api {
         Response::ok(ListMessagesResponse {
             messages: self.messages(&found, &r.workgroup).or_fail()?,
             more,
+            read_to,
             ..Default::default()
         })
     }
@@ -659,9 +690,24 @@ impl ConsoleService for Api {
             })
             .collect::<anyhow::Result<_>>()
             .or_fail()?;
+        let notices = {
+            let (unread, last) = all
+                .notice_summary(&self.app.console, |m| m.shown_in(&r.workgroup))
+                .or_fail()?;
+            pb::ConversationNotices {
+                unread: unread as i32,
+                last: last
+                    .map(|m| self.message(&m, &r.workgroup))
+                    .transpose()
+                    .or_fail()?
+                    .into(),
+                ..Default::default()
+            }
+        };
         Response::ok(ListConversationsResponse {
             conversations,
             more,
+            notices: notices.into(),
             ..Default::default()
         })
     }
@@ -672,13 +718,19 @@ impl ConsoleService for Api {
         request: ServiceRequest<'_, ReadConversationRequest>,
     ) -> ServiceResult<Empty> {
         let (id, message) = (request.conversation, request.message);
-        self.app
-            .conversations
-            .get(id)
-            .or_fail()?
-            .ok_or_else(|| fail(format!("no conversation {id}")))?;
+        let (log, all) = (&self.app.console, &self.app.conversations);
+        let changed = if id == conversations::NOTICES {
+            let workgroup = request.workgroup;
+            all.read_notices(log, message, |m| m.shown_in(workgroup))
+                .or_fail()?
+        } else {
+            all.get(id)
+                .or_fail()?
+                .ok_or_else(|| fail(format!("no conversation {id}")))?;
+            all.read(id, message).or_fail()?
+        };
         // Any other screen that counts it as unread is told.
-        if self.app.conversations.read(id, message).or_fail()? {
+        if changed {
             self.app.console.notify(Event::Approvals);
         }
         Response::ok(Empty::default())

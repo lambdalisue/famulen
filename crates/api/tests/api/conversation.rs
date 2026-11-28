@@ -374,3 +374,67 @@ async fn what_conversations_used_in_a_period_is_told_with_the_total() {
     assert_eq!(used["conversations"][0]["title"], "話");
     assert_eq!(used["conversations"][0]["spent"], expected);
 }
+
+fn looked_out(api: &famulen_api::Api, item: i64) {
+    let input = famulen_core::input::Input {
+        sender: famulen_core::input::Sender::System,
+        source: Source::Lookout {
+            source: "mail".into(),
+            item,
+        },
+        text: "The lookout passed this on".into(),
+    };
+    api.app().store.enqueue(&input).unwrap();
+}
+
+#[tokio::test]
+async fn what_was_told_unasked_is_a_notice_and_no_talk_until_answered() {
+    let dir = temp();
+    let api = open(&dir);
+    looked_out(&api, 1);
+    let told = turn(&api, "請求書が届いています").await;
+    assert_eq!(told["notice"], "lookout");
+
+    let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
+    assert_eq!(listed["conversations"], Value::Null);
+    assert_eq!(listed["notices"]["unread"], 1);
+    assert_eq!(listed["notices"]["last"]["id"], told["id"]);
+
+    let body = json!({ "notices": true });
+    let notices = call(&api, "ConsoleService/ListMessages", body.clone()).await;
+    assert_eq!(texts(&notices), ["請求書が届いています"]);
+    assert_eq!(notices["readTo"], Value::Null);
+
+    let shown = json!({ "message": told["id"] });
+    call(&api, "ConsoleService/ReadConversation", shown).await;
+    let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
+    assert_eq!(listed["notices"]["unread"], Value::Null);
+    let notices = call(&api, "ConsoleService/ListMessages", body).await;
+    assert_eq!(notices["readTo"], told["id"]);
+
+    let reply = json!({ "text": "いつまで？", "replyTo": told["id"], "workgroup": "all" });
+    let sent = call(&api, "ConsoleService/Send", reply).await;
+    assert_eq!(sent["conversation"], told["conversation"]);
+    let listed = call(&api, "ConsoleService/ListConversations", json!({})).await;
+    assert_eq!(listed["conversations"][0]["id"], told["conversation"]);
+    assert_eq!(listed["conversations"][0]["title"], "請求書が届いています");
+}
+
+#[tokio::test]
+async fn what_the_system_put_to_the_secretary_is_never_shown_as_its_words() {
+    let dir = temp();
+    let api = open(&dir);
+    looked_out(&api, 1);
+    let row = api.app().store.next_pending().unwrap().unwrap();
+    let c = api.app().conversations.settle(&row, |_| None).unwrap();
+    api.app().store.start_turn(row.id, "all").unwrap();
+
+    let status = call(&api, "ConsoleService/GetStatus", json!({})).await;
+    assert_eq!(status["doing"], "見張りの知らせ");
+    api.app().store.hold_turn().unwrap();
+    let inbox = call(&api, "ConsoleService/GetInbox", json!({})).await;
+    assert_eq!(inbox["held"][0]["text"], "見張りの知らせ");
+    let body = json!({ "also": c.id.to_string() });
+    let listed = call(&api, "ConsoleService/ListConversations", body).await;
+    assert_eq!(listed["conversations"][0]["title"], Value::Null);
+}

@@ -6,7 +6,7 @@ import Message, { Quote } from "~/components/Message";
 import { holdPageBehind } from "~/components/hold";
 import { createPull } from "~/components/pull";
 import { createSwipeBack } from "~/components/swipe";
-import Talk, { TalkHead } from "~/components/Talk";
+import Talk, { NoticesHead, TalkHead } from "~/components/Talk";
 import TalkList, { type Waits } from "~/components/TalkList";
 import Thread from "~/components/Thread";
 import * as icons from "~/lib/icons";
@@ -24,7 +24,7 @@ import { working } from "~/lib/events";
 import { createKept, createSame } from "~/lib/kept";
 import { excerptOf } from "~/lib/records";
 import { offsetIn, pointOut } from "~/lib/scroll";
-import { createTalk, createTalks, forgetLast, go, lastOpen, openTalk, type Place, place, restorePlace, titleOf } from "~/lib/talks";
+import { createTalk, createTalks, forgetLast, go, lastOpen, NOTICES, openTalk, type Place, place, restorePlace, titleOf } from "~/lib/talks";
 import { createThread } from "~/lib/thread";
 import { useOwner } from "~/lib/owner";
 import { isNarrow, narrow } from "~/lib/viewport";
@@ -128,7 +128,11 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   /** The conversation what is written in one line goes on with; none begins one. */
   const [target, setTarget] = createSignal<bigint>();
   const talks = createTalks(workgroup, () => open() ?? target());
-  const one = createTalk(workgroup, open);
+  const noticing = () => place().kind === "notices";
+  /** What is read on its own: the conversation open, or the notices. */
+  const apart = () => (noticing() ? NOTICES : open());
+  const one = createTalk(workgroup, apart);
+  const unnoticed = () => talks.notices()?.unread ?? 0;
   /** The conversation what is written goes on with; none begins one. A reply goes to that of its message. */
   const goesOn = () => open() ?? (replyTo()?.conversation || target());
   const [text, setText] = createSignal("");
@@ -172,9 +176,10 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     held: waiting.held().filter((h) => h.conversation === id).length,
   });
   const wants = (id: bigint) => waits(id).approvals + waits(id).held > 0;
-  /** How many other conversations have something for the owner. */
+  /** How many other places have something for the owner. */
   const elsewhere = () =>
     talks.talks().filter((c) => c.id !== open() && (c.unread > 0 || wants(c.id))).length +
+    (unnoticed() > 0 && !noticing() ? 1 : 0) +
     waiting.approvals().filter((a) => a.conversation !== 0n && a.conversation !== open() && strays(a.conversation)).length;
   /** Whether a conversation is not on the list, so that what waits in it is answered over the list. */
   const strays = (conversation: bigint) => (talks.there() ? !talks.of(conversation) : !!talks.failed());
@@ -201,17 +206,18 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     onCleanup(() => document.removeEventListener("visibilitychange", seen));
     restorePlace();
   });
-  let told = 0n;
+  let told = "";
   createEffect(() => {
-    const id = open();
+    const id = apart();
     const last = one.messages().at(-1);
-    if (id === undefined || !last || !visible() || (isNarrow() && !props.open)) return;
-    if (last.id === told) return;
-    told = last.id;
+    if (id === undefined || !last || !one.whole() || !visible() || (isNarrow() && !props.open)) return;
+    const of = workgroup();
+    if (`${of} ${last.id}` === told) return;
+    told = `${of} ${last.id}`;
     // It is told again with the next one, should it fail.
-    api.console.readConversation({ conversation: id, message: last.id }).catch(() => {});
+    api.console.readConversation({ conversation: id, message: last.id, workgroup: of }).catch(() => {});
   });
-  /** Something that came to a conversation that is not on the screen. */
+  /** Something that came to a conversation that is not on the screen, or a notice. */
   const [arrived, setArrived] = createSignal<bigint>();
   const arrives = (id: bigint) => {
     const at = place().kind;
@@ -227,6 +233,16 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     if (before?.of !== of) return;
     for (const [id, n] of by) if (n > (before.by.get(id) ?? 0)) untrack(() => arrives(id));
   });
+  let noticedBefore: { of: string; unread: number } | undefined;
+  createEffect(() => {
+    if (!talks.there()) return;
+    const now = { of: workgroup(), unread: unnoticed() };
+    const before = noticedBefore;
+    noticedBefore = now;
+    if (before?.of !== now.of || now.unread <= before.unread) return;
+    const at = untrack(place).kind;
+    if (at === "talk" || at === "new") setArrived(NOTICES);
+  });
   let askedBefore: Set<bigint> | undefined;
   createEffect(() => {
     const asked = waiting.approvals();
@@ -237,7 +253,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
   });
   createEffect(
     on(place, (at) => {
-      if (at.kind === "list" || at.kind === "all" || (at.kind === "talk" && at.id === arrived())) setArrived();
+      if (at.kind === "list" || at.kind === "all" || (at.kind === "notices" && arrived() === NOTICES) || (at.kind === "talk" && at.id === arrived())) setArrived();
     }),
   );
   const [error, setError] = createSignal("");
@@ -506,8 +522,8 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
     else carry({ kind: "new" });
   };
   /** What the folded conversation says of the open one. */
-  const folded = () => (open() === undefined ? "" : `${titled(open())}：${excerptOf(one.messages().at(-1)?.text ?? "", 160)}`);
-  const newOnes = () => talks.talks().reduce((n, c) => n + c.unread, 0);
+  const folded = () => (apart() === undefined ? "" : `${noticing() ? "通知" : titled(open())}：${excerptOf(one.messages().at(-1)?.text ?? "", 160)}`);
+  const newOnes = () => talks.talks().reduce((n, c) => n + c.unread, unnoticed());
 
   const attach = (files: Iterable<File>) => {
     setError("");
@@ -577,6 +593,10 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
             </>
           )}
         </Show>
+        <Show when={noticing()}>
+          <NoticesHead elsewhere={elsewhere()} />
+          <Talk talk={one} id={NOTICES} aide={aide()} tz={tz()} working="" onReply={reply} />
+        </Show>
         <Show when={place().kind === "all"}>
           <header class="talk-head">
             <button type="button" class="btn ghost small talk-back" aria-label="話の一覧へ" title="話の一覧へ" onClick={() => go({ kind: "list" })}>
@@ -613,20 +633,18 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
           </Show>
         </div>
         <Inbox aide={aide()} shows={shows} />
-        <Show when={arrived()}>
-          {(id) => (
-            <div class="arrival" role="status">
-              <Icon svg={icons.bell} size={16} />
-              <span class="grow">
-                <b>ほかの話に届いた</b>
-                <span class="arrival-title">{titled(id())}</span>
-              </span>
-              <Button small onClick={() => openTalk(id())}>
-                開く
-              </Button>
-              <IconButton plain icon={icons.x} label="あとで" onClick={() => setArrived()} />
-            </div>
-          )}
+        <Show when={arrived() !== undefined}>
+          <div class="arrival" role="status">
+            <Icon svg={icons.bell} size={16} />
+            <span class="grow">
+              <b>{arrived() === NOTICES ? "通知が届いた" : "ほかの話に届いた"}</b>
+              <span class="arrival-title">{arrived() === NOTICES ? excerptOf(talks.notices()?.last?.text ?? "", 80) : titled(arrived())}</span>
+            </span>
+            <Button small onClick={() => (arrived() === NOTICES ? go({ kind: "notices" }) : openTalk(arrived() ?? NOTICES))}>
+              開く
+            </Button>
+            <IconButton plain icon={icons.x} label="あとで" onClick={() => setArrived()} />
+          </div>
         </Show>
         <button type="button" class="m-peek" aria-label="会話を引き上げる" onClick={() => props.setOpen(true)}>
           <span class="sheet-grip" />
@@ -643,7 +661,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
         </button>
         <form id="composer" class="composer" onSubmit={submit}>
           <div class="dest" role="group" aria-label="送り先">
-            <Show when={!replyTo() || place().kind !== "all"} fallback={<span class="sub">返信</span>}>
+            <Show when={!replyTo() || (place().kind !== "all" && !noticing())} fallback={<span class="sub">返信</span>}>
             <div class="segs">
               <button
                 type="button"
@@ -661,7 +679,7 @@ export default function Chat(props: { open: boolean; setOpen: (open: boolean) =>
               </button>
             </div>
             </Show>
-            <span class="dest-name">{goesOn() === undefined ? "題は最初の一文から付く" : titled(goesOn())}</span>
+            <span class="dest-name">{goesOn() === undefined ? "題は最初の一文から付く" : noticing() ? "この知らせの話になる" : titled(goesOn())}</span>
           </div>
           <div class="view">
             <span class="dot" />

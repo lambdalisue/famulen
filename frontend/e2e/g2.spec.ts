@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import type { Input } from "~/g2/even";
-import { call, record } from "./support";
+import { call, record, tellUnasked } from "./support";
 
 type Shown = { name: string; level: number; text: string };
 
@@ -219,4 +219,112 @@ test("what waits for an answer is shown whole and answered from the menu's 確�
   await expect.poll(() => bright(page)).toContain("やめる");
   await act(page, "tap");
   await expect.poll(async () => (await call<Inbox>(request, "ConsoleService", "GetInbox")).approvals?.find((a) => a.id === id)?.status ?? "answered").not.toBe("pending");
+});
+
+test("what was told unasked is one entry of the conversations, and what is said there answers the notice shown", async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await giveTheVoiceAModel(request);
+  const told = await tellUnasked(request, "眼鏡", "e2e 眼鏡 荷物が届きました");
+  await wear(page);
+  await act(page, "long");
+  await act(page, "tap");
+  await expect.poll(() => bright(page)).toContain("新しい話");
+  await act(page, "down");
+  await expect.poll(() => bright(page)).toContain("通知");
+  await act(page, "tap");
+  await expect.poll(() => screen(page)).toContain("e2e 眼鏡 荷物が届きました");
+  expect(await screen(page)).not.toContain("e2e-work");
+
+  voice.next = "e2e 眼鏡 受け取っておいて";
+  await act(page, "tap");
+  await expect.poll(() => page.evaluate(() => window.fake.microphone)).toBe(true);
+  await speak(page, 2500, 1600);
+  await expect.poll(async () => (await messages(request)).find((m) => m.text === voice.next)?.conversation).toBe(told.conversation);
+});
+
+test("a yes spoken to one notice answers nothing that another one asked", async ({ page, request }) => {
+  test.setTimeout(150_000);
+  await giveTheVoiceAModel(request);
+  const other = await tellUnasked(request, "眼鏡 別件", "e2e 眼鏡 別の知らせ");
+  await tellUnasked(request, "e2e-asks 眼鏡", "e2e 眼鏡 実行してよいですか");
+  type Inbox = { approvals?: { id: string; status: string }[] };
+  const pending = async () => (await call<Inbox>(request, "ConsoleService", "GetInbox")).approvals?.find((a) => a.status === "pending")?.id;
+  const id = await pending();
+  expect(id).toBeTruthy();
+
+  await wear(page);
+  await act(page, "long");
+  await act(page, "tap");
+  await expect.poll(() => bright(page)).toContain("新しい話");
+  await act(page, "down");
+  await expect.poll(() => bright(page)).toContain("通知");
+  await act(page, "tap");
+  await expect.poll(() => screen(page)).toContain("ls");
+  await expect
+    .poll(async () => {
+      if ((await screen(page)).includes("別の知らせ")) return true;
+      await act(page, "up");
+      return false;
+    })
+    .toBe(true);
+
+  voice.next = "はい、眼鏡の別件";
+  await act(page, "tap");
+  await expect.poll(() => page.evaluate(() => window.fake.microphone)).toBe(true);
+  await speak(page, 2500, 1600);
+  await expect.poll(async () => (await messages(request)).find((m) => m.text === voice.next)?.conversation).toBe(other.conversation);
+  expect(await pending()).toBe(id);
+  await call(request, "ConsoleService", "AnswerApproval", { id, answer: "APPROVAL_ANSWER_DENY" });
+});
+
+test("notices unread beyond one page are read in before they are marked read, and older ones on going up", async ({ page }) => {
+  const told = (id: number) => ({ id: String(id), at: "1700000000", who: "SPEAKER_AIDE", text: `e2e 知らせ${id}番`, notice: "wake" });
+  const asked: string[] = [];
+  await page.route(/\/ListConversations$/, (route) => route.fulfill({ json: { notices: { unread: 2, last: told(300) } } }));
+  await page.route(/\/ListMessages$/, (route) => {
+    const { before = "0" } = route.request().postDataJSON() as { before?: string };
+    asked.push(`list ${before}`);
+    const at = before === "0" ? 300 : Number(before) - 100;
+    return route.fulfill({ json: { messages: [told(at)], more: at > 100, readTo: "199" } });
+  });
+  await page.route(/\/ReadConversation$/, (route) => {
+    asked.push(`read ${(route.request().postDataJSON() as { message?: string }).message}`);
+    return route.fulfill({ json: {} });
+  });
+  await wear(page);
+  await expect.poll(() => asked).toContain("read 300");
+  expect(asked.slice(0, asked.indexOf("read 300") + 1)).toEqual(["list 0", "list 300", "read 300"]);
+
+  await expect.poll(() => bright(page)).toContain("知らせ300番");
+  await act(page, "up");
+  await expect.poll(() => bright(page)).toContain("知らせ200番");
+  await act(page, "up");
+  await expect.poll(() => bright(page)).toContain("知らせ100番");
+});
+
+test("the notice being read stays on screen when older pages are put before it", async ({ page, request }) => {
+  const told = (id: number) => ({ id: String(id), at: "1700000000", who: "SPEAKER_AIDE", text: `e2e 知らせ${id}番`, notice: "wake" });
+  // A newer notice moves where the pages of them break, so reading back reaches further than before.
+  let came = false;
+  const asked: string[] = [];
+  await page.route(/\/ListConversations$/, (route) => route.fulfill({ json: { notices: { unread: 0, last: told(300) } } }));
+  await page.route(/\/ListMessages$/, (route) => {
+    const { before = "0" } = route.request().postDataJSON() as { before?: string };
+    asked.push(`${came ? "then" : "first"} ${before}`);
+    const [ids, more] = !came ? (before === "0" ? [[300], true] : [[200], true]) : before === "0" ? [[300, 400], true] : [[100, 200], false];
+    return route.fulfill({ json: { messages: (ids as number[]).map(told), more, readTo: came ? "300" : "199" } });
+  });
+  await page.route(/\/ReadConversation$/, (route) => route.fulfill({ json: {} }));
+  await wear(page);
+  await expect.poll(() => bright(page)).toContain("知らせ300番");
+  await act(page, "up");
+  await expect.poll(() => bright(page)).toContain("知らせ200番");
+
+  came = true;
+  await tellUnasked(request, "眼鏡の読み位置", "e2e 眼鏡 新しい知らせ");
+  await expect.poll(() => asked).toContain("then 300");
+  await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  expect(await bright(page)).toContain("知らせ200番");
+  await act(page, "up");
+  await expect.poll(() => bright(page)).toContain("知らせ100番");
 });

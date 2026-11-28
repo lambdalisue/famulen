@@ -184,3 +184,19 @@ export async function holdBack(page: Page, method: string) {
     letGo: () => letGo(),
   };
 }
+
+/**
+ * Have the secretary tell something nobody asked for: a wake-up comes due, and
+ * it speaks in the turn that takes it. The scheduler looks only every 20 s, so a
+ * test that calls this needs longer than usual.
+ */
+export async function tellUnasked(request: APIRequestContext, note: string, text: string) {
+  const state = async () => (await call<{ state: string }>(request, "ConsoleService", "GetStatus")).state;
+  await expect.poll(state, { timeout: 20_000 }).not.toBe("running");
+  await call(request, "RoutineService", "WakeAt", { at: new Date(Date.now() + 2_000).toISOString(), note: `e2e-work ${note}` });
+  await expect.poll(state, { timeout: 45_000 }).toBe("running");
+  const told = await call<{ id: string; conversation: string }>(request, "ConsoleService", "PostMessage", { text });
+  letOn("search", "found", "end");
+  await expect.poll(state, { timeout: 20_000 }).not.toBe("running");
+  return told;
+}
