@@ -137,7 +137,7 @@ impl Taint {
 }
 
 /// What carries marks: a turn, or what a turn leaves for later.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Holder {
     Input(i64),
     Wake(i64),
@@ -176,20 +176,74 @@ pub(super) fn conversation_of(store: &Store, input: i64) -> anyhow::Result<Optio
         .optional()?)
 }
 
+const INSERT: &str = "INSERT OR IGNORE INTO taints (holder, taint) VALUES (?1, ?2)";
+
+/// Mark for good: no comparison takes it back.
 pub(super) fn mark(store: &Store, holder: &Holder, taints: &[Taint]) -> anyhow::Result<()> {
+    let conn = store.conn();
     for taint in taints {
-        store.conn().execute(
-            "INSERT OR IGNORE INTO taints (holder, taint) VALUES (?1, ?2)",
-            params![holder.key(), serde_json::to_string(taint)?],
+        let pair = params![holder.key(), serde_json::to_string(taint)?];
+        conn.execute(INSERT, pair)?;
+        conn.execute(
+            "DELETE FROM taint_doubts WHERE holder = ?1 AND taint = ?2",
+            pair,
+        )?;
+    }
+    Ok(())
+}
+
+/// Mark until `doubt`, and every other one on the same mark, is cleared.
+/// False where the mark is already held for good.
+pub(super) fn mark_doubted(
+    store: &Store,
+    doubt: i64,
+    holder: &Holder,
+    taint: &Taint,
+) -> anyhow::Result<bool> {
+    let (holder, taint) = (holder.key(), serde_json::to_string(taint)?);
+    let conn = store.conn();
+    let for_good: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM taints WHERE holder = ?1 AND taint = ?2)
+            AND NOT EXISTS (SELECT 1 FROM taint_doubts WHERE holder = ?1 AND taint = ?2)",
+        [&holder, &taint],
+        |r| r.get(0),
+    )?;
+    if !for_good {
+        conn.execute(INSERT, [&holder, &taint])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO taint_doubts (holder, taint, doubt) VALUES (?1, ?2, ?3)",
+            params![holder, taint, doubt],
+        )?;
+    }
+    Ok(!for_good)
+}
+
+pub(super) fn clear_doubt(
+    store: &Store,
+    doubt: i64,
+    holder: &Holder,
+    taint: &Taint,
+) -> anyhow::Result<()> {
+    let (holder, taint) = (holder.key(), serde_json::to_string(taint)?);
+    let conn = store.conn();
+    let waited = conn.execute(
+        "DELETE FROM taint_doubts WHERE holder = ?1 AND taint = ?2 AND doubt = ?3",
+        params![holder, taint, doubt],
+    )?;
+    if waited > 0 {
+        conn.execute(
+            "DELETE FROM taints WHERE holder = ?1 AND taint = ?2
+             AND NOT EXISTS (SELECT 1 FROM taint_doubts WHERE holder = ?1 AND taint = ?2)",
+            [&holder, &taint],
         )?;
     }
     Ok(())
 }
 
 pub(super) fn clear(store: &Store, holder: &Holder) -> anyhow::Result<()> {
-    store
-        .conn()
-        .execute("DELETE FROM taints WHERE holder = ?1", [holder.key()])?;
+    let conn = store.conn();
+    conn.execute("DELETE FROM taint_doubts WHERE holder = ?1", [holder.key()])?;
+    conn.execute("DELETE FROM taints WHERE holder = ?1", [holder.key()])?;
     Ok(())
 }
 

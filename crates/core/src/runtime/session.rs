@@ -189,6 +189,7 @@ pub(super) async fn run_session(
     loop {
         if store.running()?.is_none() {
             guest = None;
+            services.compare_written().await;
         }
         // Inputs came or a turn ended.
         app.working.tell();
@@ -241,7 +242,14 @@ pub(super) async fn run_session(
                 continue;
             }
             if let Some(resident) = &resident {
-                services.mark_begun(&row).await;
+                if let Err(error) = services.mark_begun(&row).await {
+                    tracing::warn!(%error, id = row.id, "could not record the notebook; the input waits");
+                    services
+                        .journal
+                        .record("session", format!("an input waits: {error}"));
+                    tokio::time::sleep(RESTART_AFTER * 6).await;
+                    continue;
+                }
                 give(app, &services, resident, &conversation, &row, tz)?;
             }
         }

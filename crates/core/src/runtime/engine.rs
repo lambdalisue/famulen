@@ -67,6 +67,7 @@ pub(super) fn start_engine(
     services.turn_ended = Some(app.inputs.clone());
     services.in_flight = links.in_flight.clone();
     services.gateway = Some(app.gateway.clone());
+    services.tz = tz;
     services.reader = Some(Arc::new(ModelReader::new(
         app.models.clone(),
         app.settings.clone(),

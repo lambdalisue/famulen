@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono_tz::Tz;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
@@ -226,6 +227,8 @@ pub struct Services<S> {
     /// Reads what is about to be said where others hear it; without one, the
     /// owner is asked.
     pub reader: Option<Arc<dyn Reader>>,
+    /// The owner's time zone.
+    pub tz: Tz,
     /// Where the resident process works.
     pub workdir: PathBuf,
 }
@@ -262,6 +265,7 @@ impl<S: Slack + Clone> Services<S> {
             in_flight: InFlight::default(),
             gateway: None,
             reader: None,
+            tz: Tz::UTC,
             workdir: PathBuf::new(),
         }
     }
@@ -273,13 +277,26 @@ impl<S: Slack + Clone> Services<S> {
             permissions: &self.permissions,
             approvals: &self.approvals,
             reader: self.reader.as_ref(),
+            tz: self.tz,
         }
     }
 
     /// Mark the conversation of a turn about to begin with what the turn is
     /// given.
-    pub(crate) async fn mark_begun(&self, row: &crate::store::StoredInput) {
-        self.gate().begun_or_held(row.id, &row.input).await
+    /// Fails when the notebook cannot be recorded: what the turn would write
+    /// there could not be marked, so it must not begin.
+    pub(crate) async fn mark_begun(&self, row: &crate::store::StoredInput) -> anyhow::Result<()> {
+        self.gate().begun_or_held(row.id, &row.input).await;
+        self.gate().watch_notebook(row.id, &row.input).await
+    }
+
+    /// Take back what turns were marked with while comparing shows they did
+    /// not need it. Only while no turn runs.
+    pub(crate) async fn compare_written(&self) {
+        let compared = disclosure::compare_written(&self.store, self.reader.as_deref()).await;
+        if let Err(error) = compared {
+            tracing::warn!(%error, "what turns wrote stays marked");
+        }
     }
 
     /// Mark the running turn with what it read. What cannot be marked is not
@@ -511,6 +528,12 @@ fn on_inbound<S: Slack + Clone + 'static>(
                 && let Err(error) = conversations.spent(*id, &usage, cached)
             {
                 tracing::warn!(%error, "could not keep what the turn used");
+            }
+            if answers(services, audience)
+                && let Err(error) =
+                    disclosure::settle_notebook(&services.store, &services.memory_dir)
+            {
+                tracing::warn!(%error, "could not mark what the turn wrote into the notebook");
             }
             // A turn another process runs is not ended by this one's.
             if answers(services, audience)
@@ -812,7 +835,7 @@ async fn marked_own<S: Slack + Clone>(
     let gate = services.gate();
     let read = match tool {
         "list_delegated" => gate.of_runs(answer),
-        _ => gate.of_marked_in(answer),
+        _ => gate.of_marked_read(tool, arguments, answer),
     };
     match read {
         Ok(read) => taints.extend(read),
@@ -1408,6 +1431,13 @@ mod tests {
     fn record(kind: &str, assignee: &str) -> Value {
         serde_json::json!({ "kind": kind, "title": "t",
             "fields": [{ "name": "Assignee", "value": assignee }] })
+    }
+
+    #[tokio::test]
+    async fn a_turn_is_not_begun_while_the_notebook_cannot_be_recorded() {
+        let (services, _) = in_turn(crate::input::Sender::Owner, slack(false));
+        let row = services.store.running_input().unwrap().unwrap();
+        assert!(services.mark_begun(&row).await.is_err());
     }
 
     #[test]

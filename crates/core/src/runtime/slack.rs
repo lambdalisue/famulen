@@ -207,7 +207,7 @@ fn take_from_channel(app: &App, arrival: &Arrival) -> anyhow::Result<Taken> {
     let bot_dm = bot_dm(app, workspace)?;
     let envelope = events::read_envelope(&arrival.payload, workspace, &owner, bot_dm.as_deref());
     let kept = match envelope.input {
-        Some(input) if keep(&app.store, &app.inputs, &input)? => Some(input),
+        Some(input) if keep(&app.store, &app.inputs, &input)?.is_some() => Some(input),
         _ => None,
     };
     if let Some(Source::Slack { channel, ts, .. }) = kept.as_ref().map(|i| &i.source) {
@@ -320,7 +320,7 @@ where
                 text,
             };
             attention::attend(&app.store, workspace, &said.channel, now)?;
-            Ok(keep(&app.store, &app.inputs, &input)?.then_some(input))
+            Ok(keep(&app.store, &app.inputs, &input)?.map(|_| input))
         }
         Some(false) => {
             attention::remember(

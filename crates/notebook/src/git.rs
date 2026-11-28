@@ -189,6 +189,91 @@ pub fn commit_paths(
     Ok(Some(git(dir, &["rev-parse", "HEAD"])?.trim().to_string()))
 }
 
+/// A file that differs between two snapshots, with what it held in each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    /// Relative to the top of the repository.
+    pub path: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// The files of the repository `dir` is in as they are on disk now, committed
+/// or not, as a tree of its own. Neither the history nor what is staged
+/// changes.
+pub fn snapshot(dir: &Path) -> anyhow::Result<String> {
+    let _turn = committing(dir);
+    let top = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim_end());
+    let own = PathBuf::from(git(&top, &["rev-parse", "--absolute-git-dir"])?.trim_end());
+    let index = own.join("famulen-snapshot-index");
+    // Starting from the index spares hashing every file that did not change.
+    match std::fs::copy(own.join("index"), &index) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+        Ok(_) => {}
+        Err(_) => {
+            let _ = std::fs::remove_file(&index);
+        }
+    }
+    let state = format!(":(top){STATE}");
+    let mut tree = String::new();
+    for args in [
+        &["add", "-A", "--", "."] as &[&str],
+        &["rm", "-rq", "--cached", "--ignore-unmatch", "--", &state],
+        &["write-tree"],
+    ] {
+        let output = command(&top, args)
+            .env("GIT_INDEX_FILE", &index)
+            .output()
+            .context("running git")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        tree = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    }
+    std::fs::remove_file(&index)?;
+    Ok(tree)
+}
+
+/// What differs from the snapshot `before` to the snapshot `after`.
+pub fn changes(dir: &Path, before: &str, after: &str) -> anyhow::Result<Vec<FileChange>> {
+    check_rev(before)?;
+    check_rev(after)?;
+    let listed = git(
+        dir,
+        &[
+            "diff-tree",
+            "-r",
+            "-z",
+            "--no-renames",
+            "--name-only",
+            before,
+            after,
+        ],
+    )?;
+    let held = |tree: &str, path: &str| -> anyhow::Result<Option<String>> {
+        let output = command(dir, &["cat-file", "blob", &format!("{tree}:{path}")])
+            .output()
+            .context("running git cat-file")?;
+        Ok(output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned()))
+    };
+    listed
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            Ok(FileChange {
+                path: path.to_owned(),
+                before: held(before, path)?,
+                after: held(after, path)?,
+            })
+        })
+        .collect()
+}
+
 /// The latest commits that changed something under `dir`, newest first.
 pub fn log(dir: &Path, limit: usize) -> anyhow::Result<Vec<CommitInfo>> {
     if limit == 0 || !has_head(dir)? {
@@ -367,6 +452,39 @@ mod tests {
         let dir = TempDir::new(name);
         init(dir.path()).unwrap();
         dir
+    }
+
+    #[test]
+    fn what_differs_between_two_snapshots_is_told_without_touching_the_history() {
+        let dir = repo("git-snapshot");
+        write(dir.path(), "memory/core.md", "a\n");
+        write(dir.path(), "memory/gone.md", "g\n");
+        commit_all(dir.path(), &me(), "first").unwrap();
+        write(dir.path(), "memory/old.md", "o\n");
+        let before = snapshot(dir.path()).unwrap();
+
+        write(dir.path(), "memory/core.md", "b\n");
+        write(dir.path(), "records/memos/新.md", "n\n");
+        write(dir.path(), ".notebook/cache", "c\n");
+        std::fs::remove_file(dir.path().join("memory/gone.md")).unwrap();
+        commit_all(dir.path(), &me(), "second").unwrap();
+        let after = snapshot(dir.path()).unwrap();
+
+        let changed: Vec<_> = changes(dir.path(), &before, &after)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.path, c.before, c.after))
+            .collect();
+        let held = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            changed,
+            vec![
+                ("memory/core.md".to_owned(), held("a\n"), held("b\n")),
+                ("memory/gone.md".to_owned(), held("g\n"), None),
+                ("records/memos/新.md".to_owned(), None, held("n\n")),
+            ]
+        );
+        assert_eq!(log(dir.path(), 10).unwrap().len(), 2);
     }
 
     #[test]

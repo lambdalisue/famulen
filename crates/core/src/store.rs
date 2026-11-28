@@ -547,6 +547,14 @@ CREATE TABLE IF NOT EXISTS taints (
     taint  TEXT NOT NULL,
     PRIMARY KEY (holder, taint)
 );
+-- The comparisons a mark waits on before it may be taken back. A mark waiting
+-- on none is held for good.
+CREATE TABLE IF NOT EXISTS taint_doubts (
+    holder TEXT NOT NULL,
+    taint  TEXT NOT NULL,
+    doubt  INTEGER NOT NULL,
+    PRIMARY KEY (holder, taint, doubt)
+);
 -- What each request that asks about a disclosure would let be said, and where.
 CREATE TABLE IF NOT EXISTS disclosures (
     ticket    INTEGER PRIMARY KEY,

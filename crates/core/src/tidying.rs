@@ -22,6 +22,7 @@ use sha2::{Digest as _, Sha256};
 use famulen_notebook::body::{LOG, same};
 use famulen_notebook::records::minute;
 
+use crate::disclosure;
 use crate::dream_settings::DreamSettings;
 use crate::dreaming;
 use crate::memory::{self, Change, Op};
@@ -469,7 +470,7 @@ where
         let result = match judged.get(&target) {
             Some(j) if j.verdict == VALID => Ok(None),
             Some(_) if changes.len() >= TOUCHED => continue,
-            Some(j) => apply(records, c, j, today),
+            Some(j) => apply(store, records, c, j, today),
             None => Err(anyhow::anyhow!("not judged")),
         };
         let verdict = match result {
@@ -504,6 +505,7 @@ where
 /// Do what the model says of one record, unless it changed while the model
 /// thought.
 fn apply(
+    store: &Store,
     records: &Records,
     c: &Candidate,
     judged: &Judged,
@@ -537,6 +539,7 @@ fn apply(
         }
         TASK if kind == MEMOS => {
             let task = make_task(&held, &now, judged)?;
+            disclosure::carry_record(store, [now.id.clone(), now.rel()], &task.id)?;
             held.moved_to_task(kind, id, &task)?;
             Ok(Some(change(
                 Op::TaskMade,
@@ -822,6 +825,18 @@ mod tests {
         b.tidy(later(400), answer(&[say(&memo, TASK)])).await;
         assert_eq!(b.tasks().len(), 1);
         assert!(b.get(&memo).moved().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_task_a_memo_becomes_keeps_what_the_memo_was_marked_with() {
+        let b = book("tidy-task-marked");
+        let memo = b.add(MEMOS, "牛乳を買う");
+        crate::disclosure::marking::mark(&b.store, &memo.id);
+        b.tidy(later(10), answer(&[say(&memo, TASK)])).await;
+        assert!(crate::disclosure::marking::marked(
+            &b.store,
+            &b.tasks()[0].id
+        ));
     }
 
     #[tokio::test]
