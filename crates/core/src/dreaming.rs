@@ -164,19 +164,19 @@ What to keep:
   what matters comes up again, and you are shown what was lately thrown away. A note that says again what was thrown away counts together with it as notes that back one thing.
 - Do not throw away something still to be done that no record holds, as far as the notes and the talk tell: add it to long/prospective, the one exception to the rule on records below; a later dream makes it a task with to_record. The rules below on the lookout and on who people are say what is kept of those.
 - Before adding, look for an item that says the same or nearly the same: confirm it, or edit it to hold both, and add only what no item covers. \
-  When two items of core or pending overlap, edit one to hold both and forget the other with the reason merged, unless the owner said the other. \
+  When two items of core or pending overlap, edit one to hold both and forget the other with the reason merged, whoever said them. \
   Do not merge long-term memories away: the prose under a summary is not shown to you and would be lost.
-- A rule or correction the owner gave (src said) is kept: nothing but you puts it in memory, so being in doubt is no reason to throw it away. Where it changes an item, replace that item, since the owner's newer word on it stands.
+- Tidy what the owner said like the rest: every night's memory stays in the notebook's history, so nothing is lost by it. \
+  Merge it with an item that says the same, reword it so it reads plainly, replace it when a newer word of the owner's changes it, and forget it when it is out of date or newer notes show it no longer holds. \
+  Where two items disagree, the newer and better-backed one stands. Only being in doubt whether a rule still holds is no reason to throw it away.
 - Core holds only what must be in mind in every conversation; the rest of what is kept goes to long-term memory.
 
 Rules:
 - Records (calendar events, tasks, people's accounts, devices, contracts) are not memory: do not add them, and move any already in memory out with to_record.
 - A procedure is kept only when the owner confirmed it or it worked once; otherwise leave it pending.
-- An item the owner said is never edited away or forgotten unless the owner corrected it or 3 or more notes contradict it; an inferred item needs 2. \
-  With fewer, add or update a pending judgment instead (need=2 or need=3, ev counting what backs it).
+- An item the notes contradict is edited, replaced or forgotten as they show. Add or update a pending judgment (need=2, ev counting what backs it) only when you cannot tell which holds.
 - A replacement is an add whose attrs name the old id in supersedes, plus a forget of the old item with reason replaced.
 - Keep core within {core_lines} lines; move what is least used out of core first.
-- Never shrink a file, or a long-term group, to less than half its items in one night.
 - The lookout judges what concerns the owner by semantic memory and records alone. Notes about lookout decisions the owner marked 要らなかった or 拾ってほしかった, \
   and what the owner said does or does not concern them (\"これは関係ない\"), become or back semantic memories of what they care about and what not to bring them, \
   so the lookout picks up and passes over the same things next time.
@@ -1042,30 +1042,6 @@ fn apply_answer(
         tracing::debug!(%reason, "a dream edit was not applied");
     }
     let after = Snapshot::take(dir)?;
-    // What leaves pending on the owner's own word is not what the guard on
-    // shrinking is for.
-    let mut guarded = before.clone();
-    let judged: BTreeSet<&str> = read
-        .iter()
-        .filter_map(|(_, note)| note.get(judging::JUDGES))
-        .collect();
-    for id in judged {
-        let is_pending = |s: &Snapshot| {
-            s.entries
-                .get(id)
-                .is_some_and(|at| at.layer == Layer::Pending)
-        };
-        if is_pending(&before)
-            && !is_pending(&after)
-            && let Some(count) = guarded.counts.get_mut(Path::new(memory::PENDING))
-        {
-            *count -= 1;
-        }
-    }
-    if let Err(violation) = memory::check(&guarded, &after) {
-        notebook::revert_to(dir, "HEAD")?;
-        return Ok(Outcome::nothing(format!("当てなかった（{violation}）")));
-    }
     // What one says may name another that is gone by now, and a record once
     // written stays though the memory comes back: nothing is written unless
     // all can be.
@@ -2158,43 +2134,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_dream_that_shrinks_a_file_below_half_is_rolled_back() {
+    async fn a_dream_may_forget_most_of_a_file_and_what_the_owner_said_in_one_night() {
         let (dir, store) = setup();
-        memory::write_file(dir.path(), "core.md", "# 心得\n- 一 {id: c1, src: inferred}\n- 二 {id: c2, src: inferred}\n- 三 {id: c3, src: inferred}\n".as_bytes()).unwrap();
+        memory::write_file(dir.path(), "core.md", "# 心得\n- 一 {id: c1, src: said}\n- 二 {id: c2, src: inferred}\n- 三 {id: c3, src: inferred}\n".as_bytes()).unwrap();
         let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async {
-            Ok(json!({ "edits": [{ "op": "forget", "id": "c1" }, { "op": "forget", "id": "c2" }] }))
+            Ok(json!({ "edits": [
+                { "op": "forget", "id": "c1", "reason": "言い直された" },
+                { "op": "forget", "id": "c2", "reason": "古い" },
+            ] }))
         })
         .await
         .unwrap();
-        assert!(outcome.commit.is_none());
-        assert!(
-            outcome.status.contains("当てなかった"),
-            "{}",
-            outcome.status
-        );
-        assert_eq!(memory::core_entries(dir.path()).unwrap().len(), 3);
-        assert!(memory::forgotten_months(dir.path()).unwrap().is_empty());
-        assert_eq!(recent_dreams(&store, 9).unwrap()[0].status, outcome.status);
-    }
-
-    #[tokio::test]
-    async fn a_refused_dream_leaves_no_memo_and_keeps_what_was_noted_meanwhile() {
-        let (dir, store) = setup();
-        memory::write_file(dir.path(), "core.md", "# 心得\n- 一 {id: c1, src: inferred}\n- 二 {id: c2, src: inferred}\n- 三 {id: c3, src: inferred}\n".as_bytes()).unwrap();
-        let path = dir.path().to_owned();
-        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
-            note(&path, "考えている間の気づき");
-            Ok(json!({ "edits": [{ "op": "to_record", "id": "c1", "record": { "kind": "memos", "title": "一" } }, { "op": "forget", "id": "c2" }] }))
-        })
-        .await
-        .unwrap();
-        assert!(
-            outcome.status.contains("当てなかった"),
-            "{}",
-            outcome.status
-        );
-        assert!(dir.records.list(MEMOS).unwrap().is_empty());
-        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 1);
+        assert!(outcome.applied, "{}", outcome.status);
+        assert_eq!(memory::core_entries(dir.path()).unwrap().len(), 1);
+        assert_eq!(memory::forgotten_months(dir.path()).unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -2803,24 +2756,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refused_dream_throws_nothing_away() {
-        let (dir, store) = setup();
-        memory::write_file(dir.path(), "core.md", "# 心得\n- 一 {id: c1, src: inferred}\n- 二 {id: c2, src: inferred}\n- 三 {id: c3, src: inferred}\n".as_bytes()).unwrap();
-        let thrown = note(dir.path(), "昼は蕎麦だった");
-        let outcome = dream(&store, &dir.records, dir.path(), day(), |_, _| async move {
-            Ok(json!({
-                "edits": [{ "op": "forget", "id": "c1" }, { "op": "forget", "id": "c2" }],
-                "discarded": [{ "id": thrown }]
-            }))
-        })
-        .await
-        .unwrap();
-        assert!(!outcome.applied);
-        assert_eq!(outcome.summary.counts.discarded, 0);
-        assert_eq!(waiting_notes(dir.path()).unwrap().len(), 1);
-    }
-
-    #[tokio::test]
     async fn the_next_dream_is_shown_what_was_lately_thrown_away_so_it_can_tell_what_comes_back() {
         let (dir, store) = setup();
         let thrown = note(dir.path(), "昼は蕎麦だった");
@@ -2885,6 +2820,33 @@ mod tests {
                     "Before adding",
                 ] {
                     assert!(system.contains(told), "{told}");
+                }
+                Ok(json!({ "edits": [] }))
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_dream_is_told_to_tidy_what_the_owner_said_like_the_rest() {
+        let (dir, store) = setup();
+        dream(
+            &store,
+            &dir.records,
+            dir.path(),
+            day(),
+            |system, _| async move {
+                assert!(
+                    system.contains("Tidy what the owner said like the rest"),
+                    "{system}"
+                );
+                for gone in [
+                    "less than half",
+                    "3 or more notes",
+                    "unless the owner said the other",
+                ] {
+                    assert!(!system.contains(gone), "{gone}");
                 }
                 Ok(json!({ "edits": [] }))
             },

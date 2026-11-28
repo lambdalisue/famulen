@@ -1,6 +1,6 @@
 # 記憶と記録は、Famulen がなくても読める Markdown の手帳 1 つに持つ
 
-状態：採用
+状態：採用（結果のうち、夢が記録を書き換えず消さないとしたものは 20261128-let-the-dream-tidy-the-whole-notebook-whoever-wrote-it.md に置き換えられた）
 
 ## 背景
 

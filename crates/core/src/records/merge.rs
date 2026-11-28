@@ -46,7 +46,8 @@ pub(crate) fn with_quantity(mut details: Vec<Field>, many: u32) -> Vec<Field> {
 }
 
 impl Held<'_> {
-    /// Lead every link to one record to another.
+    /// Lead every link to one record to another, and every record moved into
+    /// it as well.
     pub(crate) fn relink(
         &self,
         writer: Writer,
@@ -55,9 +56,20 @@ impl Held<'_> {
         to: &str,
     ) -> anyhow::Result<()> {
         writer.may_write()?;
+        let r = self.records();
         let subject = format!("{from} へのリンクを {to} に付け替えた");
-        self.records()
-            .notebook
-            .relink(&writer.signature(), kind, from, to, &subject)
+        r.notebook
+            .relink(&writer.signature(), kind, from, to, &subject)?;
+        let moved_from = Some((kind.to_owned(), from.to_owned()));
+        let target = format!("{}/{kind}/{to}", famulen_notebook::RECORDS);
+        for name in r.notebook.kind_names()? {
+            for mut record in r.list(&name)? {
+                if record.moved() == moved_from {
+                    record.meta.set("moved", target.clone());
+                    r.notebook.write(&writer.signature(), &record, &subject)?;
+                }
+            }
+        }
+        Ok(())
     }
 }

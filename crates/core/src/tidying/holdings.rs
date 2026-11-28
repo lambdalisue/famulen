@@ -1,37 +1,30 @@
 //! What is wrong with the holdings that needs no model to tell: the same thing
 //! kept twice, and an order long past still waiting to arrive. What may be the
-//! same thing and may not is asked of the owner.
+//! same thing and may not is left to the dream, which reads them.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::NaiveDate;
 use famulen_notebook::body::same;
-use rusqlite::{OptionalExtension as _, params};
+use rusqlite::OptionalExtension as _;
 
 use super::Tidied;
+use super::merging::{MERGED, merge, word};
 use crate::dream_settings::DreamSettings;
-use crate::memory::{Change, Op};
+use crate::memory::Change;
 use crate::notebook::Writer;
 use crate::purchases::SOURCE;
 use crate::records::{
-    Field, HOLDINGS, Held, OWNER, Patch, QUANTITY, Record, Records, SectionContent, TASKS, counted,
-    details, fields, log_lines, quantity, sections, with_quantity,
+    HOLDINGS, Patch, QUANTITY, Record, Records, details, fields, log_lines, quantity, sections,
 };
 use crate::store::Store;
 
-/// The source of the task that asks the owner whether things are the same one.
-pub const SAME_SOURCE: &str = "夢が、同じものかもしれない物を確かめるために足した";
-
 /// An order older than this is taken to have arrived.
 const ARRIVED_DAYS: i64 = 30;
-/// Things bought further apart than this are two purchases.
-const SAME_DAYS: i64 = 3;
-/// How the log line of a merge begins; the ids it names follow the colon.
-const MERGED: &str = "夢で重なっていた記録をまとめた";
 
 /// Make one of what is surely one thing, take long past orders to have
-/// arrived, and ask the owner of what may be one thing.
+/// arrived.
 pub fn holdings(
     store: &Store,
     records: &Records,
@@ -42,7 +35,6 @@ pub fn holdings(
     }
     let changes = merge_same(store, records)?;
     let arrived = arrive(store, records, today)?;
-    let asked = ask(store, records)?;
     let mut done = Vec::new();
     if !changes.is_empty() {
         done.push(format!("重なっていた物を {} 組まとめた", changes.len()));
@@ -52,20 +44,10 @@ pub fn holdings(
             "{ARRIVED_DAYS}日より前の注文の物 {arrived} 件を owned にした"
         ));
     }
-    if asked > 0 {
-        done.push(format!("同じかもしれない物 {asked} 組をタスクで尋ねた"));
-    }
     Ok((!done.is_empty()).then(|| Tidied {
         changes,
         status: done.join("、"),
     }))
-}
-
-fn word(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
 }
 
 fn value(record: &Record, section: &str, name: &str) -> String {
@@ -172,7 +154,7 @@ fn merge_same(store: &Store, records: &Records) -> anyhow::Result<Vec<Change>> {
             }
         }
         for one in apart.iter().filter(|one| one.len() > 1) {
-            match merge(store, &held, one) {
+            match merge(store, &held, one, "同じ注文の同じ物".into()) {
                 Ok(change) => changes.push(change),
                 Err(error) => {
                     tracing::warn!(%error, holding = %one[0].id, "holdings were not merged");
@@ -200,7 +182,7 @@ fn already_counted(alike: &[Record]) -> BTreeSet<String> {
 /// How many there are of what these records say. What one mail told of adds up,
 /// unless each of its records only repeats how many records there are; of
 /// several mails telling of one order, the one that tells of the most counts.
-fn how_many(store: &Store, alike: &[Record]) -> anyhow::Result<u32> {
+pub(super) fn how_many(store: &Store, alike: &[Record]) -> anyhow::Result<u32> {
     let done = already_counted(alike);
     let mut told: BTreeMap<Option<i64>, Vec<u32>> = BTreeMap::new();
     for record in alike.iter().filter(|r| !done.contains(&r.id)) {
@@ -214,6 +196,8 @@ fn how_many(store: &Store, alike: &[Record]) -> anyhow::Result<u32> {
             .optional()?;
         told.entry(mail).or_default().push(quantity(record));
     }
+    // Records no mail told of are the same thing written again, not more of it.
+    let unbought = told.remove(&None).and_then(|said| said.into_iter().max());
     let of_one_mail = |said: Vec<u32>| {
         let records = said.len() as u32;
         if said.iter().all(|n| *n == 1 || *n == records) {
@@ -222,187 +206,12 @@ fn how_many(store: &Store, alike: &[Record]) -> anyhow::Result<u32> {
             said.iter().sum()
         }
     };
-    Ok(told.into_values().map(of_one_mail).max().unwrap_or(1))
-}
-
-/// Add what `into` does not say. What it says otherwise is given back.
-fn fill(into: &mut Vec<Field>, from: Vec<Field>) -> Vec<Field> {
-    let mut otherwise = Vec::new();
-    for field in from {
-        match into.iter().find(|f| same(&f.name, &field.name)) {
-            Some(said) if word(&said.value) != word(&field.value) => otherwise.push(field),
-            Some(_) => {}
-            None => into.push(field),
-        }
-    }
-    otherwise
-}
-
-fn union(into: &mut Vec<String>, from: Vec<String>) {
-    for item in from {
-        if !into.contains(&item) {
-            into.push(item);
-        }
-    }
-}
-
-/// The metadata a merge combines, or that is about the record itself.
-const COMBINED: [&str; 6] = ["id", "created", "updated", "labels", "workgroup", "source"];
-
-/// The metadata of `other` that does not reach the one that stays.
-fn left_behind<'a>(
-    other: &'a Record,
-    kept: &'a Record,
-    carried: &'a dyn Fn(&str) -> Option<String>,
-) -> impl Iterator<Item = String> + 'a {
-    other.meta.fields().filter_map(|(name, value)| {
-        let text = other.meta.text(name);
-        if COMBINED.contains(&name)
-            || kept.meta.value(name) == Some(value)
-            || (["url", "google"].contains(&name) && carried(name) == text)
-        {
-            return None;
-        }
-        let text = text.or_else(|| serde_json::to_string(value).ok())?;
-        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        Some(format!("{name}: {text}"))
-    })
-}
-
-/// Put what the others say into the first, which stays, and remove them.
-fn merge(store: &Store, held: &Held<'_>, alike: &[Record]) -> anyhow::Result<Change> {
-    let (kept, gone) = alike.split_first().expect("a group is not empty");
-    let many = how_many(store, alike)?;
-    let mut top = fields(kept);
-    let mut parts: Vec<SectionContent> = sections(kept);
-    let mut labels = kept.labels();
-    let mut workgroups = kept.workgroups();
-    let mut notes = kept.notes().trim().to_owned();
-    let mut log = Vec::new();
-    let meta = |name: &str| alike.iter().find_map(|r| r.meta.text(name));
-    for other in gone {
-        let mut otherwise: Vec<String> = fill(&mut top, fields(other))
-            .into_iter()
-            .filter(|f| !same(&f.name, "Status"))
-            .map(|f| format!("{}: {}", f.name, f.value))
-            .collect();
-        for section in sections(other) {
-            match parts.iter_mut().find(|s| same(&s.name, &section.name)) {
-                Some(part) => {
-                    otherwise.extend(
-                        fill(&mut part.fields, section.fields)
-                            .into_iter()
-                            .map(|f| format!("{} の {}: {}", section.name, f.name, f.value)),
-                    );
-                    for item in section.items {
-                        if !part.items.contains(&item) {
-                            part.items.push(item);
-                        }
-                    }
-                }
-                None => parts.push(section),
-            }
-        }
-        otherwise.extend(
-            details(other)
-                .into_iter()
-                .filter(|d| d.name == QUANTITY && counted(&d.value).is_none())
-                .map(|d| format!("{}: {}", d.name, d.value)),
-        );
-        otherwise.extend(left_behind(other, kept, &meta));
-        union(&mut labels, other.labels());
-        union(&mut workgroups, other.workgroups());
-        let said = other.notes();
-        let said = said.trim();
-        if !notes.contains(said) {
-            notes = format!("{notes}\n\n{said}").trim().to_owned();
-        }
-        log.extend(
-            log_lines(other)
-                .into_iter()
-                .map(|l| format!("{} の経過：{} {}", other.id, l.at, l.text)),
-        );
-        log.extend(
-            otherwise
-                .into_iter()
-                .map(|said| format!("{} では {said}", other.id)),
-        );
-    }
-    if alike
-        .iter()
-        .any(|r| r.body.value("Status").as_deref() == Some("owned"))
-    {
-        top.retain(|f| !same(&f.name, "Status"));
-        top.push(Field::new("Status", "owned"));
-    }
-    let gone_ids: Vec<&str> = gone.iter().map(|r| r.id.as_str()).collect();
-    log.push(format!("{MERGED}（数量 {many}）：{}", gone_ids.join(", ")));
-    let patch = Patch {
-        fields: top,
-        sections: parts,
-        details: Some(with_quantity(details(kept), many)),
-        notes: (notes != kept.notes().trim()).then_some(notes),
-        labels: Some(labels),
-        workgroups: Some(workgroups),
-        url: meta("url"),
-        google: meta("google"),
-        log,
-        ..Patch::default()
-    };
-    held.change(Writer::Secretary, HOLDINGS, &kept.id, patch)?;
-    let from = gone.iter().flat_map(|r| [r.id.clone(), r.rel()]);
-    crate::disclosure::carry_record(store, from, &kept.id)?;
-    // Moved before the removal, so that stopping midway leaves nothing that a
-    // second pass cannot finish.
-    for other in gone {
-        held.relink(Writer::Secretary, HOLDINGS, &other.id, &kept.id)?;
-        move_what_is_kept_beside(store, &other.id, &kept.id)?;
-        held.remove(Writer::Secretary, HOLDINGS, &other.id)?;
-    }
-    Ok(Change {
-        op: Op::Edited,
-        id: kept.id.clone(),
-        file: kept.rel(),
-        text: format!("{}（数量 {many}）", kept.title()),
-        previous: None,
-        from_file: None,
-        replaces: None,
-        reason: Some(format!(
-            "同じ注文の同じ品が重なっていたのでまとめた：{}",
-            gone_ids.join(", ")
-        )),
-        basis: Vec::new(),
-    })
-}
-
-/// What mail and pictures know of a record goes to the one that stays. Where
-/// that one has its own, the other's is dropped: left, a mail read again would
-/// take it for a thing the owner removed.
-fn move_what_is_kept_beside(store: &Store, from: &str, to: &str) -> anyhow::Result<()> {
-    let conn = store.conn();
-    // Empty bytes say that no picture was found, which gives way to one.
-    conn.execute(
-        "DELETE FROM holding_pictures WHERE holding = ?2 AND length(bytes) = 0
-         AND EXISTS (SELECT 1 FROM holding_pictures WHERE holding = ?1 AND length(bytes) > 0)",
-        params![from, to],
-    )?;
-    for table in [
-        "purchases",
-        "purchase_settled",
-        "holding_pictures",
-        "holding_looks",
-    ] {
-        conn.execute(
-            &format!("UPDATE OR IGNORE {table} SET holding = ?2 WHERE holding = ?1"),
-            params![from, to],
-        )?;
-        conn.execute(&format!("DELETE FROM {table} WHERE holding = ?1"), [from])?;
-    }
-    conn.execute(
-        "DELETE FROM record_looks WHERE kind = ?1 AND id = ?2",
-        params![HOLDINGS, from],
-    )?;
-    Ok(())
+    Ok(told
+        .into_values()
+        .map(of_one_mail)
+        .chain(unbought)
+        .max()
+        .unwrap_or(1))
 }
 
 fn date(text: &str) -> Option<NaiveDate> {
@@ -447,96 +256,6 @@ fn arrive(store: &Store, records: &Records, today: NaiveDate) -> anyhow::Result<
     Ok(arrived)
 }
 
-/// Whether two records of one name may be one thing, though nothing makes it
-/// sure.
-fn alike_enough(a: &Record, b: &Record) -> bool {
-    let differ = |a: String, b: String| !a.is_empty() && !b.is_empty() && word(&a) != word(&b);
-    let (order_a, order_b) = (value(a, "Acquired", "Order"), value(b, "Acquired", "Order"));
-    let one_order = !order_a.is_empty() && word(&order_a) == word(&order_b);
-    let apart = matches!(
-        (bought_on(a), bought_on(b)),
-        (Some(a), Some(b)) if (a - b).num_days().abs() > SAME_DAYS
-    );
-    let details_b = details(b);
-    !one_order
-        && !apart
-        && may_be_one(a, b)
-        && !differ(value(a, "", "Model"), value(b, "", "Model"))
-        && !differ(value(a, "Acquired", "Price"), value(b, "Acquired", "Price"))
-        && details(a).iter().all(|d| {
-            d.name == QUANTITY
-                || !details_b
-                    .iter()
-                    .any(|o| same(&o.name, &d.name) && word(&o.value) != word(&d.value))
-        })
-}
-
-/// Ask in one task about the pairs not asked about before. How many there were.
-fn ask(store: &Store, records: &Records) -> anyhow::Result<usize> {
-    let mut named: BTreeMap<String, Vec<Record>> = BTreeMap::new();
-    for record in records.list(HOLDINGS)? {
-        let name: String = record
-            .title()
-            .chars()
-            .filter(|c| c.is_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect();
-        if !name.is_empty() && held_now(&record) {
-            named.entry(name).or_default().push(record);
-        }
-    }
-    let mut pairs = Vec::new();
-    let mut lines = Vec::new();
-    for alike in named.values() {
-        let mut asked = BTreeSet::new();
-        for (at, a) in alike.iter().enumerate() {
-            for b in &alike[at + 1..] {
-                let (first, second) = if a.id < b.id { (a, b) } else { (b, a) };
-                let before = store
-                    .conn()
-                    .query_row(
-                        "SELECT 1 FROM holding_pairs_asked WHERE first = ?1 AND second = ?2",
-                        [&first.id, &second.id],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
-                if !before && alike_enough(a, b) {
-                    asked.extend([a.link(), b.link()]);
-                    pairs.push((first.id.clone(), second.id.clone()));
-                }
-            }
-        }
-        if !asked.is_empty() {
-            lines.push(format!(
-                "- {}：{}",
-                alike[0].title(),
-                asked.into_iter().collect::<Vec<_>>().join(" ")
-            ));
-        }
-    }
-    if pairs.is_empty() {
-        return Ok(0);
-    }
-    let notes = format!(
-        "同じものかもしれないが、確かでないのでまとめていない。同じものがあれば、秘書にまとめるように頼む。別のものなら、このまま済にする。\n\n{}",
-        lines.join("\n")
-    );
-    let task = Patch {
-        notes: Some(notes),
-        source: SAME_SOURCE.into(),
-        ..Patch::titled("同じ物かもしれない記録を確かめる")
-    };
-    records.add(Writer::Secretary, TASKS, task.with("Assignee", OWNER))?;
-    for (first, second) in &pairs {
-        store.conn().execute(
-            "INSERT OR IGNORE INTO holding_pairs_asked (first, second) VALUES (?1, ?2)",
-            [first, second],
-        )?;
-    }
-    Ok(pairs.len())
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::{Days, Local};
@@ -545,7 +264,7 @@ mod tests {
     use super::*;
     use crate::notebook::testing::TempDir;
     use crate::records::testing::records;
-    use crate::records::{Entry, MEMOS};
+    use crate::records::{Entry, Field, MEMOS, SectionContent};
 
     const ME: Writer = Writer::Owner;
 
@@ -628,10 +347,6 @@ mod tests {
             let mut list = self.list();
             assert_eq!(list.len(), 1);
             list.remove(0)
-        }
-
-        fn tasks(&self) -> Vec<Record> {
-            self.records.list(TASKS).unwrap()
         }
     }
 
@@ -938,25 +653,6 @@ mod tests {
         b.add(thing("椅子"));
         b.tidy();
         assert_eq!(b.list().len(), 12);
-        assert!(b.tasks().is_empty());
-    }
-
-    #[test]
-    fn what_may_be_the_same_is_asked_of_the_owner_once() {
-        let b = book("same-ask");
-        let one = b.add(thing("基板"));
-        let mut other = thing("基板");
-        other.sections = vec![acquired("A-2", "", today())];
-        let two = b.add(other);
-        b.tidy();
-        assert_eq!(b.list().len(), 2);
-        let tasks = b.tasks();
-        assert_eq!(tasks.len(), 1);
-        assert!(tasks[0].notes().contains(&one.target()));
-        assert!(tasks[0].notes().contains(&two.target()));
-        assert_eq!(tasks[0].body.value("Assignee").as_deref(), Some("owner"));
-        assert!(b.tidy().is_none());
-        assert_eq!(b.tasks().len(), 1);
     }
 
     #[test]

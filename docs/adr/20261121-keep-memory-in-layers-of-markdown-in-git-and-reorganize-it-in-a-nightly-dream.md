@@ -1,6 +1,6 @@
 # 記憶は層に分けた Markdown として Git に置き、夜の夢で整理する
 
-状態：採用
+状態：採用（決定のうち、夢は小さな変更だけを当てるとしたところは 20261128-let-the-dream-tidy-the-whole-notebook-whoever-wrote-it.md に置き換えられた）
 
 ## 背景
 

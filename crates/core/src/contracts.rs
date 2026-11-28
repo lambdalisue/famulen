@@ -414,10 +414,16 @@ fn all(records: &Records, store: &Store) -> anyhow::Result<Vec<Known>> {
             None => list.push(row.known),
         }
     }
-    // A bill of a plan it had may be read after one of the plan it has.
+    // A bill of a plan it had may be read after one of the plan it has, and
+    // one of a contract merged into it under the name that one had.
     for k in &mut list {
         for told in events(store, &k.id)? {
-            for (list, said) in [(&mut k.plans, told.plan), (&mut k.numbers, told.number)] {
+            for (list, said) in [
+                (&mut k.names, told.name),
+                (&mut k.providers, told.provider),
+                (&mut k.plans, told.plan),
+                (&mut k.numbers, told.number),
+            ] {
                 if !said.is_empty() {
                     list.push(said);
                 }
@@ -916,6 +922,50 @@ fn standing(events: &[Told], today: NaiveDate) -> Standing {
             .push_str("。そのあとの請求も解約の知らせも見つからず、続いているかは分からない");
     }
     standing
+}
+
+/// What Famulen wrote of a contract merged with another: a value the merged
+/// record took from the other is mail's to change, as it was there. One it
+/// had before stays as it was, though mail told the same.
+pub(crate) fn put_wrote_together(
+    store: &Store,
+    before: &Record,
+    merged: &Record,
+    from: &str,
+) -> anyhow::Result<()> {
+    let rows = ledger(store)?;
+    let wrote = |id: &str| rows.iter().find(|r| r.known.id == id).map(|r| &r.wrote);
+    let Some(gone) = wrote(from) else {
+        return Ok(());
+    };
+    let kept = wrote(&merged.id);
+    let mut now = kept.cloned().unwrap_or_default();
+    for (name, value) in gone {
+        match (merged.body.value(name), before.body.value(name)) {
+            // Not a field: what was told of it is kept as it was told.
+            (None, None) => {
+                now.entry(name.clone()).or_insert_with(|| value.clone());
+            }
+            (Some(there), was) if there == *value && was.as_ref() != Some(&there) => {
+                now.insert(name.clone(), value.clone());
+            }
+            _ => {}
+        }
+    }
+    // With no row of its own, the first row merged in becomes its row, so
+    // what the rows merged in after it wrote is put together with that one.
+    if kept.is_none() {
+        store.conn().execute(
+            "UPDATE contracts SET contract = ?2, wrote = ?3 WHERE contract = ?1",
+            params![from, merged.id, serde_json::to_string(&now)?],
+        )?;
+    } else if kept != Some(&now) {
+        store.conn().execute(
+            "UPDATE contracts SET wrote = ?2 WHERE contract = ?1",
+            params![merged.id, serde_json::to_string(&now)?],
+        )?;
+    }
+    Ok(())
 }
 
 /// Write how a contract stands into its record. A field the owner changed
@@ -1607,6 +1657,23 @@ mod tests {
         b.mail(netflix("billed", "2026-08-10"));
         assert_eq!(value(&b.only(), "Plan"), "プレミアム");
         assert_eq!(value(&b.only(), "Started"), "2026-08-10");
+    }
+
+    #[test]
+    fn a_bill_under_a_name_only_its_mail_told_is_of_the_same_contract() {
+        let b = Box::new("contracts-told-name");
+        b.mail(netflix("billed", "2026-09-10"));
+        // As a merge leaves it: another title, and a row that tells no name.
+        b.change(Patch::titled("動画の契約"));
+        b.store
+            .conn()
+            .execute(
+                "UPDATE contracts SET name = '', provider = '', plan = ''",
+                [],
+            )
+            .unwrap();
+        b.mail(netflix("billed", "2026-10-10"));
+        assert_eq!(b.list().len(), 1);
     }
 
     #[test]

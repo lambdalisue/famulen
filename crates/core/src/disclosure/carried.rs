@@ -524,6 +524,15 @@ pub(crate) fn carry_to_record(
     mark_record(store, record, taints)
 }
 
+/// Mark a record rewritten from what a model was shown with anything marked of
+/// it: the records and memories named in `shown`, and the talk since `since`.
+pub(crate) fn carry_shown(store: &Store, shown: &str, since: i64, to: &str) -> anyhow::Result<()> {
+    let mut taints = marked_in(store, shown)?;
+    taints.extend(marked_by_path_in(store, shown)?);
+    taints.extend(of_talk(store, since)?.0);
+    mark_record(store, to, taints)
+}
+
 /// Mark what one record says with what is marked of another it was made from.
 pub(crate) fn carry_record(
     store: &Store,

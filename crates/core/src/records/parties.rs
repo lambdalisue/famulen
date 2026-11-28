@@ -171,6 +171,22 @@ pub fn handles_of(party: &Record) -> Vec<String> {
 }
 
 impl Records {
+    /// A party of the kind of `like`, none of `besides`, that is called one of
+    /// the names `parties` go by.
+    pub(crate) fn party_called(
+        &self,
+        like: &Record,
+        parties: &[Record],
+        besides: &[&str],
+    ) -> anyhow::Result<Option<Record>> {
+        let names: BTreeSet<String> = parties.iter().flat_map(bare_names).collect();
+        Ok(self.list(PARTIES)?.into_iter().find(|party| {
+            !besides.contains(&party.id.as_str())
+                && kind_of(party) == kind_of(like)
+                && names.contains(&bare(&party.title()))
+        }))
+    }
+
     /// Refuse a name that makes a party the same as one there already, resting
     /// or not: the secretary would have one person twice. The owner may know
     /// two people of one name, and two may share an alias.
@@ -179,6 +195,7 @@ impl Records {
         writer: Writer,
         new: &Record,
         before: Option<&Record>,
+        besides: &[&str],
     ) -> anyhow::Result<()> {
         if writer == Writer::Owner {
             return Ok(());
@@ -192,7 +209,10 @@ impl Records {
         }
         let title = bare(&new.title());
         for party in self.list(PARTIES)? {
-            if party.id == new.id || kind_of(&party) != kind_of(new) {
+            if party.id == new.id
+                || besides.contains(&party.id.as_str())
+                || kind_of(&party) != kind_of(new)
+            {
                 continue;
             }
             let same = wanted.contains(&bare(&party.title()))
