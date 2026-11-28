@@ -2,6 +2,7 @@ use super::*;
 
 fn content() -> Content {
     Content {
+        changes_ci: false,
         change: "c".into(),
         commit: "a".repeat(40),
         tree: "t".into(),

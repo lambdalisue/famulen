@@ -57,6 +57,36 @@ async fn only_a_repository_the_owner_named_is_finished_and_only_famulen_is_deplo
 }
 
 #[test]
+fn a_key_kept_in_git_settings_is_named_and_never_told() {
+    let named = |listing: &str| credential_key(listing);
+    assert_eq!(
+        named("user.name\nme\0remote.origin.url\nhttps://tok@github.com/a/b\0"),
+        Some("remote.origin.url".into())
+    );
+    assert_eq!(
+        named("url.https://u:tok@github.com/.insteadof\ngh:\0"),
+        Some("url.<url>.insteadof".into())
+    );
+    assert_eq!(
+        named("http.https://github.com/.extraheader\nAUTHORIZATION: basic x\0"),
+        Some("http.<url>.extraheader".into())
+    );
+    assert_eq!(
+        named("credential.helper\n!f() { echo password=tok; }; f\0"),
+        Some("credential.helper".into())
+    );
+    assert_eq!(named("github.token\ntok\0"), Some("github.token".into()));
+    assert_eq!(
+        named(
+            "remote.origin.url\ngit@github.com:a/b.git\0remote.up.url\nssh://git@host/a\0\
+             credential.helper\nosxkeychain\0http.extraheader\n\0\
+             remote.web.url\nhttps://github.com/a/b@c\0core.bare\0"
+        ),
+        None
+    );
+}
+
+#[test]
 fn famulens_own_repository_is_known_by_any_address() {
     assert!(deployable("git@github.com:lambdalisue/famulen.git"));
     assert!(deployable("https://github.com/lambdalisue/famulen"));

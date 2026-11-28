@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
 	--body) body=$2 ;;
 	esac
 	case $1 in
-	--merge | --log-failed) shift ;;
+	--merge | --squash | --rebase | --log-failed) shift ;;
 	--*) shift 2 ;;
 	*) shift ;;
 	esac
@@ -51,10 +51,11 @@ case $verb in
 	;;
 "pr view")
 	if [ -f "$state/merged" ]; then
-		printf '{"state":"MERGED","headRefOid":"%s","mergeCommit":{"oid":"%s"}}\n' \
-			"$(cat "$state/merged")" "$(cat "$state/merge-commit")"
+		printf '{"state":"MERGED","headRefOid":"%s","baseRefName":"%s","mergeCommit":{"oid":"%s"}}\n' \
+			"$(cat "$state/merged")" "$(cat "$state/base")" "$(cat "$state/merge-commit")"
 	else
-		printf '{"state":"OPEN","headRefOid":"%s","mergeCommit":null}\n' "$(of "$(cat "$state/branch")")"
+		printf '{"state":"OPEN","headRefOid":"%s","baseRefName":"%s","mergeCommit":null}\n' \
+			"$(of "$(cat "$state/branch")")" "$(cat "$state/base")"
 	fi
 	;;
 "pr checks")

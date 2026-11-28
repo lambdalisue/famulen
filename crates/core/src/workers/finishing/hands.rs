@@ -115,20 +115,25 @@ impl Hands for OwnHands {
     }
 
     async fn ci(&self, pinned: &Pinned, pull: &PullRequest) -> anyhow::Result<Ci> {
-        self.forge(pinned).ci(pull).await
+        self.forge(pinned)
+            .ci(pull, &pinned.target, &pinned.rule.required)
+            .await
     }
 
     async fn merged(&self, pinned: &Pinned, pull: &PullRequest) -> anyhow::Result<bool> {
-        self.forge(pinned).merged(pull).await
+        self.forge(pinned).merged(pull, &pinned.target).await
     }
 
     async fn merge(&self, pinned: &Pinned, pull: &PullRequest) -> anyhow::Result<()> {
-        self.forge(pinned).merge(pull).await
+        self.forge(pinned)
+            .merge(pull, &pinned.target, pinned.rule.method)
+            .await
     }
 
     async fn confirm_merge(
         &self,
         pull: &PullRequest,
+        why: &str,
         ticket: Option<i64>,
     ) -> anyhow::Result<Answer> {
         if let Some(held) = ticket {
@@ -145,7 +150,6 @@ impl Hands for OwnHands {
             "commit": pull.head,
         });
         let until = crate::store::now() + APPROVAL_SECONDS;
-        let why = "this repository's merges are not allowed without asking";
         Ok(
             match self
                 .app
@@ -166,7 +170,10 @@ impl Hands for OwnHands {
         pull: &PullRequest,
         command: &str,
     ) -> anyhow::Result<Started> {
-        let merged = self.forge(pinned).merge_commit(pull).await?;
+        let merged = self
+            .forge(pinned)
+            .merge_commit(pull, &pinned.target)
+            .await?;
         start_deploy(
             &Source {
                 jj: &self.direct.jj,
@@ -211,6 +218,7 @@ mod tests {
             base: "b".into(),
             title: "Add b".into(),
             body: "why".into(),
+            changes_ci: false,
         };
         assert_eq!(body(&content, None), "why");
         assert_eq!(

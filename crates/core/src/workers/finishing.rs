@@ -37,12 +37,27 @@ pub struct Rule {
     /// Whether a pull request is merged without asking.
     #[serde(default)]
     pub merge: bool,
+    /// The checks of CI that must have passed, not been skipped.
+    #[serde(default)]
+    pub required: Vec<String>,
+    /// How a pull request is merged: a repository may refuse some ways.
+    #[serde(default)]
+    pub method: MergeMethod,
     /// A shell command that puts the merged work to use.
     #[serde(default)]
     pub deploy: Option<String>,
     /// The command pull requests are made with.
     #[serde(default = "gh")]
     pub forge: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMethod {
+    #[default]
+    Merge,
+    Squash,
+    Rebase,
 }
 
 fn two() -> u32 {
@@ -75,6 +90,9 @@ pub struct Content {
     pub base: String,
     pub title: String,
     pub body: String,
+    /// Whether it changes what CI runs.
+    #[serde(default)]
+    pub changes_ci: bool,
 }
 
 /// How the work stands when looked at.
@@ -175,6 +193,9 @@ pub struct Finishing {
     pub ticket: Option<i64>,
     #[serde(default)]
     pub merge_approved: bool,
+    /// When the forge took the merge. It may make it later, as with a queue.
+    #[serde(default)]
+    pub merge_asked: Option<i64>,
     #[serde(default)]
     pub merged: bool,
     /// When deploying was started, in seconds since the epoch.
@@ -215,6 +236,7 @@ impl Finishing {
             ci_since: None,
             ticket: None,
             merge_approved: false,
+            merge_asked: None,
             merged: false,
             deploy_started: None,
             deploy_waiting_since: None,
@@ -332,7 +354,7 @@ impl Finishing {
             Stage::Reviewing => self.review(hands).await,
             Stage::Publishing => self.publish(hands).await,
             Stage::Ci => self.ci(hands, now).await,
-            Stage::Merging => self.merge(hands).await,
+            Stage::Merging => self.merge(hands, now).await,
             Stage::Deploying => self.deploy(hands, now).await,
             Stage::Tidying => {
                 let merged = self
@@ -492,6 +514,7 @@ impl Finishing {
         self.ci_since = None;
         self.ticket = None;
         self.merge_approved = false;
+        self.merge_asked = None;
         self.stage = Stage::Ci;
         Ok(Next::Again)
     }
@@ -527,15 +550,33 @@ impl Finishing {
         }
     }
 
-    async fn merge<H: Hands>(&mut self, hands: &H) -> anyhow::Result<Next> {
+    async fn merge<H: Hands>(&mut self, hands: &H, now: i64) -> anyhow::Result<Next> {
         let pull = self.pulled()?;
         // Merged by a Famulen that went away before it kept so.
         if !hands.merged(&self.pinned, &pull).await? {
+            if let Some(since) = self.merge_asked {
+                return Ok(if now - since > CI_LIMIT_SECONDS {
+                    self.stop(format!(
+                        "The merge was asked for, but the pull request is not merged after {} hours: {}",
+                        CI_LIMIT_SECONDS / 3600,
+                        pull.url
+                    ))
+                } else {
+                    Next::Wait(CI_EVERY)
+                });
+            }
             if !self.unmoved(hands).await? {
                 return Ok(Next::Again);
             }
-            if !self.pinned.rule.merge && !self.merge_approved {
-                match hands.confirm_merge(&pull, self.ticket).await? {
+            // CI that the work itself changed says too little of it.
+            let changes_ci = self.content.as_ref().is_some_and(|c| c.changes_ci);
+            if (!self.pinned.rule.merge || changes_ci) && !self.merge_approved {
+                let why = if changes_ci {
+                    "the work changes what CI runs"
+                } else {
+                    "this repository's merges are not allowed without asking"
+                };
+                match hands.confirm_merge(&pull, why, self.ticket).await? {
                     Answer::Waiting(ticket) => {
                         self.ticket = Some(ticket);
                         return Ok(Next::Wait(ASKED_EVERY));
@@ -565,6 +606,8 @@ impl Finishing {
                     ),
                 ));
             }
+            self.merge_asked = Some(now);
+            return Ok(Next::Again);
         }
         self.merged = true;
         self.note = None;
@@ -700,6 +743,7 @@ pub trait Hands: Send + Sync {
     fn confirm_merge(
         &self,
         pull: &PullRequest,
+        why: &str,
         ticket: Option<i64>,
     ) -> impl Future<Output = anyhow::Result<Answer>> + Send;
     /// Start deploying, unless another deployment is under way. It goes on by

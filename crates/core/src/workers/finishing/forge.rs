@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tokio::process::Command;
 
 use super::repo::{output, ran};
-use super::{Ci, PullRequest};
+use super::{Ci, MergeMethod, PullRequest};
 
 pub(crate) struct Forge<'a> {
     command: &'a [String],
@@ -28,6 +28,7 @@ struct Listed {
 struct Viewed {
     state: String,
     head_ref_oid: String,
+    base_ref_name: String,
     #[serde(default)]
     merge_commit: Option<Commit>,
 }
@@ -95,8 +96,13 @@ impl<'a> Forge<'a> {
     }
 
     /// How CI stands on the commit pushed, and never on another.
-    pub(crate) async fn ci(&self, pull: &PullRequest) -> anyhow::Result<Ci> {
-        if self.view(pull.number).await?.head_ref_oid != pull.head {
+    pub(crate) async fn ci(
+        &self,
+        pull: &PullRequest,
+        target: &str,
+        required: &[String],
+    ) -> anyhow::Result<Ci> {
+        if self.view(pull.number, target).await?.head_ref_oid != pull.head {
             return Ok(Ci::Pending);
         }
         let number = pull.number.to_string();
@@ -122,8 +128,15 @@ impl<'a> Forge<'a> {
             });
         }
         let passed = |c: &Check| matches!(c.bucket.as_str(), "pass" | "skipping");
+        let named = |name: &String| {
+            let mut of_name = checks.iter().filter(|c| &c.name == name).peekable();
+            of_name.peek().is_some() && of_name.all(|c| c.bucket == "pass")
+        };
         Ok(
-            if checks.iter().any(|c| c.bucket == "pass") && checks.iter().all(passed) {
+            if checks.iter().any(|c| c.bucket == "pass")
+                && checks.iter().all(passed)
+                && required.iter().all(named)
+            {
                 Ci::Passed
             } else {
                 Ci::Pending
@@ -132,8 +145,8 @@ impl<'a> Forge<'a> {
     }
 
     /// Whether the commit pushed is merged.
-    pub(crate) async fn merged(&self, pull: &PullRequest) -> anyhow::Result<bool> {
-        let viewed = self.view(pull.number).await?;
+    pub(crate) async fn merged(&self, pull: &PullRequest, target: &str) -> anyhow::Result<bool> {
+        let viewed = self.view(pull.number, target).await?;
         if viewed.state != "MERGED" {
             return Ok(false);
         }
@@ -145,8 +158,12 @@ impl<'a> Forge<'a> {
     }
 
     /// The commit the pull request was merged as.
-    pub(crate) async fn merge_commit(&self, pull: &PullRequest) -> anyhow::Result<String> {
-        let viewed = self.view(pull.number).await?;
+    pub(crate) async fn merge_commit(
+        &self,
+        pull: &PullRequest,
+        target: &str,
+    ) -> anyhow::Result<String> {
+        let viewed = self.view(pull.number, target).await?;
         anyhow::ensure!(
             viewed.state == "MERGED" && viewed.head_ref_oid == pull.head,
             "the pull request is not merged holding the commit pushed"
@@ -157,10 +174,23 @@ impl<'a> Forge<'a> {
             .context("the forge names no commit the pull request was merged as")
     }
 
-    pub(crate) async fn merge(&self, pull: &PullRequest) -> anyhow::Result<()> {
+    pub(crate) async fn merge(
+        &self,
+        pull: &PullRequest,
+        target: &str,
+        method: MergeMethod,
+    ) -> anyhow::Result<()> {
+        // The forge takes no branch to hold the merge to, so it is looked at
+        // right before.
+        self.view(pull.number, target).await?;
         let number = pull.number.to_string();
         let mut command = self.command(&["pr", "merge", &number])?;
-        command.args(["--merge", "--match-head-commit", &pull.head]);
+        let how = match method {
+            MergeMethod::Merge => "--merge",
+            MergeMethod::Squash => "--squash",
+            MergeMethod::Rebase => "--rebase",
+        };
+        command.args([how, "--match-head-commit", &pull.head]);
         output(command).await?;
         Ok(())
     }
@@ -173,11 +203,19 @@ impl<'a> Forge<'a> {
         Ok(listed.into_iter().next())
     }
 
-    async fn view(&self, number: u64) -> anyhow::Result<Viewed> {
+    /// The pull request, refused when it is no longer aimed at `target`.
+    async fn view(&self, number: u64, target: &str) -> anyhow::Result<Viewed> {
         let number = number.to_string();
         let mut command = self.command(&["pr", "view", &number])?;
-        command.args(["--json", "state,headRefOid,mergeCommit"]);
-        serde_json::from_str(&output(command).await?).context("the pull request could not be read")
+        command.args(["--json", "state,headRefOid,baseRefName,mergeCommit"]);
+        let viewed: Viewed = serde_json::from_str(&output(command).await?)
+            .context("the pull request could not be read")?;
+        anyhow::ensure!(
+            viewed.base_ref_name == target,
+            "the pull request is aimed at {}, not at {target}",
+            viewed.base_ref_name
+        );
+        Ok(viewed)
     }
 
     /// What a failed check wrote, as far as the forge tells.

@@ -14,9 +14,10 @@ use super::{Content, Snapshot};
 /// How long one command of jj, Git or the forge is given.
 const LIMIT: Duration = Duration::from_secs(120);
 
-/// The head of the work: the latest change of the workspace that holds
-/// anything.
-const HEAD_REVSET: &str = "latest(heads(::@ ~ empty()))";
+/// The change that names the work: the latest that holds anything or joins
+/// lines of work. What is pushed is the workspace's whole tree, not only
+/// what this one holds.
+const NAMED_REVSET: &str = "latest(heads(::@ ~ (empty() ~ merges())))";
 const HEAD_TEMPLATE: &str =
     r#"change_id ++ "\n" ++ commit_id ++ "\n" ++ conflict ++ "\n" ++ description"#;
 
@@ -52,23 +53,15 @@ impl Repo {
         target: &str,
         title: &str,
     ) -> anyhow::Result<Snapshot> {
-        let told = {
-            let mut command = Command::new(&self.jj);
-            command
-                .arg("-R")
-                .arg(&self.workspace)
-                .args(["log", "--no-graph", "-r", HEAD_REVSET, "-T", HEAD_TEMPLATE])
-                .current_dir(&self.workspace);
-            output(command)
-                .await
-                .context("jj could not tell the work")?
-        };
-        let mut lines = told.splitn(4, '\n');
-        let (Some(change), Some(commit), Some(conflict)) =
-            (lines.next(), lines.next(), lines.next())
-        else {
+        let head = self.log("@").await?;
+        let mut lines = head.splitn(4, '\n').skip(1);
+        let (Some(commit), Some(conflict)) = (lines.next(), lines.next()) else {
             anyhow::bail!("jj told nothing of the work");
         };
+        let named = self.log(NAMED_REVSET).await?;
+        let mut named = named.splitn(4, '\n');
+        let change = named.next().unwrap_or_default();
+        let description = named.nth(2).unwrap_or_default().trim();
         anyhow::ensure!(is_id(commit), "jj named no commit: {commit}");
         let tip = self.take_up(remote, target).await?;
         if conflict == "true" {
@@ -79,7 +72,16 @@ impl Repo {
         if base == commit || tree == self.tree(&base).await? {
             return Ok(Snapshot::Unchanged);
         }
-        let description = lines.next().unwrap_or_default().trim();
+        let ci = [
+            "diff",
+            "--no-renames",
+            "--name-only",
+            &base,
+            commit,
+            "--",
+            ".github",
+        ];
+        let changes_ci = !self.git(&ci).await?.is_empty();
         let (first, body) = description.split_once('\n').unwrap_or((description, ""));
         let first = if first.is_empty() { title } else { first };
         Ok(Snapshot::Changed(Content {
@@ -89,7 +91,27 @@ impl Repo {
             base,
             title: first.trim().to_owned(),
             body: body.trim().to_owned(),
+            changes_ci,
         }))
+    }
+
+    async fn log(&self, revset: &str) -> anyhow::Result<String> {
+        let mut command = Command::new(&self.jj);
+        command
+            .arg("-R")
+            .arg(&self.workspace)
+            .args(["log", "--no-graph", "-r", revset, "-T", HEAD_TEMPLATE])
+            .current_dir(&self.workspace);
+        output(command).await.context("jj could not tell the work")
+    }
+
+    /// The setting of Git that holds a key, which the agent could read.
+    pub(crate) async fn credential_setting(
+        jj: &str,
+        checkout: &Path,
+    ) -> anyhow::Result<Option<String>> {
+        let listing = git(jj, checkout, &["config", "--list", "--includes", "-z"]).await?;
+        Ok(super::pin::credential_key(&listing))
     }
 
     /// Fetch the target, refuse a `merged` it does not hold, and say whether

@@ -81,6 +81,8 @@ async fn finished_work_is_pushed_and_merged_by_famulen_once_the_owner_approves()
             checks: Vec::new(),
             reviews: 0,
             merge: false,
+            required: Vec::new(),
+            method: Default::default(),
             deploy: None,
             forge: ["sh".to_owned()].into_iter().chain(forge).collect(),
         }]);
@@ -182,6 +184,8 @@ async fn live_finishing_of_work_run_directly_merges_what_was_checked_and_reviewe
             ],
             reviews: 1,
             merge: false,
+            required: Vec::new(),
+            method: Default::default(),
             deploy: None,
             forge: ["sh".to_owned()].into_iter().chain(forge).collect(),
         }]);

@@ -281,6 +281,8 @@ mod default_runner_tests {
             checks: Vec::new(),
             reviews: 0,
             merge: false,
+            required: Vec::new(),
+            method: Default::default(),
             deploy: None,
             forge: vec!["gh".to_owned()],
         };

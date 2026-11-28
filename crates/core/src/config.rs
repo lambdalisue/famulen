@@ -273,6 +273,10 @@ impl Config {
                 !rule.forge.is_empty(),
                 "[[workers.finishing]] forge names a command"
             );
+            anyhow::ensure!(
+                !rule.merge || !rule.required.is_empty(),
+                "[[workers.finishing]] required names the checks that must pass where merge is true"
+            );
         }
         let mut claude = file.claude;
         if let Some(model) = env(MODEL_ENV) {
@@ -529,6 +533,14 @@ mod tests {
         assert!(!rule.merge && rule.deploy.is_none());
         let error = load(Some("[[workers.finishing]]\nrepository = \"a\"\n"), &[]).unwrap_err();
         assert!(error.to_string().contains("workers.finishing"), "{error}");
+        let unasked = "[[workers.finishing]]\nrepository = \"/src/a\"\nmerge = true\n";
+        let error = load(Some(unasked), &[]).unwrap_err();
+        assert!(error.to_string().contains("required"), "{error}");
+        let named = format!("{unasked}required = [\"ci\"]\n");
+        assert_eq!(
+            load(Some(&named), &[]).unwrap().workers_finishing[0].required,
+            ["ci"]
+        );
     }
 
     #[test]

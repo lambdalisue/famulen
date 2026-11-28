@@ -341,7 +341,7 @@ impl Executor {
             // A number is not given out again while a group goes by it.
             && process::born(pid).is_none_or(|now| now == born)
         {
-            process::end_group(pid, true);
+            process::end_group(pid, true, &mut Vec::new());
         }
         Ok(())
     }

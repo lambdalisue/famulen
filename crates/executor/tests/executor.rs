@@ -273,6 +273,26 @@ async fn stopping_ends_everything_it_started_and_forgetting_leaves_nothing() {
     executor.forget().await.unwrap();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn stopping_ends_what_left_the_group_too() {
+    let dir = Dir::new("left-group");
+    let executor = dir
+        .run("perl -MPOSIX -e '$| = 1; POSIX::setsid(); print \"$$\\n\"; sleep 60' & wait")
+        .await;
+    let mut records = executor.attach(0);
+    let pid = loop {
+        if let Next::Record(record) = next(&mut records).await
+            && let What::Out { line } = record.what
+        {
+            break line;
+        }
+    };
+    assert!(alive(&pid));
+    executor.stop(Duration::ZERO).await.unwrap();
+    gone(&pid).await;
+}
+
 #[tokio::test]
 async fn what_outlives_the_program_ends_with_it() {
     let dir = Dir::new("left");

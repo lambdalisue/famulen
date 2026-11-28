@@ -4,7 +4,7 @@ use super::*;
 use crate::notebook::testing::TempDir;
 #[cfg(unix)]
 use crate::workers::direct::tests::stand_in;
-use crate::workers::finishing::{Ci, Forge};
+use crate::workers::finishing::{Ci, Forge, MergeMethod};
 
 fn sh(dir: &Path, command: &str) -> String {
     let ran = std::process::Command::new("sh")
@@ -31,7 +31,9 @@ const JJ: &str = r#"case "$*" in
 *" git root") if [ -d "$2/.jj/repo/store/git" ]; then echo "$2/.jj/repo/store/git"; else echo "$2/.git"; fi ;;
 *" git import") echo "$*" >> "$2/../imported" ;;
 *) if [ -e "$2/../conflicted" ]; then c=true; else c=false; fi
-   git -C "$2" log -1 --format="change%n%H%n$c%n%B" ;;
+   at=HEAD
+   case "$*" in *"-r @ "*) ;; *) [ -e "$2/../described" ] && at=$(cat "$2/../described") ;; esac
+   git -C "$2" log -1 --format="change%n%H%n$c%n%B" "$at" ;;
 esac
 "#;
 
@@ -290,29 +292,51 @@ async fn a_pull_request_is_made_once_checked_and_merged_only_at_the_commit_pushe
         "left by the last review\n"
     );
     world.checks("pending");
-    assert_eq!(forge.ci(&pull).await.unwrap(), Ci::Pending);
+    assert_eq!(forge.ci(&pull, "main", &[]).await.unwrap(), Ci::Pending);
     world.checks("fail");
     assert_eq!(
-        forge.ci(&pull).await.unwrap(),
+        forge.ci(&pull, "main", &[]).await.unwrap(),
         Ci::Failed {
             name: "ci".into(),
             log: "the log of the failed check\n".into()
         }
     );
     world.checks("pass");
-    assert_eq!(forge.ci(&pull).await.unwrap(), Ci::Passed);
+    assert_eq!(forge.ci(&pull, "main", &[]).await.unwrap(), Ci::Passed);
 
     // The branch changed: CI says nothing of it, and it is not merged.
     world.bare("git update-ref refs/heads/famulen/x main");
-    assert_eq!(forge.ci(&pull).await.unwrap(), Ci::Pending);
-    assert!(forge.merge(&pull).await.is_err());
-    assert!(!forge.merged(&pull).await.unwrap());
+    assert_eq!(forge.ci(&pull, "main", &[]).await.unwrap(), Ci::Pending);
+    assert!(
+        forge
+            .merge(&pull, "main", MergeMethod::Merge)
+            .await
+            .is_err()
+    );
+    assert!(!forge.merged(&pull, "main").await.unwrap());
 
     world.bare(&format!("git update-ref refs/heads/famulen/x {head}"));
-    forge.merge(&pull).await.unwrap();
-    assert!(forge.merged(&pull).await.unwrap());
+    // The pull request is aimed elsewhere than where the work was to go.
+    world.bare("git update-ref refs/heads/elsewhere main");
+    let base = world.dir.path().join("forge/base");
+    std::fs::write(&base, "elsewhere").unwrap();
+    assert!(
+        forge
+            .merge(&pull, "main", MergeMethod::Merge)
+            .await
+            .is_err()
+    );
+    assert!(!world.dir.path().join("forge/merged").exists());
+    std::fs::write(&base, "main").unwrap();
+    forge
+        .merge(&pull, "main", MergeMethod::Squash)
+        .await
+        .unwrap();
+    let calls = std::fs::read_to_string(world.dir.path().join("forge/calls")).unwrap();
+    assert!(calls.contains(" --squash --match-head-commit "), "{calls}");
+    assert!(forge.merged(&pull, "main").await.unwrap());
     assert_eq!(
-        forge.merge_commit(&pull).await.unwrap(),
+        forge.merge_commit(&pull, "main").await.unwrap(),
         world.bare("git rev-parse main")
     );
     assert_eq!(world.bare("git show main:b"), "two");
@@ -323,4 +347,65 @@ async fn a_pull_request_is_made_once_checked_and_merged_only_at_the_commit_pushe
         .await
         .unwrap();
     assert_eq!(world.bare("git branch --list famulen/x"), "");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_merge_that_changed_nothing_itself_is_work_with_both_sides() {
+    let world = World::new("finishing-merge");
+    world.work(
+        "echo two >b && git add b && git commit -qm 'Add b' \
+         && git checkout -q -b side HEAD~1 && echo three >d && git add d && git commit -qm 'Add d' \
+         && git checkout -q work && git merge -q --no-ff -m 'Merge side' side",
+    );
+    // What jj calls the latest change that is not empty is one side of it.
+    std::fs::write(
+        world.dir.path().join("described"),
+        sh(&world.repo.workspace, "git rev-parse HEAD^1"),
+    )
+    .unwrap();
+    let content = world.content().await;
+    assert_eq!(
+        content.commit,
+        sh(&world.repo.workspace, "git rev-parse HEAD")
+    );
+    assert_eq!(
+        content.tree,
+        sh(&world.repo.workspace, "git rev-parse 'HEAD^{tree}'")
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn work_that_changes_what_ci_runs_is_told_apart() {
+    let world = World::new("finishing-ci-files");
+    world.work("echo two >b && git add b && git commit -qm 'Add b'");
+    assert!(!world.content().await.changes_ci);
+    world.work(
+        "mkdir -p .github/workflows && echo on >.github/workflows/ci.yml \
+         && git add .github && git commit -qm 'Change CI'",
+    );
+    assert!(world.content().await.changes_ci);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn ci_passes_only_with_every_check_the_owner_named() {
+    let world = World::new("finishing-required");
+    world.work("echo two >b && git add b && git commit -qm 'Add b'");
+    let content = world.content().await;
+    let head = world.push(&content, None).await.unwrap();
+    let url = world.bare.display().to_string();
+    let forge = Forge::new(&world.forge, &world.repo.checkout, &url);
+    let pull = forge
+        .open("famulen/x", "main", &head, "one", "")
+        .await
+        .unwrap();
+    let ci = |required: &[&str]| {
+        let required: Vec<String> = required.iter().map(|&r| r.to_owned()).collect();
+        let (forge, pull) = (&forge, &pull);
+        async move { forge.ci(pull, "main", &required).await.unwrap() }
+    };
+    assert_eq!(ci(&["ci"]).await, Ci::Passed);
+    assert_eq!(ci(&["ci", "e2e"]).await, Ci::Pending);
 }

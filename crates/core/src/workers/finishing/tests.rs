@@ -10,6 +10,8 @@ pub(super) fn rule() -> Rule {
         checks: vec!["just ci".into()],
         reviews: 2,
         merge: true,
+        required: vec!["ci".into()],
+        method: MergeMethod::default(),
         deploy: None,
         forge: gh(),
     }
@@ -36,6 +38,7 @@ fn content(commit: &str) -> Content {
         base: "base".into(),
         title: "title".into(),
         body: String::new(),
+        changes_ci: false,
     }
 }
 
@@ -50,6 +53,8 @@ pub(super) struct Fake {
     /// Another deployment is under way.
     pub(super) busy: AtomicBool,
     pub(super) merge_fails: bool,
+    /// The forge takes the merge but has yet to make it.
+    pub(super) merge_queued: bool,
     pub(super) lost: bool,
     pub(super) did: Mutex<Vec<String>>,
 }
@@ -65,6 +70,7 @@ impl Default for Fake {
             deployed: Mutex::new(Some(Ok(()))),
             busy: AtomicBool::new(false),
             merge_fails: false,
+            merge_queued: false,
             lost: false,
             did: Mutex::default(),
         }
@@ -142,11 +148,21 @@ impl Hands for Fake {
 
     async fn merge(&self, _: &Pinned, pull: &PullRequest) -> anyhow::Result<()> {
         anyhow::ensure!(!self.merge_fails, "conflict");
-        self.note(format!("merge {}", pull.head));
+        let how = if self.merge_queued {
+            "merge-queued"
+        } else {
+            "merge"
+        };
+        self.note(format!("{how} {}", pull.head));
         Ok(())
     }
 
-    async fn confirm_merge(&self, _: &PullRequest, _: Option<i64>) -> anyhow::Result<Answer> {
+    async fn confirm_merge(
+        &self,
+        _: &PullRequest,
+        _: &str,
+        _: Option<i64>,
+    ) -> anyhow::Result<Answer> {
         Ok(*self.answer.lock().unwrap())
     }
 
@@ -399,6 +415,39 @@ async fn a_merge_that_fails_is_handed_back() {
 }
 
 #[tokio::test]
+async fn a_merge_the_forge_has_yet_to_make_is_waited_for() {
+    let (mut f, hands) = (
+        finishing(rule()),
+        Fake {
+            merge_queued: true,
+            ..Fake::default()
+        },
+    );
+    f.turned();
+    assert_eq!(run(&mut f, &hands).await, Next::Wait(CI_EVERY));
+    assert_eq!(run(&mut f, &hands).await, Next::Wait(CI_EVERY));
+    assert!(!f.merged);
+    assert_eq!(outside(&hands), ["publish one", "merge-queued one"]);
+    hands.note("merge one");
+    assert_eq!(run(&mut f, &hands).await, Next::Done);
+    assert!(hands.did().contains(&"tidy one".to_owned()));
+
+    let (mut f, hands) = (
+        finishing(rule()),
+        Fake {
+            merge_queued: true,
+            ..Fake::default()
+        },
+    );
+    f.turned();
+    run(&mut f, &hands).await;
+    assert!(matches!(
+        f.step(&hands, CI_LIMIT_SECONDS + 1).await.unwrap(),
+        Next::Stop(why) if why.contains("not merged")
+    ));
+}
+
+#[tokio::test]
 async fn deploying_waits_for_the_one_under_way_and_gives_up_in_time() {
     let mut deploys = rule();
     deploys.deploy = Some("deploy it".into());
@@ -495,4 +544,17 @@ async fn what_changed_after_the_last_review_allowed_is_not_pushed() {
         "{next:?}"
     );
     assert_eq!(outside(&hands), ["publish one"]);
+}
+
+#[tokio::test]
+async fn work_that_changes_what_ci_runs_is_merged_only_when_the_owner_says() {
+    let mut f = finishing(rule());
+    let hands = Fake::default();
+    let mut changed = content("one");
+    changed.changes_ci = true;
+    *hands.snapshot.lock().unwrap() = Snapshot::Changed(changed);
+    *hands.answer.lock().unwrap() = Answer::Waiting(7);
+    run(&mut f, &hands).await;
+    assert!(f.asking());
+    assert!(!hands.did().iter().any(|d| d.starts_with("merge ")));
 }
